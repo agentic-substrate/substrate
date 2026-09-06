@@ -26,6 +26,11 @@ import (
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
+const (
+	maxBodyBytes  = 1 << 20 // 1 MiB
+	maxBatchItems = 50      // EDD §7.2
+)
+
 // gitHealthVar is the R27 metric: Git reachability lives here, never on /readyz.
 var gitHealthVar = expvar.NewString("substrate_git_health")
 
@@ -286,8 +291,12 @@ func (h *Handler) memoryBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var items []memory.BatchItem
-	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("memory.batch: %w", err))
+	if err := decodeJSONBody(w, r, &items); err != nil {
+		writeDecodeErr(w, err)
+		return
+	}
+	if len(items) > maxBatchItems {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("memory.batch: at most %d items", maxBatchItems))
 		return
 	}
 	out, err := h.mem.Batch(r.Context(), items)
@@ -406,8 +415,8 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		TeamID  string          `json:"team_id"`
 		Payload json.RawMessage `json:"payload"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+	if err := decodeJSONBody(w, r, &in); err != nil {
+		writeDecodeErr(w, err)
 		return
 	}
 	sc, err := scope.Parse(in.Scope)
@@ -552,8 +561,8 @@ func (h *Handler) reviewDecide(w http.ResponseWriter, r *http.Request) {
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+	if err := decodeJSONBody(w, r, &in); err != nil {
+		writeDecodeErr(w, err)
 		return
 	}
 	var status store.ReviewStatus
@@ -671,6 +680,29 @@ func (h *Handler) requireStore() (*store.Store, error) {
 		return nil, fmt.Errorf("store not configured")
 	}
 	return st, nil
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	err := json.NewDecoder(r.Body).Decode(dest)
+	if err == nil {
+		return nil
+	}
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return errBodyTooLarge
+	}
+	return err
+}
+
+var errBodyTooLarge = errors.New("request body too large")
+
+func writeDecodeErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errBodyTooLarge) {
+		writeErr(w, http.StatusRequestEntityTooLarge, err)
+		return
+	}
+	writeErr(w, http.StatusBadRequest, err)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

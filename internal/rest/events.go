@@ -12,6 +12,9 @@ import (
 
 const eventBuffer = 8
 
+// wakePayload is a typeless SSE body. Audit metadata must not cross the wire.
+var wakePayload = []byte("{}")
+
 type hub struct {
 	mu      sync.Mutex
 	buf     int
@@ -108,7 +111,10 @@ func (h *hub) listen(ctx context.Context, pool *pgxpool.Pool, ready chan struct{
 			return
 		}
 		if n != nil {
-			h.broadcast([]byte(n.Payload))
+			// Typeless wake-up: the adapter needs to know THAT something
+			// changed so it can re-render. Forwarding the audit payload
+			// would leak subject_id/scope_id across teams (SCOPE-3).
+			h.broadcast(wakePayload)
 		}
 	}
 }

@@ -95,8 +95,8 @@ Agents always write `unverified`; supersede never deletes.
 `/v1` is the adapter and CLI REST surface (EDD §4.2), behind the same bearer
 auth as `/mcp` and not exposed to harnesses. It serves `GET /v1/render`,
 `GET /v1/skills/manifest`, `POST /v1/memory/batch`, `GET /v1/memory/cache`,
-review create/list/decide, `GET /v1/events` (SSE of `substrate_audit`
-notifications), and `GET /v1/health/git`. `/v1/memory/batch` is the
+review create/list/decide, `GET /v1/events` (SSE wake-ups when
+`substrate_audit` fires; the payload carries no audit metadata), and `GET /v1/health/git`. `/v1/memory/batch` is the
 idempotency boundary: `ingest_receipt` and the memory row are created in one
 transaction, and a replay with a known `client_id` returns the original id
 with `duplicate: true`. Render `sha256` values are `render.DriftHash` of the

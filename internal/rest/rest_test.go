@@ -29,13 +29,14 @@ type world struct {
 	alice, bob, lead                        string
 	orgID, teamAID, teamBID                 string
 	global, org, teamA, teamB, projectA     string
+	projectOff                              string
 	userA, repo, repoKey                    string
 	aliceP, bobP, leadP                     *identity.Principal
 	pathStr                                 string
 	skillID, skillName, skillGitPath        string
 	skillSHA                                string
 	memTeam, memOld, memUnverified, memProb string
-	memGlobal                               string
+	memGlobal, memOffChain                  string
 	reviewOpen                              string
 }
 
@@ -66,6 +67,7 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 		teamA:         id(),
 		teamB:         id(),
 		projectA:      id(),
+		projectOff:    id(),
 		userA:         id(),
 		repo:          id(),
 		skillID:       id(),
@@ -74,6 +76,7 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 		memUnverified: id(),
 		memProb:       id(),
 		memGlobal:     id(),
+		memOffChain:   id(),
 		reviewOpen:    id(),
 	}
 	w.global = ensureGlobal(t, conn)
@@ -100,6 +103,8 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 		w.teamA, w.org, w.teamAID, w.teamB, w.teamBID)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
 		($1, 'project', $2, 'secret', 0, 'placeholder', $3)`, w.projectA, w.teamA, w.teamAID)
+	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
+		($1, 'project', $2, 'other', 0, 'placeholder', $3)`, w.projectOff, w.teamA, w.teamAID)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
 		($1, 'repo', $2, $3, 0, 'placeholder', $4)`, w.repo, w.projectA, w.repoKey, w.teamAID)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'user', NULL, $2, 0, 'placeholder')`, w.userA, w.alice)
@@ -134,6 +139,9 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 	insertMem(w.memUnverified, "team", "unverified", "team-unverified-fact", false)
 	insertMem(w.memOld, "team", "confirmed", "team-old-fact", true)
 	insertMem(w.memGlobal, "global", "confirmed", "global-public-fact", false)
+	exec(`INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, status, source, verification, created_by)
+		VALUES ($1, $2, 'team', $3, 'semantic', 'fact', 'off-chain-fact', 'off-chain-fact', 'confirmed', '{"machine":"wsl"}', '{"type":"human"}', $3)`,
+		w.memOffChain, w.projectOff, w.alice)
 
 	exec(`INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
 		VALUES ($1, 'drift_proposal', $2, $3, '{"title":"open review: x"}', $4)`,
@@ -190,18 +198,6 @@ func openREST(t *testing.T, dsn string, git GitChecker) (*Handler, *store.Store,
 func serveREST(t *testing.T, h *Handler, w world) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /readyz", func(rw http.ResponseWriter, r *http.Request) {
-		st := h.store()
-		if err := st.Ping(r.Context()); err != nil {
-			rw.Header().Set("Content-Type", "application/json")
-			rw.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = rw.Write([]byte(`{"status":"not_ready"}`))
-			return
-		}
-		rw.Header().Set("Content-Type", "application/json")
-		rw.WriteHeader(http.StatusOK)
-		_, _ = rw.Write([]byte(`{"status":"ok"}`))
-	})
 	h.Mount(mux)
 	wrapped := identity.Middleware(func(_ context.Context, tok string) (*identity.Principal, error) {
 		switch tok {
@@ -526,6 +522,28 @@ func TestMemoryCacheDeltaAndRLS(t *testing.T) {
 	if _, ok := seen[w.memOld]; ok {
 		t.Fatal("cache returned a row older than since=")
 	}
+	if _, ok := seen[w.memOffChain]; ok {
+		t.Fatal("?repos= returned a memory whose scope is not on the requested chain")
+	}
+
+	wide := doJSON(t, srv, http.MethodGet, "/v1/memory/cache?since="+since, "alice", nil)
+	t.Cleanup(func() { _ = wide.Body.Close() })
+	var wideOut struct {
+		Memories []struct {
+			ID string `json:"id"`
+		} `json:"memories"`
+	}
+	decodeJSON(t, wide, &wideOut)
+	foundOff := false
+	for _, m := range wideOut.Memories {
+		if m.ID == w.memOffChain {
+			foundOff = true
+			break
+		}
+	}
+	if !foundOff {
+		t.Fatal("alice cannot see the off-chain row without repos=; ?repos= omitting it would not prove the allow-list")
+	}
 
 	bob := doJSON(t, srv, http.MethodGet, "/v1/memory/cache?since="+since, "bob", nil)
 	t.Cleanup(func() { _ = bob.Body.Close() })
@@ -603,19 +621,11 @@ func TestSkillsManifest(t *testing.T) {
 	}
 }
 
-func TestGitHealthDoesNotAffectReadyz(t *testing.T) {
+func TestGitHealthReportsSkillsRepoFailure(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
 	h, _, _ := openREST(t, dsn, fakeGit{err: errors.New("skills repo unreachable")})
 	srv := serveREST(t, h, w)
-
-	ready := doJSON(t, srv, http.MethodGet, "/readyz", "", nil)
-	if ready.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(ready.Body)
-		_ = ready.Body.Close()
-		t.Fatalf("/readyz = %d with git down, want 200 (EDD R27): %s", ready.StatusCode, b)
-	}
-	_ = ready.Body.Close()
 
 	git := doJSON(t, srv, http.MethodGet, "/v1/health/git", "alice", nil)
 	if git.StatusCode != http.StatusOK && git.StatusCode != http.StatusServiceUnavailable {
@@ -719,6 +729,184 @@ func TestReviewCreateListDecide(t *testing.T) {
 	decodeJSON(t, decided, &after)
 	if after.Status != "approved" {
 		t.Fatalf("status %q, want approved", after.Status)
+	}
+}
+
+func TestEventsDoNotLeakAuditMetadataAcrossTeams(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, st, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	var subjectID string
+	if err := conn.QueryRow(t.Context(), `SELECT id::text FROM instruction WHERE key = 'ci.required' AND scope_id = $1`, w.projectA).Scan(&subjectID); err != nil {
+		t.Fatalf("instruction id: %v", err)
+	}
+
+	subscribe := func(token string) <-chan string {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s SSE = %d", token, res.StatusCode)
+		}
+		got := make(chan string, 8)
+		go func() {
+			defer close(got)
+			sc := bufio.NewScanner(res.Body)
+			for sc.Scan() {
+				line := sc.Text()
+				if strings.HasPrefix(line, "data:") {
+					got <- strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				}
+			}
+		}()
+		return got
+	}
+
+	aliceGot := subscribe("alice")
+	bobGot := subscribe("bob")
+
+	if err := h.WaitListening(2 * time.Second); err != nil {
+		t.Fatalf("LISTEN not ready: %v", err)
+	}
+
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE instruction SET body = body WHERE key = 'ci.required' AND scope_id = $1`, w.projectA)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-aliceGot:
+	case <-time.After(2 * time.Second):
+		t.Fatal("alice received nothing within 2s of an instruction change")
+	}
+
+	var bobEvent string
+	select {
+	case bobEvent = <-bobGot:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bob received nothing within 2s; the adapter still needs a wake-up")
+	}
+	if strings.Contains(bobEvent, subjectID) {
+		t.Fatalf("bob received team A's subject_id %s in %q", subjectID, bobEvent)
+	}
+	if strings.Contains(bobEvent, w.projectA) {
+		t.Fatalf("bob received team A's scope_id %s in %q", w.projectA, bobEvent)
+	}
+	if strings.Contains(bobEvent, `"subject_id"`) || strings.Contains(bobEvent, `"scope_id"`) {
+		t.Fatalf("bob received audit metadata %q", bobEvent)
+	}
+}
+
+func TestMemoryBatchRejectsMoreThanFifty(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, st, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	payloads := make([]map[string]any, 51)
+	for i := range payloads {
+		cid, err := uuid.NewV7()
+		if err != nil {
+			t.Fatal(err)
+		}
+		payloads[i] = map[string]any{
+			"client_id":    cid.String(),
+			"kind":         "fact",
+			"title":        fmt.Sprintf("overcap-%d", i),
+			"body":         "x",
+			"scope":        w.pathStr,
+			"visibility":   "team",
+			"verification": map[string]string{"type": "human"},
+			"source":       map[string]string{"machine": "wsl"},
+		}
+	}
+	res := doJSON(t, srv, http.MethodPost, "/v1/memory/batch", "alice", payloads)
+	if res.StatusCode == http.StatusOK {
+		_ = res.Body.Close()
+		t.Fatal("batch of 51 returned 200; EDD §7.2 caps outbox drains at 50")
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	decodeJSON(t, res, &body)
+	if !strings.Contains(body.Error, "50") {
+		t.Fatalf("error %q does not name the 50-item cap", body.Error)
+	}
+
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	var n int
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM memory WHERE title LIKE 'overcap-%'`).Scan(&n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("rejected batch still wrote %d memories", n)
+	}
+}
+
+func TestRequestBodiesAreBounded(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, _, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	pad := strings.Repeat("x", (1<<20)+1)
+	cid, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		path string
+		body any
+	}{
+		{
+			path: "/v1/memory/batch",
+			body: []map[string]any{{
+				"client_id":    cid.String(),
+				"kind":         "fact",
+				"title":        "huge",
+				"body":         pad,
+				"scope":        w.pathStr,
+				"visibility":   "team",
+				"verification": map[string]string{"type": "human"},
+				"source":       map[string]string{"machine": "wsl"},
+			}},
+		},
+		{
+			path: "/v1/review",
+			body: map[string]any{
+				"kind":    "drift_proposal",
+				"scope":   w.pathStr,
+				"team_id": w.teamAID,
+				"payload": map[string]string{"pad": pad},
+			},
+		},
+		{
+			path: "/v1/review/" + w.reviewOpen + "/decide",
+			body: map[string]any{"decision": "approved", "reason": pad},
+		},
+	}
+	for _, tc := range cases {
+		res := doJSON(t, srv, http.MethodPost, tc.path, "alice", tc.body)
+		b, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("%s oversized body = %d, want 413: %s", tc.path, res.StatusCode, b)
+		}
 	}
 }
 
