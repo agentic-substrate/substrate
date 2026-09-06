@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
@@ -140,7 +141,14 @@ func newHandler(getStore func() *store.Store) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	return mux
+	lookup := func(ctx context.Context, tok string) (*identity.Principal, error) {
+		st := getStore()
+		if st == nil {
+			return nil, identity.ErrUnauthorized
+		}
+		return identity.Lookup(ctx, st.Pool(), tok)
+	}
+	return identity.Middleware(lookup)(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

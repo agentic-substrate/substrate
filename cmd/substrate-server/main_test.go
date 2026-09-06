@@ -71,6 +71,15 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 	}
 }
 
+func TestProtectedRouteRequiresBearer(t *testing.T) {
+	h := newHandler(nil)
+	res := get(t, h, "/v1/review")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("/v1/review without bearer = %d, want 401", res.StatusCode)
+	}
+}
+
 func get(t *testing.T, h http.Handler, path string) *http.Response {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)

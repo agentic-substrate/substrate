@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/agentic-substrate/substrate/internal/identity"
 )
 
 // Store is a migrated Postgres pool. /readyz pings it and nothing else.
@@ -66,6 +68,39 @@ func assumeAppRole(ctx context.Context, conn *pgx.Conn) error {
 	}
 	if _, err := conn.Exec(ctx, `SET ROLE substrate_app`); err != nil {
 		return fmt.Errorf("set role substrate_app: %w", err)
+	}
+	return nil
+}
+
+// Pool is the request-scoped pgx pool. It operates as substrate_app.
+func (s *Store) Pool() *pgxpool.Pool {
+	if s == nil {
+		return nil
+	}
+	return s.pool
+}
+
+// Tx runs fn in one transaction with RLS session settings applied from ctx
+// (EDD §8.2). Identity is loaded by middleware; this only SET LOCALs.
+func (s *Store) Tx(ctx context.Context, fn func(pgx.Tx) error) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("store not configured")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if p := identity.FromContext(ctx); p != nil {
+		if err := identity.ApplySession(ctx, tx, p); err != nil {
+			return err
+		}
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
