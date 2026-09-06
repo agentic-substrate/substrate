@@ -665,6 +665,23 @@ func TestRLSFrozenColumns(t *testing.T) {
 	if tag.RowsAffected() != 0 {
 		t.Fatal("owner changed memory.status; agents must not self-service status (MEM-6)")
 	}
+
+	tag, err = aliceTx.Exec(t.Context(), `UPDATE memory SET status = 'superseded' WHERE id = $1`, w.memTeam)
+	if err != nil {
+		t.Fatalf("superseded without superseded_by leaked an error: %v", err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Fatal("owner set status=superseded without setting superseded_by")
+	}
+
+	tag, err = aliceTx.Exec(t.Context(), `UPDATE memory SET status = 'superseded', superseded_by = $2 WHERE id = $1`, w.memTeam, w.memOwner)
+	if err != nil {
+		t.Fatalf("system supersede transition leaked an error: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatal("owner could not set status=superseded while setting superseded_by in the same statement")
+	}
+
 	if err := aliceTx.Rollback(t.Context()); err != nil {
 		t.Fatalf("rollback owner tx: %v", err)
 	}

@@ -19,7 +19,7 @@ resolve, a failure mode the runbook misses.
 make check     # fmt, vet, lint, race tests, govulncheck — everything CI's `go` job runs
 make build     # static binaries into ./bin
 make smoke     # boots the real server with no database; /healthz 200 and /readyz 503
-make test      # tests alone; coverage is printed, never gated
+make test      # tests alone (`-p 1`); coverage is printed, never gated
 sqlc generate  # or `make sqlc` — regenerate internal/store after changing migrations/ or queries.sql
 
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
@@ -34,7 +34,8 @@ or `internal/store/queries.sql`; generated files are committed.
 `make smoke` boots the server with no database and asserts `/healthz` 200 and `/readyz` 503
 (EDD §16: a Postgres outage must not kill the process). Store integration tests boot Postgres 16
 with pgvector via Docker. They prefer `pgvector/pgvector:pg16`, and fall back to building
-`testdata/pgvector` from `postgres:16-alpine` if that pull fails.
+`testdata/pgvector` from `postgres:16-alpine` if that pull fails. `make test` and CI's `go test`
+pass `-p 1` so packages that each boot a testcontainer do not stampede the Docker daemon.
 
 ## Tests
 

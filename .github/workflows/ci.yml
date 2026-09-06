@@ -45,7 +45,7 @@ jobs:
         # canary PR caught exactly that here — do not remove this line.
         run: |
           set -o pipefail
-          go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
+          go test -p 1 -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
 
       # Fail loudly, never skip: a skipped test is a silently missing check.
       - name: assert nothing skipped

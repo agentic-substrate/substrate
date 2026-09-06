@@ -23,6 +23,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
+	"github.com/agentic-substrate/substrate/internal/memory"
 	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
@@ -156,6 +157,7 @@ func newHandlerLookup(getStore func() *store.Store, lookup identity.LookupFunc) 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mcpSrv := mcpx.New("substrate", version.Version)
+	memory.Register(mcpSrv, getStore)
 	mux.Handle("/mcp", mcpSrv.Handler())
 	return identity.Middleware(lookup)(mux)
 }

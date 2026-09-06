@@ -30,12 +30,18 @@ What has shipped:
 | 2 | `00002_schema.sql` | EDD §3 identity, scopes (ltree `path`, chain trigger), instructions, memory, skills, review, audit (INSERT-only trigger + `pg_notify('substrate_audit')`) |
 | 3 | `00003_roles.sql` | `substrate_migrate` owns the tables; `substrate_app` is DML-only, **no** `BYPASSRLS`, no `DELETE` on domain tables, `REVOKE UPDATE, DELETE` on `audit`. The request pool assumes `substrate_app` on acquire |
 | 4 | `00004_rls.sql` | `ENABLE` + `FORCE ROW LEVEL SECURITY` on `instruction`, `preference`, `memory`, `skill`, `review_item`, `skill_version`, `memory_edge`, `memory_feedback`, `ingest_receipt`. Child-table policies follow the parent row (`skill` / `memory` / `principal_id`). `scope_writable` treats `kind='user'` as the caller's own scope (`scope.key = actor_id`). `review_item` UPDATE is withdraw (proposer, `open`→`withdrawn`) or decide (`human_admin` / team lead). Frozen columns (`status`, `visibility`, `owner_id`, `scope_id`) are immutable except for `human_admin`. Session GUCs are `substrate.actor_id`, `substrate.team_ids`, `substrate.org_id`, `substrate.granted_project_ids`, `substrate.is_admin`. |
+| 5 | `00005_memory_supersede_status.sql` | Replaces `content_freeze_cols` so a non-admin `memory` UPDATE may set `status='superseded'` when `superseded_by` is set in the same statement (system supersession, not a user edit). Visibility, owner_id, scope_id, and every other status change stay frozen. Without this, superseded rows keep `status='confirmed'` and still match `memory_default_read`. |
 
 The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. Migrations run on
 that connection; the request pool then `SET SESSION AUTHORIZATION` / `SET ROLE` to
 `substrate_app` so REVOKEs on `DELETE` and on `audit` actually bind (GOV-1, gotcha 6).
 A Postgres outage must not kill the process: `/healthz` stays 200, `/readyz` is 503, and
 the server retries `store.Open` in the background until the pool pings.
+
+Frozen columns (`visibility`, `owner_id`, `scope_id`, and `status`) stay immutable for
+non-admins. The one exception, from version 5, is a `memory` UPDATE that sets
+`status='superseded'` in the same statement as `superseded_by` — a system transition,
+not a user edit.
 
 - **Forward:** deploy the new image; the server migrates on boot (`-dsn` / `SUBSTRATE_DSN`).
 - **Backward:** every migration ships a `-- +goose Down`. Roll back by deploying the previous

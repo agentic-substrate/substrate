@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getMemory = `-- name: GetMemory :one
+SELECT id, scope_id, visibility, owner_id, tier, kind, title, body, identifiers,
+  status, superseded_by, source, verification, created_by
+FROM memory
+WHERE id = $1
+`
+
+type GetMemoryRow struct {
+	ID           pgtype.UUID
+	ScopeID      pgtype.UUID
+	Visibility   Visibility
+	OwnerID      pgtype.UUID
+	Tier         MemoryTier
+	Kind         MemoryKind
+	Title        string
+	Body         string
+	Identifiers  []string
+	Status       MemoryStatus
+	SupersededBy pgtype.UUID
+	Source       []byte
+	Verification []byte
+	CreatedBy    pgtype.UUID
+}
+
+func (q *Queries) GetMemory(ctx context.Context, id pgtype.UUID) (GetMemoryRow, error) {
+	row := q.db.QueryRow(ctx, getMemory, id)
+	var i GetMemoryRow
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeID,
+		&i.Visibility,
+		&i.OwnerID,
+		&i.Tier,
+		&i.Kind,
+		&i.Title,
+		&i.Body,
+		&i.Identifiers,
+		&i.Status,
+		&i.SupersededBy,
+		&i.Source,
+		&i.Verification,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const getScope = `-- name: GetScope :one
 SELECT id, kind, parent_id, key, team_id, depth, path::text AS path
 FROM scope
@@ -40,6 +86,108 @@ func (q *Queries) GetScope(ctx context.Context, id pgtype.UUID) (GetScopeRow, er
 		&i.Path,
 	)
 	return i, err
+}
+
+const insertAudit = `-- name: InsertAudit :exec
+INSERT INTO audit (actor_id, action, subject_type, subject_id, scope_id, reason, request_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertAuditParams struct {
+	ActorID     pgtype.UUID
+	Action      string
+	SubjectType string
+	SubjectID   pgtype.UUID
+	ScopeID     pgtype.UUID
+	Reason      *string
+	RequestID   *string
+}
+
+func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
+	_, err := q.db.Exec(ctx, insertAudit,
+		arg.ActorID,
+		arg.Action,
+		arg.SubjectType,
+		arg.SubjectID,
+		arg.ScopeID,
+		arg.Reason,
+		arg.RequestID,
+	)
+	return err
+}
+
+const insertMemory = `-- name: InsertMemory :one
+INSERT INTO memory (
+  id, scope_id, visibility, owner_id, tier, kind, title, body, identifiers,
+  status, source, verification, created_by
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+)
+RETURNING id, status
+`
+
+type InsertMemoryParams struct {
+	ID           pgtype.UUID
+	ScopeID      pgtype.UUID
+	Visibility   Visibility
+	OwnerID      pgtype.UUID
+	Tier         MemoryTier
+	Kind         MemoryKind
+	Title        string
+	Body         string
+	Identifiers  []string
+	Status       MemoryStatus
+	Source       []byte
+	Verification []byte
+	CreatedBy    pgtype.UUID
+}
+
+type InsertMemoryRow struct {
+	ID     pgtype.UUID
+	Status MemoryStatus
+}
+
+func (q *Queries) InsertMemory(ctx context.Context, arg InsertMemoryParams) (InsertMemoryRow, error) {
+	row := q.db.QueryRow(ctx, insertMemory,
+		arg.ID,
+		arg.ScopeID,
+		arg.Visibility,
+		arg.OwnerID,
+		arg.Tier,
+		arg.Kind,
+		arg.Title,
+		arg.Body,
+		arg.Identifiers,
+		arg.Status,
+		arg.Source,
+		arg.Verification,
+		arg.CreatedBy,
+	)
+	var i InsertMemoryRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
+const insertMemoryEdge = `-- name: InsertMemoryEdge :exec
+INSERT INTO memory_edge (from_id, to_id, relation, created_by)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertMemoryEdgeParams struct {
+	FromID    pgtype.UUID
+	ToID      pgtype.UUID
+	Relation  EdgeRelation
+	CreatedBy pgtype.UUID
+}
+
+func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgeParams) error {
+	_, err := q.db.Exec(ctx, insertMemoryEdge,
+		arg.FromID,
+		arg.ToID,
+		arg.Relation,
+		arg.CreatedBy,
+	)
+	return err
 }
 
 const listActiveInstructions = `-- name: ListActiveInstructions :many
@@ -170,4 +318,23 @@ func (q *Queries) Ping(ctx context.Context) (int32, error) {
 	var ok int32
 	err := row.Scan(&ok)
 	return ok, err
+}
+
+const setMemorySupersededBy = `-- name: SetMemorySupersededBy :execrows
+UPDATE memory
+SET superseded_by = $2, status = 'superseded', updated_at = now()
+WHERE id = $1 AND superseded_by IS NULL
+`
+
+type SetMemorySupersededByParams struct {
+	ID           pgtype.UUID
+	SupersededBy pgtype.UUID
+}
+
+func (q *Queries) SetMemorySupersededBy(ctx context.Context, arg SetMemorySupersededByParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMemorySupersededBy, arg.ID, arg.SupersededBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
