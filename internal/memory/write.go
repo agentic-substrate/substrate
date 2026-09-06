@@ -22,9 +22,6 @@ func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
 	if err := validateWrite(in); err != nil {
 		return WriteOut{}, err
 	}
-	if err := scanWrite(in); err != nil {
-		return WriteOut{}, err
-	}
 
 	p := identity.FromContext(ctx)
 	if p == nil {
@@ -52,10 +49,21 @@ func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
 	}
 	status := decideStatus(p, in.Status)
 
+	// Strip and cap before the scan so the scanner sees the bytes that land
+	// in the row. Scanning the raw input lets a control character split a
+	// key, then stripControls reconstitutes it in storage.
 	body := capBody(stripControls(in.Body))
 	title := stripControls(in.Title)
-	ids := extractIdentifiers(body, in.Identifiers)
-	if err := scanAll(ids...); err != nil {
+	idIn := make([]string, 0, len(in.Identifiers))
+	for _, id := range in.Identifiers {
+		idIn = append(idIn, stripControls(id))
+	}
+	ids := extractIdentifiers(body, idIn)
+	machine := ""
+	if in.Source != nil {
+		machine = in.Source.Machine
+	}
+	if err := scanStored(title, body, in.Kind, in.Verification.Type, machine, ids); err != nil {
 		return WriteOut{}, err
 	}
 
@@ -125,12 +133,9 @@ func validateWrite(in WriteIn) error {
 	return nil
 }
 
-func scanWrite(in WriteIn) error {
-	parts := []string{in.Title, in.Body, in.Verification.Type, in.Kind}
-	if in.Source != nil {
-		parts = append(parts, in.Source.Machine)
-	}
-	parts = append(parts, in.Identifiers...)
+func scanStored(title, body, kind, verification, machine string, ids []string) error {
+	parts := []string{title, body, kind, verification, machine}
+	parts = append(parts, ids...)
 	return scanAll(parts...)
 }
 

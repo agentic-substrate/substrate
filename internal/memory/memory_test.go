@@ -63,11 +63,53 @@ func TestScanSecretsRejectsGeneratedAWSKeyAndPEM(t *testing.T) {
 	}
 }
 
-func TestScanSecretsDoesNotTreatDocumentationAWSKeyAsTheTest(t *testing.T) {
+func TestScanSecretsRejectsGitHubTokensAndLowercasePEM(t *testing.T) {
 	t.Parallel()
-	key := generatedAWSAccessKey(t)
-	if key == strings.Join([]string{"AKIA", "IOSFODNN7", "EXAMPLE"}, "") {
-		t.Fatal("generated the published documentation key; scanners exclude it")
+	t.Run("ghp", func(t *testing.T) {
+		tok := generatedGitHubToken(t)
+		if err := scanSecrets("export TOKEN=" + tok); !errors.Is(err, policy.ErrSecretDetected) {
+			t.Fatalf("GitHub token: %v, want %s", err, policy.CodeSecretDetected)
+		}
+	})
+	t.Run("github_pat", func(t *testing.T) {
+		pat := generatedGitHubPAT(t)
+		if err := scanSecrets(pat); !errors.Is(err, policy.ErrSecretDetected) {
+			t.Fatalf("github_pat: %v, want %s", err, policy.CodeSecretDetected)
+		}
+	})
+	t.Run("lowercase_pem", func(t *testing.T) {
+		lower := "-----begin rsa private key-----\n" + strings.Repeat("A", 64) + "\n-----end rsa private key-----"
+		if err := scanSecrets(lower); !errors.Is(err, policy.ErrSecretDetected) {
+			t.Fatalf("lowercase PEM: %v, want %s", err, policy.CodeSecretDetected)
+		}
+	})
+}
+
+func TestWriteRejectsControlByteSplitSecrets(t *testing.T) {
+	svc := New(nil)
+	ctx := identity.WithPrincipal(t.Context(), humanPrincipal())
+	awsRest := generatedAWSAccessKey(t)[4:]
+	jwt := generatedJWT(t)
+	dot := strings.IndexByte(jwt, '.')
+	cases := []struct {
+		name string
+		mut  func(*WriteIn)
+	}{
+		{"aws", func(in *WriteIn) { in.Body = "key AKIA\x00" + awsRest }},
+		{"pem", func(in *WriteIn) {
+			in.Body = "-----BEGIN RSA PRIVATE\x00 KEY-----\n" + strings.Repeat("A", 64) + "\n-----END RSA PRIVATE KEY-----"
+		}},
+		{"jwt", func(in *WriteIn) { in.Title = jwt[:dot] + ".\x00" + jwt[dot+1:] }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := validWriteIn()
+			tc.mut(&in)
+			_, err := svc.Write(ctx, in)
+			if !errors.Is(err, policy.ErrSecretDetected) {
+				t.Fatalf("control-byte %s accepted (err=%v); scanner ran on the raw input instead of the stored bytes", tc.name, err)
+			}
+		})
 	}
 }
 
@@ -92,19 +134,6 @@ func TestWriteSecretDoesNotAppearInLogsOrError(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), key) {
 		t.Fatal("secret appeared in a log line")
-	}
-}
-
-func TestStripControlsAndCap(t *testing.T) {
-	t.Parallel()
-	got := stripControls("ok\x00\x01\n\tkeep\x1f")
-	if got != "ok\n\tkeep" {
-		t.Fatalf("stripControls = %q", got)
-	}
-	long := strings.Repeat("a", 5000)
-	capped := capBody(long)
-	if len(capped) > 4096 {
-		t.Fatalf("capBody length %d, want <= 4096", len(capped))
 	}
 }
 
@@ -158,6 +187,32 @@ func generatedAWSAccessKey(t *testing.T) string {
 		t.Fatal("generated the published documentation key, which scanners exclude")
 	}
 	return key
+}
+
+func generatedGitHubToken(t *testing.T) string {
+	t.Helper()
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 36)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return "ghp_" + string(b)
+}
+
+func generatedGitHubPAT(t *testing.T) string {
+	t.Helper()
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+	b := make([]byte, 40)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return "github_pat_" + string(b)
 }
 
 func generatedPEM(t *testing.T) string {

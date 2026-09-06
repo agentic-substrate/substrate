@@ -322,7 +322,7 @@ func (q *Queries) Ping(ctx context.Context) (int32, error) {
 
 const setMemorySupersededBy = `-- name: SetMemorySupersededBy :execrows
 UPDATE memory
-SET superseded_by = $2, updated_at = now()
+SET superseded_by = $2, status = 'superseded', updated_at = now()
 WHERE id = $1 AND superseded_by IS NULL
 `
 

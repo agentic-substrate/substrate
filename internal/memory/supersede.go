@@ -31,10 +31,6 @@ func (s *Service) Supersede(ctx context.Context, in SupersedeIn) (SupersedeOut, 
 	if err != nil {
 		return SupersedeOut{}, fmt.Errorf("memory.supersede: old_id: %w", err)
 	}
-	if err := scanSecrets(in.Body); err != nil {
-		return SupersedeOut{}, err
-	}
-
 	p := identity.FromContext(ctx)
 	if p == nil {
 		return SupersedeOut{}, store.ErrNoPrincipal
@@ -45,6 +41,9 @@ func (s *Service) Supersede(ctx context.Context, in SupersedeIn) (SupersedeOut, 
 	}
 
 	body := capBody(stripControls(in.Body))
+	if err := scanSecrets(body); err != nil {
+		return SupersedeOut{}, err
+	}
 	newID, err := uuid.NewV7()
 	if err != nil {
 		return SupersedeOut{}, fmt.Errorf("memory.supersede: %w", err)

@@ -198,6 +198,30 @@ func TestSupersedeRetainsOldRowAndEdge(t *testing.T) {
 	if supersededBy != replaced.ID {
 		t.Fatalf("superseded_by=%q, want %s", supersededBy, replaced.ID)
 	}
+	if oldStatus != "superseded" {
+		t.Fatalf("old status=%q, want superseded so the default-read index no longer matches", oldStatus)
+	}
+
+	var statusOnly int
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM memory WHERE id = $1 AND status IN ('confirmed','probable')`, written.ID).
+			Scan(&statusOnly)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if statusOnly != 0 {
+		t.Fatal("superseded row still matches a status-only confirmed/probable filter")
+	}
+
+	var oldBody string
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT body FROM memory WHERE id = $1`, written.ID).Scan(&oldBody)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if oldBody != "the harness loads validation.py before scoring" {
+		t.Fatalf("old body was rewritten or deleted: %q", oldBody)
+	}
 
 	var edges int
 	if err := st.Tx(ctx, func(tx pgx.Tx) error {
@@ -243,7 +267,8 @@ func TestIdentifierHitOutranksKeyword(t *testing.T) {
 	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
 
 	target := aliceWrite(w)
-	if _, err := svc.Write(ctx, target); err != nil {
+	written, err := svc.Write(ctx, target)
+	if err != nil {
 		t.Fatalf("target write: %v", err)
 	}
 	for i, body := range []string{
@@ -258,7 +283,6 @@ func TestIdentifierHitOutranksKeyword(t *testing.T) {
 		if _, err := svc.Write(ctx, in); err != nil {
 			t.Fatalf("distractor %d: %v", i, err)
 		}
-		_ = i
 	}
 
 	out, err := svc.Search(ctx, SearchIn{Query: "validation.py", Limit: 10})
@@ -268,18 +292,9 @@ func TestIdentifierHitOutranksKeyword(t *testing.T) {
 	if len(out.Results) < 1 {
 		t.Fatal("search returned no hits")
 	}
-	top := 3
-	if len(out.Results) < top {
-		top = len(out.Results)
-	}
-	found := false
-	for _, h := range out.Results[:top] {
-		if strings.Contains(h.Snippet, "validation.py") || strings.Contains(h.Title, "validator") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("memory whose body contains validation.py not in top 3: %+v", out.Results[:top])
+	if out.Results[0].ID != written.ID {
+		t.Fatalf("rank 1 is %s score=%v snippet=%q; identifier hit %s must outrank keyword hits (MEM-3)",
+			out.Results[0].ID, out.Results[0].Score, out.Results[0].Snippet, written.ID)
 	}
 }
 
@@ -292,11 +307,15 @@ func TestSearchReturnsWithinTwoSecondsWithoutEmbeddings(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	start := time.Now()
-	if _, err := svc.Search(ctx, SearchIn{Query: "validation.py"}); err != nil {
+	out, err := svc.Search(ctx, SearchIn{Query: "validation.py"})
+	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("memory.search took %s with no embedding backend; want <= 2s (MEM-5)", d)
+	}
+	if len(out.Results) < 1 {
+		t.Fatal("search returned no hits; a duration-only assertion would pass on an empty result")
 	}
 }
 
@@ -464,8 +483,53 @@ func TestStripAndCapStored(t *testing.T) {
 	if strings.Contains(body, "\x00") {
 		t.Fatalf("control character stored: %q", body)
 	}
-	if body != "helloworld" && body != "hello\nworld" && !strings.Contains(body, "hello") {
-		t.Fatalf("body after strip = %q", body)
+	if body != "helloworld" {
+		t.Fatalf("stored body = %q, want helloworld after stripControls through Write", body)
+	}
+
+	in.Body = strings.Repeat("a", 5000)
+	capped, err := svc.Write(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT body FROM memory WHERE id = $1`, capped.ID).Scan(&stored)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 4096 {
+		t.Fatalf("stored body length %d, want 4096 after cap through Write", len(stored))
+	}
+}
+
+func TestWriteRejectsControlByteSplitSecretsStored(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	awsRest := generatedAWSAccessKey(t)[4:]
+	jwt := generatedJWT(t)
+	dot := strings.IndexByte(jwt, '.')
+	cases := []struct {
+		name string
+		mut  func(*WriteIn)
+	}{
+		{"aws", func(in *WriteIn) { in.Body = "key AKIA\x00" + awsRest }},
+		{"pem", func(in *WriteIn) {
+			in.Body = "-----BEGIN RSA PRIVATE\x00 KEY-----\n" + strings.Repeat("A", 64) + "\n-----END RSA PRIVATE KEY-----"
+		}},
+		{"jwt", func(in *WriteIn) { in.Title = jwt[:dot] + ".\x00" + jwt[dot+1:] }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := aliceWrite(w)
+			tc.mut(&in)
+			out, err := svc.Write(ctx, in)
+			if !errors.Is(err, policy.ErrSecretDetected) {
+				t.Fatalf("control-byte %s accepted (id=%s err=%v); scanner ran on the raw input instead of the stored bytes", tc.name, out.ID, err)
+			}
+		})
 	}
 }
 

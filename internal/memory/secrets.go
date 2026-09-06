@@ -11,16 +11,17 @@ import (
 )
 
 var (
-	awsKeyRe = regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
-	pemRe    = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
-	jwtRe    = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
-	identRe  = regexp.MustCompile(`[A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]+`)
+	awsKeyRe      = regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
+	pemRe         = regexp.MustCompile(`(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----`)
+	jwtRe         = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
+	githubTokenRe = regexp.MustCompile(`\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]{20,}\b`)
+	identRe       = regexp.MustCompile(`[A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]+`)
 )
 
 // scanSecrets returns SUBSTRATE_SECRET_DETECTED when s looks like an AWS key,
-// PEM block, or JWT. The match itself is never included in the error.
+// PEM block, JWT, or GitHub token. The match itself is never included in the error.
 func scanSecrets(s string) error {
-	if awsKeyRe.MatchString(s) || pemRe.MatchString(s) || jwtRe.MatchString(s) {
+	if awsKeyRe.MatchString(s) || pemRe.MatchString(s) || jwtRe.MatchString(s) || githubTokenRe.MatchString(s) {
 		return fmt.Errorf("%w", policy.ErrSecretDetected)
 	}
 	return nil
