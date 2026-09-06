@@ -24,6 +24,10 @@ type Embedder interface {
 // a slice of that and the caller proceeds keyword-only when it expires.
 const embedBudget = 900 * time.Millisecond
 
+// embedDim is the width memory.embedding accepts. A client returning anything
+// else must be ignored rather than passed to Postgres.
+const embedDim = 768
+
 // embedText is what gets vectorised: the title and body a human would read.
 // Identifiers are matched exactly and by trigram, not semantically.
 func embedText(title, body string) string { return title + "\n" + body }
@@ -35,10 +39,25 @@ func (s *Service) vectorFor(ctx context.Context, text string) *pgvector.Vector {
 	if s.embedder == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, embedBudget)
+	// A SIBLING context, not a child of the caller's 2s search budget. Deriving
+	// it from that budget lets a slow embed spend 900ms of the time the query
+	// still needs, so a slow-but-working Ollama turns a search that would have
+	// succeeded into a deadline error — search failing *because of* embeddings,
+	// which is exactly what MEM-5 forbids. Cancellation of the parent is still
+	// honoured via context.Cause on the parent below.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), embedBudget)
 	defer cancel()
-	vecs, err := s.embedder.Embed(ctx, []string{text})
-	if err != nil || len(vecs) != 1 {
+	vecs, err := func() (v [][]float32, err error) {
+		// A third-party client panicking must degrade to keyword-only, not take
+		// down the request.
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("embed panicked: %v", r)
+			}
+		}()
+		return s.embedder.Embed(ctx, []string{text})
+	}()
+	if err != nil || len(vecs) != 1 || len(vecs[0]) != embedDim {
 		slog.Debug("search degraded to keyword", "reason", errText(err))
 		return nil
 	}
@@ -57,29 +76,38 @@ func errText(err error) string {
 // embedding NULL for the backfill job and is NOT reported to the caller: the
 // memory is already durably written, and failing the write because the GPU is
 // busy would lose it (EDD §8.4).
-func (s *Service) storeEmbedding(ctx context.Context, st *store.Store, id, title, body string) {
+func (s *Service) storeEmbedding(ctx context.Context, st *store.Store, id, title, body string) bool {
 	if s.embedder == nil {
-		return
+		return false
 	}
 	vecs, err := s.embedder.Embed(ctx, []string{embedText(title, body)})
-	if err != nil || len(vecs) != 1 {
+	if err != nil || len(vecs) != 1 || len(vecs[0]) != embedDim {
 		slog.Warn("embedding deferred to backfill", "memory_id", id, "reason", errText(err))
-		return
+		return false
 	}
 	v := pgvector.NewVector(vecs[0])
+	wrote := false
 	if err := st.Tx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE memory SET embedding = $2 WHERE id = $1 AND embedding IS NULL`, id, v)
+		tag, err := tx.Exec(ctx, `UPDATE memory SET embedding = $2 WHERE id = $1 AND embedding IS NULL`, id, v)
+		wrote = err == nil && tag.RowsAffected() == 1
 		return err
 	}); err != nil {
 		slog.Warn("embedding update failed", "memory_id", id, "err", err.Error())
+		return false
 	}
+	return wrote
 }
 
 // backfillSQL takes rows whose embedding never landed. RLS applies, so a
 // backfill run only sees what its principal may read.
+// Owner-scoped on purpose. content_read lets a caller SEE team rows it does
+// not own, but content_write only lets it UPDATE its own. Selecting on
+// readability alone re-embeds those rows on every pass and never fills them:
+// wasted GPU time, and a "filled" count that never converges.
 const backfillSQL = `
 SELECT id::text, title, body FROM memory
 WHERE embedding IS NULL
+  AND owner_id = NULLIF(current_setting('substrate.actor_id', true), '')::uuid
 ORDER BY created_at
 LIMIT $1
 `
@@ -121,15 +149,11 @@ func (s *Service) Backfill(ctx context.Context, limit int) (int, error) {
 
 	filled := 0
 	for _, p := range todo {
-		before := filled
-		s.storeEmbedding(ctx, st, p.id, p.title, p.body)
-		var got bool
-		if err := st.Tx(ctx, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT embedding IS NOT NULL FROM memory WHERE id = $1`, p.id).Scan(&got)
-		}); err == nil && got {
+		// Counted from rows actually written, not from "the column is now
+		// non-NULL" — that reads as success when a concurrent pass filled it.
+		if s.storeEmbedding(ctx, st, p.id, p.title, p.body) {
 			filled++
-		}
-		if filled == before {
+		} else {
 			slog.Debug("backfill skipped a row", "memory_id", p.id)
 		}
 	}

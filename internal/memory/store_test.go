@@ -758,3 +758,47 @@ func TestBackfillFillsNullEmbeddingsAndIsIdempotent(t *testing.T) {
 		t.Fatal("backfill rewrote an embedding that was already set; the IS NULL guard is not holding")
 	}
 }
+
+// The semantic term must actually contribute. Neither row shares a word with
+// the query, so keyword scoring ties them at zero and the tie breaks on
+// created_at DESC — which favours the row written SECOND. The aligned row is
+// written FIRST, so it can only come back rank 1 if similarity moved it there.
+// Delete the vector term from searchSQL and this test fails.
+func TestSemanticSimilarityActuallyRanks(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	const query = "zzqq unrelated lexeme"
+	svc = svc.WithEmbedder(&axisEmbedder{query: query, document: "aligned marker"})
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	aligned := aliceWrite(w)
+	aligned.Title = "aligned marker"
+	aligned.Body = "carries no query words at all"
+	aligned.Identifiers = nil
+	first, err := svc.Write(ctx, aligned)
+	if err != nil {
+		t.Fatalf("aligned write: %v", err)
+	}
+
+	inert := aliceWrite(w)
+	inert.Title = "inert row"
+	inert.Body = "also carries no query words at all"
+	inert.Identifiers = nil
+	if _, err := svc.Write(ctx, inert); err != nil {
+		t.Fatalf("inert write: %v", err)
+	}
+
+	out, err := svc.Search(ctx, SearchIn{Query: query, Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("search returned no hits")
+	}
+	if out.Results[0].ID != first.ID {
+		t.Fatalf("rank 1 is %q, want the semantically aligned row; with no keyword overlap the "+
+			"only thing that can promote it is the vector term, so that term is not contributing",
+			out.Results[0].Title)
+	}
+}

@@ -120,7 +120,7 @@ func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
 	// After the row is durable. A failure here leaves embedding NULL for the
 	// backfill job rather than failing a write that already succeeded — losing
 	// the memory because the GPU is busy would be the worse outcome (EDD §8.4).
-	s.storeEmbedding(ctx, st, id.String(), title, body)
+	_ = s.storeEmbedding(ctx, st, id.String(), title, body)
 	return WriteOut{ID: id.String(), Status: string(stored)}, nil
 }
 

@@ -110,17 +110,38 @@ func TestVectorForGivesUpOnASlowEmbedder(t *testing.T) {
 	}
 }
 
-// A wrong-width vector must not reach the vector(768) column.
-func TestVectorForRejectsNothingItCannotStore(t *testing.T) {
-	f := &fakeEmbedder{vec: unitVec(768)}
-	s := New(nil).WithEmbedder(f)
+// A wrong-width vector must not reach the vector(768) column: Postgres would
+// reject it and turn a degradable condition into a failed search.
+func TestVectorForRejectsAWrongWidthVector(t *testing.T) {
+	s := New(nil).WithEmbedder(&fakeEmbedder{vec: unitVec(64)})
+	if got := s.vectorFor(t.Context(), "q"); got != nil {
+		t.Fatalf("vectorFor accepted a %d-d vector for a vector(768) column", len(got.Slice()))
+	}
+}
+
+func TestVectorForAcceptsTheRightWidth(t *testing.T) {
+	s := New(nil).WithEmbedder(&fakeEmbedder{vec: unitVec(768)})
 	got := s.vectorFor(t.Context(), "q")
 	if got == nil {
 		t.Fatal("vectorFor with a working embedder = nil, want a vector")
 	}
-	if n := len(got.Slice()); n != 768 {
-		t.Fatalf("vector width %d, want 768", n)
+	if n := len(got.Slice()); n != embedDim {
+		t.Fatalf("vector width %d, want %d", n, embedDim)
 	}
+}
+
+// A panicking client must degrade, not take down the request.
+func TestVectorForSurvivesAPanickingEmbedder(t *testing.T) {
+	s := New(nil).WithEmbedder(panicEmbedder{})
+	if got := s.vectorFor(t.Context(), "q"); got != nil {
+		t.Fatalf("vectorFor = %v after a panic, want nil", got)
+	}
+}
+
+type panicEmbedder struct{}
+
+func (panicEmbedder) Embed(context.Context, []string) ([][]float32, error) {
+	panic("ollama client blew up")
 }
 
 // storeEmbedding must never panic or block when there is no embedder; the
