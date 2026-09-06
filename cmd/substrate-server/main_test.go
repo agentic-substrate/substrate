@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -18,13 +19,58 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
+	"github.com/agentic-substrate/substrate/internal/store"
 )
 
 //go:embed testdata/tool_schemas.json
 var schemaSnapshot []byte
 
+type downGit struct{}
+
+func (downGit) Check(context.Context) error {
+	return errors.New("skills repo unreachable")
+}
+
+func TestReadyzIgnoresGitOutage(t *testing.T) {
+	dsn := startMigrated(t)
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
+	h := newHandlerLookup(func() *store.Store { return st }, nil, downGit{}, func(context.Context, string) (*identity.Principal, error) {
+		return p, nil
+	})
+
+	readyz := get(t, h, "/readyz")
+	defer func() { _ = readyz.Body.Close() }()
+	if readyz.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(readyz.Body)
+		t.Fatalf("/readyz = %d with git down, want 200 (EDD R27): %s", readyz.StatusCode, b)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health/git", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("/v1/health/git reported ok while the skills repo is unreachable")
+	}
+	var body struct {
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Reason, "skills repo unreachable") && body.Status == "ok" {
+		t.Fatalf("git health body %+v, want a named failure", body)
+	}
+}
+
 func TestHealthzWithoutStore(t *testing.T) {
-	h := newHandler(nil, nil)
+	h := newHandler(nil, nil, nil)
 	healthz := get(t, h, "/healthz")
 	defer func() { _ = healthz.Body.Close() }()
 	if healthz.StatusCode != http.StatusOK {
@@ -47,7 +93,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", nil)
+		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", nil, nil)
 	}()
 
 	url := "http://" + ln.Addr().String()
@@ -85,7 +131,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 }
 
 func TestProtectedRouteRequiresBearer(t *testing.T) {
-	h := newHandler(nil, nil)
+	h := newHandler(nil, nil, nil)
 	res := get(t, h, "/v1/review")
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusUnauthorized {
@@ -96,7 +142,7 @@ func TestProtectedRouteRequiresBearer(t *testing.T) {
 func TestMCPRequiresBearer(t *testing.T) {
 	var lookedUp bool
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		lookedUp = true
 		return p, nil
 	})
@@ -134,7 +180,7 @@ func TestMCPRequiresBearer(t *testing.T) {
 
 func TestProductionSchemaSnapshot(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
 	})
 	httpSrv := httptest.NewServer(h)
@@ -176,7 +222,7 @@ func TestProductionSchemaSnapshot(t *testing.T) {
 
 func TestMCPInitializeAndListTools(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
 	})
 	httpSrv := httptest.NewServer(h)

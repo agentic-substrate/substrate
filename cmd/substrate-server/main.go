@@ -26,6 +26,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
@@ -41,6 +42,7 @@ func run() error {
 	addr := flag.String("addr", ":8080", "listen address")
 	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run under an advisory lock")
 	ollama := flag.String("ollama", os.Getenv("SUBSTRATE_OLLAMA_URL"), "Ollama base URL for embeddings; empty means keyword-only retrieval")
+	skills := flag.String("skills-repo", os.Getenv("SUBSTRATE_SKILLS_REPO"), "skills git remote; reachability is /v1/health/git, never /readyz")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -63,17 +65,17 @@ func run() error {
 	} else {
 		slog.Info("embeddings disabled; retrieval is keyword-only")
 	}
-	return serve(ctx, ln, *dsn, embedder)
+	return serve(ctx, ln, *dsn, embedder, rest.SkillsRepo{URL: *skills})
 }
 
 type runtime struct {
 	store atomic.Pointer[store.Store]
 }
 
-func serve(ctx context.Context, ln net.Listener, dsn string, embedder memory.Embedder) error {
+func serve(ctx context.Context, ln net.Listener, dsn string, embedder memory.Embedder, git rest.GitChecker) error {
 	rt := &runtime{}
 	srv := &http.Server{
-		Handler:           newHandler(rt.getStore, embedder),
+		Handler:           newHandler(rt.getStore, embedder, git),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -135,11 +137,11 @@ func connectLoop(ctx context.Context, dsn string, rt *runtime) {
 	}
 }
 
-func newHandler(getStore func() *store.Store, embedder memory.Embedder) http.Handler {
+func newHandler(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
-	return newHandlerLookup(getStore, embedder, func(ctx context.Context, tok string) (*identity.Principal, error) {
+	return newHandlerLookup(getStore, embedder, git, func(ctx context.Context, tok string) (*identity.Principal, error) {
 		st := getStore()
 		if st == nil {
 			return nil, identity.ErrUnauthorized
@@ -148,7 +150,7 @@ func newHandler(getStore func() *store.Store, embedder memory.Embedder) http.Han
 	})
 }
 
-func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, lookup identity.LookupFunc) http.Handler {
+func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker, lookup identity.LookupFunc) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
@@ -174,6 +176,7 @@ func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, lo
 	memSvc := memory.Register(mcpSrv, getStore, embedder)
 	compiler.Register(mcpSrv, getStore, memSvc)
 	mux.Handle("/mcp", mcpSrv.Handler())
+	rest.New(rest.Options{Store: getStore, Memory: memSvc, Git: git}).Mount(mux)
 	return identity.Middleware(lookup)(mux)
 }
 

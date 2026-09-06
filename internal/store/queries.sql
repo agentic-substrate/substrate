@@ -52,3 +52,44 @@ VALUES ($1, $2, $3, $4);
 -- name: InsertAudit :exec
 INSERT INTO audit (actor_id, action, subject_type, subject_id, scope_id, reason, request_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: GetIngestReceipt :one
+SELECT client_id, principal_id, subject_type, subject_id
+FROM ingest_receipt
+WHERE client_id = $1;
+
+-- name: InsertIngestReceipt :exec
+INSERT INTO ingest_receipt (client_id, principal_id, subject_type, subject_id)
+VALUES ($1, $2, $3, $4);
+
+-- name: ListMemoryCache :many
+SELECT id, scope_id, title, body, identifiers, status, updated_at
+FROM memory
+WHERE status IN ('confirmed', 'probable')
+  AND updated_at > @since
+ORDER BY updated_at ASC;
+
+-- name: ListApprovedSkills :many
+SELECT s.name, v.git_path, v.git_sha
+FROM skill s
+JOIN skill_version v ON v.id = s.active_version_id
+WHERE s.active_version_id IS NOT NULL
+ORDER BY s.name;
+
+-- name: InsertReviewItem :one
+INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, kind, scope_id, team_id, payload, status, proposed_by, created_at;
+
+-- name: ListReviewItems :many
+SELECT id, kind, scope_id, team_id, payload, status, proposed_by, decided_by, decided_at, reason, created_at
+FROM review_item
+WHERE (sqlc.narg('team_id')::uuid IS NULL OR team_id = sqlc.narg('team_id'))
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::review_status)
+ORDER BY created_at DESC;
+
+-- name: DecideReviewItem :one
+UPDATE review_item
+SET status = $2, decided_by = $3, decided_at = now(), reason = $4
+WHERE id = $1 AND status = 'open'
+RETURNING id, status, decided_by, decided_at, reason;
