@@ -1,0 +1,31 @@
+<!-- generated — do not edit -->
+
+## Rules
+
+### deploy
+- deploy.policy: protected
+
+### indent
+- indent: spaces
+
+### python
+- python.formatter: ruff
+- python.version: 3.12
+
+## Conventions
+
+- errors: wrap with %w
+- go.module: github.com/acme/plotlens
+
+## Preferences
+
+- color: auto
+- editor: vim
+
+preference indent=tabs suppressed by instruction
+
+## Skills
+
+- team/plotlens/validation: regression checks
+
+<!-- sha256:4e9a2ad5613d27b6b39717782ea5718313821bc77ed49741772be8760f0295b8 generated-at:2026-01-02T15:04:05Z -->
