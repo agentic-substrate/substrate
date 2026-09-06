@@ -48,6 +48,8 @@ translate:
 | `acp_audit`, `acp_tool_latency_seconds` | `substrate_audit`, `substrate_tool_latency_seconds` |
 | database `acp`, buckets `acp-sessions` / `acp-backups` | `substrate`, `substrate-sessions` / `substrate-backups` |
 | module `acp/` | `github.com/agentic-substrate/substrate` |
+| GUCs `acp.actor_id`, `acp.team_ids`, `acp.is_admin`, … | `substrate.actor_id`, `substrate.team_ids`, `substrate.is_admin`, … |
+| roles `acp_app`, `acp_migrate` | `substrate_app`, `substrate_migrate` |
 
 **Never introduce a new `acp` identifier.** These strings end up in error messages, backup
 paths, and Kubernetes object names, where renaming them later is a migration.

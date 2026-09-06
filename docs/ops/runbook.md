@@ -26,6 +26,11 @@ under a Postgres advisory lock so a second replica cannot double-apply.
   image *and* running `goose down-to <version>` manually — the server never auto-downgrades.
 - Domain tables are never `DELETE`d from; state retires via `status`. A migration that drops a
   domain table is a design change, not a migration.
+- **`goose down-to` is for an empty CI database only.** The `Down` of an initial-schema migration
+  drops the domain tables, so running it against the homelab database destroys every memory,
+  instruction, and audit row — and the audit table is the one record that cannot be rebuilt. Once
+  a migration has been applied here, the only backward path is a PITR restore (below) or a new
+  forward migration.
 
 ## Backups and restore
 
