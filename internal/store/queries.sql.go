@@ -42,6 +42,125 @@ func (q *Queries) GetScope(ctx context.Context, id pgtype.UUID) (GetScopeRow, er
 	return i, err
 }
 
+const listActiveInstructions = `-- name: ListActiveInstructions :many
+SELECT id, scope_id, kind, key, body
+FROM instruction
+WHERE status = 'active'
+  AND scope_id = ANY($1::uuid[])
+`
+
+type ListActiveInstructionsRow struct {
+	ID      pgtype.UUID
+	ScopeID pgtype.UUID
+	Kind    InstructionKind
+	Key     string
+	Body    string
+}
+
+func (q *Queries) ListActiveInstructions(ctx context.Context, scopeIds []pgtype.UUID) ([]ListActiveInstructionsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveInstructions, scopeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveInstructionsRow
+	for rows.Next() {
+		var i ListActiveInstructionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Kind,
+			&i.Key,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActivePreferences = `-- name: ListActivePreferences :many
+SELECT id, scope_id, key, body
+FROM preference
+WHERE status = 'active'
+  AND scope_id = ANY($1::uuid[])
+`
+
+type ListActivePreferencesRow struct {
+	ID      pgtype.UUID
+	ScopeID pgtype.UUID
+	Key     string
+	Body    string
+}
+
+func (q *Queries) ListActivePreferences(ctx context.Context, scopeIds []pgtype.UUID) ([]ListActivePreferencesRow, error) {
+	rows, err := q.db.Query(ctx, listActivePreferences, scopeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActivePreferencesRow
+	for rows.Next() {
+		var i ListActivePreferencesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Key,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lookupScope = `-- name: LookupScope :one
+SELECT id, kind, parent_id, key, team_id, depth, path::text AS path
+FROM scope
+WHERE kind = $1
+  AND key = $2
+  AND parent_id IS NOT DISTINCT FROM $3
+`
+
+type LookupScopeParams struct {
+	Kind     ScopeKind
+	Key      string
+	ParentID pgtype.UUID
+}
+
+type LookupScopeRow struct {
+	ID       pgtype.UUID
+	Kind     ScopeKind
+	ParentID pgtype.UUID
+	Key      string
+	TeamID   pgtype.UUID
+	Depth    int16
+	Path     string
+}
+
+func (q *Queries) LookupScope(ctx context.Context, arg LookupScopeParams) (LookupScopeRow, error) {
+	row := q.db.QueryRow(ctx, lookupScope, arg.Kind, arg.Key, arg.ParentID)
+	var i LookupScopeRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ParentID,
+		&i.Key,
+		&i.TeamID,
+		&i.Depth,
+		&i.Path,
+	)
+	return i, err
+}
+
 const ping = `-- name: Ping :one
 SELECT 1::int AS ok
 `

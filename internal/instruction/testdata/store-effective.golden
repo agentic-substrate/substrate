@@ -1,0 +1,8 @@
+instructions:
+go.module=github.com/acme/plotlens
+indent=spaces
+python.version=3.12
+preferences:
+editor=vim
+suppressed:
+preference indent=tabs suppressed by instruction

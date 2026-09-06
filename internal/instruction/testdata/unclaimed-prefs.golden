@@ -1,0 +1,6 @@
+instructions:
+python.version=3.12
+preferences:
+color=auto
+editor=vim
+suppressed:
