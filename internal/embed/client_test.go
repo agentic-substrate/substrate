@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -150,12 +151,35 @@ func TestEmbedDeadline(t *testing.T) {
 	}
 }
 
+// syncBuffer is a concurrency-safe sink for the captured logger. slog.SetDefault
+// is process-global, so every other test in this package — and any goroutine
+// still draining from one — writes through the handler installed here while this
+// test reads it. bytes.Buffer is not safe for that, and the resulting race is
+// nondeterministic: it passed CI once before failing.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// Not parallel on purpose: it replaces the process-global default logger, so
+// running alongside siblings makes what it captures depend on scheduling.
 func TestEmbedDoesNotLogOrReturnInput(t *testing.T) {
-	t.Parallel()
 	secret := "the harness loads validation.py before scoring"
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
