@@ -24,7 +24,7 @@ type GetIn struct {
 	Repo         string   `json:"repo,omitempty" jsonschema:"repo remote or repo scope key"`
 	Branch       string   `json:"branch,omitempty" jsonschema:"branch name"`
 	Files        []string `json:"files,omitempty" jsonschema:"touched or relevant paths"`
-	BudgetTokens int      `json:"budget_tokens,omitempty" jsonschema:"overall token budget; defaults to the documented section sum"`
+	BudgetTokens *int     `json:"budget_tokens,omitempty" jsonschema:"overall token budget; omitted uses the documented section sum, zero or negative is too small"`
 }
 
 // GetOut is the context.get result (EDD §4.1).

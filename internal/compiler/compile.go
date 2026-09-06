@@ -14,6 +14,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/instruction"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/policy"
 	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
@@ -34,9 +35,9 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 	if err != nil {
 		return Pack{}, err
 	}
-	budget := req.Budget
-	if budget <= 0 {
-		budget = DefaultBudget()
+	budget, err := resolveBudget(req.Budget)
+	if err != nil {
+		return Pack{}, err
 	}
 
 	var d draft
@@ -64,26 +65,25 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 		d.Memories = capMemories(mems, MemoryItemCap)
 	}
 
-	untrimmed := untrimmedMarkdown(d)
-	if err := fitUntrimmed(untrimmed, budget); err != nil {
+	d, md, err := assemble(d, budget)
+	if err != nil {
 		return Pack{}, err
 	}
-	remaining := budget - Estimate(untrimmed)
-	d.Memories = fitMemoryBudget(d.Memories, min(DefaultMemory, remaining))
-	remaining -= Estimate(renderMemorySection(d.Memories))
-	d.Skills = fitSkillBudget(d.Skills, min(DefaultSkills, remaining))
 
-	md := renderMarkdown(d)
 	id, err := uuid.NewV7()
 	if err != nil {
 		return Pack{}, fmt.Errorf("pack id: %w", err)
 	}
-	return Pack{
+	pack := Pack{
 		PackID:   id.String(),
 		Markdown: md,
 		Sections: sectionEstimates(d),
 		Items:    itemsOf(d),
-	}, nil
+	}
+	if Estimate(pack.Markdown) > budget {
+		return Pack{}, fmt.Errorf("%w: packed markdown exceeds budget", policy.ErrBudgetTooSmall)
+	}
+	return pack, nil
 }
 
 func loadDraft(ctx context.Context, tx pgx.Tx, p scope.Path, principal *identity.Principal) (draft, []uuid.UUID, error) {
@@ -417,4 +417,14 @@ func formatTime(t *time.Time) string {
 		return "-"
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+func resolveBudget(b *int) (int, error) {
+	if b == nil {
+		return DefaultBudget(), nil
+	}
+	if *b <= 0 {
+		return 0, fmt.Errorf("%w: budget must be positive", policy.ErrBudgetTooSmall)
+	}
+	return *b, nil
 }

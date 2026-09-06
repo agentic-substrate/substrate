@@ -32,7 +32,9 @@ type Request struct {
 	Scope  scope.Path
 	TaskID *uuid.UUID
 	Files  []string
-	Budget int
+	// Budget is the overall token cap. Nil means DefaultBudget; a non-nil
+	// value <= 0 is SUBSTRATE_BUDGET_TOO_SMALL (omitted vs explicit zero).
+	Budget *int
 }
 
 // Section is one named region of the pack, with its estimated tokens.
