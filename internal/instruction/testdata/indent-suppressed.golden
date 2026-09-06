@@ -1,0 +1,5 @@
+instructions:
+indent=spaces
+preferences:
+suppressed:
+preference indent=tabs suppressed by instruction
