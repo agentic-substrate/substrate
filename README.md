@@ -75,6 +75,14 @@ background rather than exiting. `/healthz` is **200** whenever the process is al
 otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
 not check Git or the skills repo (EDD R27).
 
+`-ollama` (or `SUBSTRATE_OLLAMA_URL`) points at Ollama for embeddings — `nomic-embed-text`,
+768 dimensions, called directly from Go with no Python in the request path (EDD R21). Leave it
+empty and retrieval is keyword-only, which is a supported configuration rather than a degraded
+one: `memory.search` must never fail because embeddings are unavailable (MEM-5). When it is set,
+a write whose embed call fails still succeeds with `embedding NULL` and is picked up by the
+backfill pass. Semantic similarity is capped below the score of an exact identifier hit, so a
+vector neighbour can never outrank a typed filename or symbol (MEM-3).
+
 `POST /mcp` is the streamable-HTTP MCP endpoint (EDD §4.1). Bearer auth is required;
 unauthenticated requests are rejected before the MCP handler runs. Rate limiting is
 Traefik's job, not the process. Domain packages register tools on the server
@@ -94,9 +102,10 @@ binary is the per-machine daemon (render, skills, outbox, cache loops).
 
 ## Configuration
 
-`-addr` (listen address) and `-dsn` / `SUBSTRATE_DSN` (Postgres). The rest of the intended
-surface — bearer tokens per (principal, machine), Ollama endpoint, repo roots — is specified
-in [`docs/design/edd.md`](docs/design/edd.md) §4.3 and §7 and will be documented here as it lands.
+`-addr` (listen address), `-dsn` / `SUBSTRATE_DSN` (Postgres), and `-ollama` /
+`SUBSTRATE_OLLAMA_URL` (embeddings; empty means keyword-only). The rest of the intended
+surface — repo roots, the skills repo, the OTel endpoint — is specified in
+[`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and will be documented here as it lands.
 
 ## Deployment
 

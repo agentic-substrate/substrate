@@ -25,6 +25,12 @@ SELECT m.id::text, m.title, left(m.body, 240), m.status::text, m.scope_id::text,
     + COALESCE(similarity(memory_identifiers_text(m.identifiers), $1::text), 0) * 30
     + COALESCE(ts_rank(m.fts, plainto_tsquery('english', $1::text)), 0) * 10
     + CASE WHEN m.body ILIKE '%' || $1::text || '%' OR m.title ILIKE '%' || $1::text || '%' THEN 20 ELSE 0 END
+    -- Semantic similarity is capped at 25, below the 100 an exact identifier
+    -- hit scores, so a vector neighbour can never outrank a typed filename or
+    -- symbol (MEM-3). A NULL query vector (Ollama down, or no embedder) makes
+    -- this term zero and the ranking keyword-only.
+    + CASE WHEN $6::vector IS NOT NULL AND m.embedding IS NOT NULL
+           THEN (1 - (m.embedding <=> $6::vector)) * 25 ELSE 0 END
   )::float8 AS score
 FROM memory m
 WHERE ($2::uuid IS NULL OR m.scope_id = $2)
@@ -99,9 +105,13 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
+	// Best-effort: nil means keyword-only. Computed before the transaction so a
+	// slow embed backend never holds a database connection open.
+	qv := s.vectorFor(ctx, q)
+
 	var out SearchOut
 	err = st.Tx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, searchSQL, q, scopeID, tier, statuses, limit)
+		rows, err := tx.Query(ctx, searchSQL, q, scopeID, tier, statuses, limit, qv)
 		if err != nil {
 			return fmt.Errorf("memory.search: %w", err)
 		}
