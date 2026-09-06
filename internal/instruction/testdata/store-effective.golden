@@ -1,4 +1,6 @@
 instructions:
+ci.required=true
+deploy.policy=protected
 go.module=github.com/acme/plotlens
 indent=spaces
 python.version=3.12

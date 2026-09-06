@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/preference"
@@ -67,6 +68,14 @@ func seedResolveWorld(t *testing.T, conn *pgx.Conn) fixture {
 		VALUES (gen_random_uuid(), $1, 'global', $2, 'rule', 'indent', 'spaces', 'active', $2)`, f.project, f.actor)
 	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
 		VALUES (gen_random_uuid(), $1, 'global', $2, 'constraint', 'python.version', '3.10', 'proposed', $2)`, f.org, f.actor)
+	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'global', $2, 'rule', 'deploy.policy', 'protected', 'active', $2)`, f.global, f.actor)
+	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'global', $2, 'rule', 'deploy.policy', 'open', 'retired', $2)`, f.project, f.actor)
+	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'global', $2, 'rule', 'deploy.policy', 'review', 'proposed', $2)`, f.project, f.actor)
+	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'team', $2, 'constraint', 'ci.required', 'true', 'active', $2)`, f.project, f.actor)
 
 	exec(`INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, status, created_by)
 		VALUES (gen_random_uuid(), $1, 'global', $2, 'indent', 'tabs', 'active', $2)`, f.userScope, f.actor)
@@ -88,38 +97,7 @@ func TestResolveThroughStoreTx(t *testing.T) {
 	}
 	t.Cleanup(st.Close)
 
-	actor, err := uuid.Parse(f.actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	orgID, err := uuid.Parse(f.orgID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	teamID, err := uuid.Parse(f.teamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	userScope, err := uuid.Parse(f.userScope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	teamScope, err := uuid.Parse(f.team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	orgScope, err := uuid.Parse(f.org)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	p := &identity.Principal{
-		ID:      actor,
-		Kind:    identity.KindUser,
-		Trust:   identity.TrustHuman,
-		OrgID:   orgID,
-		TeamIDs: []uuid.UUID{teamID},
-	}
+	p := principalFor(t, f)
 	ctx := identity.WithPrincipal(t.Context(), p)
 
 	var ins []Record
@@ -131,7 +109,7 @@ func TestResolveThroughStoreTx(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		prefs, notes, err = preference.Resolve(ctx, tx, []uuid.UUID{userScope, teamScope, orgScope}, Keys(ins))
+		prefs, notes, err = preference.Resolve(ctx, tx, overlayScopes(t, f), Keys(ins))
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -144,18 +122,133 @@ func TestResolveThroughStoreTx(t *testing.T) {
 	}
 }
 
-func TestResolveWithoutPrincipalIsEmptyGate(t *testing.T) {
-	dsn, _ := startMigrated(t)
+func TestTeamVisibilityRequiresSession(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	f := seedResolveWorld(t, conn)
 	st, err := store.Open(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(st.Close)
-	err = st.Tx(t.Context(), func(tx pgx.Tx) error {
-		_, err := Resolve(t.Context(), tx, mustParse(t, "global:"))
+
+	bare, err := st.Pool().Begin(t.Context())
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { _ = bare.Rollback(t.Context()) })
+	bareRows, err := store.New(bare).ListActiveInstructions(t.Context(), pgUUIDs(t, f.project))
+	if err != nil {
+		t.Fatalf("bare ListActiveInstructions: %v", err)
+	}
+	if containsKey(bareRows, "ci.required") {
+		t.Fatal("team-visible ci.required leaked without substrate.* session settings")
+	}
+	if !containsKey(bareRows, "python.version") {
+		t.Fatal("same-scope global-visible python.version missing; the query is not reading instruction")
+	}
+
+	p := principalFor(t, f)
+	ctx := identity.WithPrincipal(t.Context(), p)
+	var ins []Record
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		var err error
+		ins, err = Resolve(ctx, tx, f.path)
 		return err
-	})
-	if err == nil {
-		t.Fatal("Tx without a principal succeeded; Resolve must not run on a bare pool")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range ins {
+		if r.Key == "ci.required" && r.Body == "true" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("team-visible ci.required missing after ApplySession; session settings are not reaching the query")
+	}
+}
+
+func principalFor(t *testing.T, f fixture) *identity.Principal {
+	t.Helper()
+	actor, err := uuid.Parse(f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgID, err := uuid.Parse(f.orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamID, err := uuid.Parse(f.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &identity.Principal{
+		ID:      actor,
+		Kind:    identity.KindUser,
+		Trust:   identity.TrustHuman,
+		OrgID:   orgID,
+		TeamIDs: []uuid.UUID{teamID},
+	}
+}
+
+func overlayScopes(t *testing.T, f fixture) []uuid.UUID {
+	t.Helper()
+	parse := func(s string) uuid.UUID {
+		t.Helper()
+		id, err := uuid.Parse(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	return []uuid.UUID{parse(f.userScope), parse(f.team), parse(f.org)}
+}
+
+func pgUUIDs(t *testing.T, ids ...string) []pgtype.UUID {
+	t.Helper()
+	out := make([]pgtype.UUID, len(ids))
+	for i, s := range ids {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[i] = pgtype.UUID{Bytes: id, Valid: true}
+	}
+	return out
+}
+
+func containsKey(rows []store.ListActiveInstructionsRow, key string) bool {
+	for _, r := range rows {
+		if r.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func TestResolveWithoutPrincipalIsEmptyGate(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	f := seedResolveWorld(t, conn)
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	tx, err := st.Pool().Begin(t.Context())
+	if err != nil {
+		t.Fatalf("begin as substrate_app: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(t.Context()) })
+
+	rows, err := store.New(tx).ListActiveInstructions(t.Context(), pgUUIDs(t, f.global, f.org, f.team, f.project))
+	if err != nil {
+		t.Fatalf("ListActiveInstructions: %v", err)
+	}
+	if !containsKey(rows, "python.version") {
+		t.Fatal("global-visible rows should still read without session settings; query may not have run")
+	}
+	if containsKey(rows, "ci.required") {
+		t.Fatal("team-visible ci.required leaked as substrate_app with no SET LOCAL")
 	}
 }
