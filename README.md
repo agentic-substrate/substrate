@@ -1,150 +1,196 @@
-# Substrate
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img src="docs/assets/hero-light.svg" alt="Substrate — disposable harnesses on top, one durable control plane beneath, every machine in sync" width="820">
+  </picture>
+</p>
 
-**A self-hosted control plane that makes AI coding agents disposable by making their context
-durable** — one source of truth for instructions, memory, and skills, served to any harness on
-any machine.
+<h1 align="center">Substrate</h1>
+
+<p align="center"><strong>A self-hosted control plane that makes AI coding agents disposable by making their context durable.</strong></p>
+
+<p align="center">
+  One source of truth for instructions, memory, and skills —<br>
+  served to Claude Code, Codex, Cursor, or any headless worker, on any machine.
+</p>
+
+<p align="center">
+  <a href="ROADMAP.md">Roadmap</a> ·
+  <a href="docs/product/problem.md">Why</a> ·
+  <a href="docs/design/edd.md">Design</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
+
+<p align="center">
+  <img alt="Status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-orange">
+  <img alt="Go 1.26.6+" src="https://img.shields.io/badge/go-1.26.6%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue">
+  <img alt="MCP" src="https://img.shields.io/badge/protocol-MCP-black">
+</p>
 
 > Status: **pre-alpha.** Phase 1 (authority + sync) is under construction. Nothing here is
-> stable yet; see [ROADMAP.md](ROADMAP.md) for what "done" means at each horizon.
+> stable yet; [ROADMAP.md](ROADMAP.md) says what "done" means at each horizon.
 
-## The problem
+---
 
-Every AI coding harness — Claude Code, Codex, Cursor, any headless worker — keeps its own
-memory, instruction files, and session state on whichever machine it happened to run on. The
-agent is treated as durable and its knowledge as disposable, when it should be the reverse.
+Every coding harness treats the **agent as durable and its knowledge as disposable**. Substrate is built on the opposite premise: the agent is the throwaway part. What it learned, what it was told, and what it's allowed to do should outlive it — and follow you to the next harness, the next laptop, the next teammate.
 
-Switching harnesses, switching machines, or bringing a teammate onto a project means
-re-explaining context, re-discovering past failures, and hand-syncing instruction files that
-have already drifted. The cost recurs every session and grows with agents × machines × people.
+## Why
 
-Substrate inverts it. It is one function —
+You already pay this tax. It just doesn't show up on one line item.
+
+| What you do today | What it costs |
+|---|---|
+| Copy `CLAUDE.md` / `AGENTS.md` / `.cursor/rules` between machines | Two machines disagree. Neither is right. |
+| Re-explain the project every session | Minutes, per session, per harness |
+| Let each harness keep its own memory | Knowledge stranded on whichever box learned it |
+| Finish the job where you started it | Can't hand a long run to the GPU box |
+| Trust what the agent "remembers" | Confident action on facts the code no longer honors |
+
+The cost recurs, and it multiplies: **harnesses × machines × people**.
+
+Substrate collapses it to one function —
 
 ```
-(principal + team + project + repo + branch + task + current code) → effective context
+(global → org → team → project → repo → branch → task → session) + user overlay
+                     → effective context
 ```
 
-— served to any harness on any machine, with what the harness learns flowing back under
-provenance and trust. Full framing: [`docs/product/problem.md`](docs/product/problem.md).
+— compiled once, served everywhere, with what agents learn flowing *back* under provenance and trust. Full framing: [`docs/product/problem.md`](docs/product/problem.md).
 
 ## What makes it different
 
-Shared agent memory is a crowded space, and three of the four layers here are borrowed
-deliberately (Agent Skills for the skill format, board-as-control-plane for orchestration,
-transcript-slug resumption for migration). The part being built is the combination no surveyed
-project offers on one store:
+Shared agent memory is a crowded space, and three of the four layers here are borrowed deliberately — Agent Skills for the skill format, board-as-control-plane for orchestration, transcript-slug resumption for migration. What no surveyed project offers is this combination on **one store**:
 
-- A normalized **scope chain** — `global → org → team → project → repo → branch → task → session`
-  — with `user` as an orthogonal overlay, used identically by every table and by the compiler.
-- **Deterministic instruction resolution.** Instructions are a first-class table, never scored,
-  never trimmed by budget pressure. A rule that is sometimes present is worse than no rule.
-- **Provenance and verification state** on every memory, with trust-weighted conflict handling:
-  a low-trust agent observation can never quietly demote a human-confirmed fact.
-- **Explainable, budgeted context compilation** — ask why an item is in the pack, and why
-  another is not.
-- **Adapters that treat local files as caches.** A hand-edited `CLAUDE.md` is drift: it becomes
-  a reviewable diff, not a silent merge.
+- **A scope chain.** `global → org → team → project → repo → branch → task → session`, with `user` as an orthogonal overlay. Every table uses it. So does the compiler.
+- **Deterministic instructions.** Rules are a first-class table, never scored, never budget-trimmed. *A rule that is sometimes present is worse than no rule.*
+- **Provenance and trust on memory.** Every fact carries who wrote it, how it was verified, and its status: `unverified → probable → confirmed`. A low-trust agent can never quietly demote a human-confirmed fact.
+- **Budgeted compilation, explainable by design.** The pack is compiled under a token budget with instructions exempt; `context.explain` — why an item is in the pack, and why another is not — is a Next-horizon item.
+- **Local files as caches.** `CLAUDE.md` is a *rendering* of the store, emitted byte-deterministically. The adapter that turns a hand-edit into a reviewable diff rather than a silent merge is Phase 1 work in progress.
 
-Reasoning and what we're *not* building: [`docs/product/positioning.md`](docs/product/positioning.md),
-[`docs/product/non-goals.md`](docs/product/non-goals.md).
+Reasoning, and what we're deliberately *not* building: [`docs/product/positioning.md`](docs/product/positioning.md), [`docs/product/non-goals.md`](docs/product/non-goals.md).
 
-## Quickstart (developers)
+## Works with
+
+| Harness | Substrate renders | Captures via | Continuity |
+|---|---|---|---|
+| Claude Code | `CLAUDE.md` (`@AGENTS.md` + hooks block) | `SessionStart` / `PostToolUse` hooks *(Phase 2)* | checkpoint *(Phase 2)* |
+| Codex | `AGENTS.md`, `~/.codex/AGENTS.md` | hooks *(Phase 2)* | checkpoint *(Phase 2)* |
+| Cursor | `~/.cursor/rules/substrate.mdc` | read-only | checkpoint *(Phase 2)* |
+| Headless workers | context pack over MCP (`context.get`) | `memory.*` MCP tools | lease + checkpoint *(Phase 6)* |
+
+Rendering ships today; skill materialization, hooks, and continuity are designed and phased, not shipped. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state.
+
+## Quickstart
 
 Requires Go 1.26.6+ (the floor in `go.mod`; earlier 1.26 patches carry stdlib CVEs that `govulncheck` fails CI on).
 
 ```sh
-git clone https://github.com/agentic-substrate/substrate.git
-cd substrate
+git clone https://github.com/agentic-substrate/substrate.git && cd substrate
 
-make build     # static binaries into ./bin
+make build     # binaries into ./bin
 make smoke     # boots the real server against empty state and hits it
 make check     # everything CI runs: fmt, vet, lint, race tests, govulncheck
 ```
 
-Run the server directly:
+Run the server and mint a token:
 
 ```sh
 ./bin/substrate-server -addr :8080 -dsn 'postgres://…'
 curl localhost:8080/healthz
 curl localhost:8080/readyz
+
+./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl \
+    --scopes memory:write --dsn "$SUBSTRATE_DSN"
 ```
 
-`-dsn` (or `SUBSTRATE_DSN`) is the Postgres connection string. The server listens first.
-If a DSN is set, it applies goose migrations under an advisory lock and retries in the
-background rather than exiting. `/healthz` is **200** whenever the process is alive.
-`/readyz` returns **200** only after migrations have applied and the pool can ping Postgres;
-otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
-not check Git or the skills repo (EDD R27).
+Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
 
-`-ollama` (or `SUBSTRATE_OLLAMA_URL`) points at Ollama for embeddings — `nomic-embed-text`,
-768 dimensions, called directly from Go with no Python in the request path (EDD R21). Leave it
-empty and retrieval is keyword-only, which is a supported configuration rather than a degraded
-one: `memory.search` must never fail because embeddings are unavailable (MEM-5). When it is set,
-a write whose embed call fails still succeeds with `embedding NULL` and is picked up by the
+<details>
+<summary><strong>Operational detail</strong> — health, embeddings, the <code>/v1</code> surface, configuration</summary>
+
+`-dsn` (or `SUBSTRATE_DSN`) is the Postgres connection string. The server listens first. If a
+DSN is set, it applies goose migrations under an advisory lock and retries in the background
+rather than exiting. `/healthz` is **200** whenever the process is alive. `/readyz` returns
+**200** only after migrations have applied and the pool can ping Postgres; otherwise **503**.
+Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does not check Git or the
+skills repo (EDD R27).
+
+`-ollama` (or `SUBSTRATE_OLLAMA_URL`) points at Ollama for embeddings — `nomic-embed-text`, 768
+dimensions, called directly from Go with no Python in the request path (EDD R21). Leave it empty
+and retrieval is keyword-only, which is a supported configuration rather than a degraded one:
+`memory.search` must never fail because embeddings are unavailable (MEM-5). When it is set, a
+write whose embed call fails still succeeds with `embedding NULL` and is picked up by the
 backfill pass. Semantic similarity is capped below the score of an exact identifier hit, so a
 vector neighbour can never outrank a typed filename or symbol (MEM-3).
 
 `POST /mcp` is the streamable-HTTP MCP endpoint (EDD §4.1). Bearer auth is required;
-unauthenticated requests are rejected before the MCP handler runs. Rate limiting is
-Traefik's job, not the process. Domain packages register tools on the server
-`internal/mcpx` provides. Phase 1 exposes `context.get`, `memory.write`, `memory.search`,
-and `memory.supersede`. `context.get` compiles instructions, preferences, mandatory
-items, keyword-retrieved memories, and a skill index under the documented conservative
-token estimator; instructions, preferences, and mandatory items are never trimmed.
-Agents always write `unverified`; supersede never deletes.
+unauthenticated requests are rejected before the MCP handler runs. Rate limiting is Traefik's
+job, not the process. `context.get` compiles instructions, preferences, mandatory items,
+keyword-retrieved memories, and a skill index under the documented conservative token estimator;
+instructions, preferences, and mandatory items are never trimmed.
 
-`/v1` is the adapter and CLI REST surface (EDD §4.2), behind the same bearer
-auth as `/mcp` and not exposed to harnesses. It serves `GET /v1/render`,
-`GET /v1/skills/manifest`, `POST /v1/memory/batch`, `GET /v1/memory/cache`,
-review create/list/decide, `GET /v1/events` (SSE wake-ups when
-`substrate_audit` fires; the payload carries no audit metadata), and `GET /v1/health/git`. `/v1/memory/batch` is the
-idempotency boundary: `ingest_receipt` and the memory row are created in one
-transaction, and a replay with a known `client_id` returns the original id
-with `duplicate: true`. Render `sha256` values are `render.DriftHash` of the
-content (footer excluded). `/readyz` stays Postgres-only; skills-repo
-reachability is `/v1/health/git` plus the `substrate_git_health` expvar
-(EDD R27). `POST /v1/import` is not served here.
+`/v1` is the adapter and CLI REST surface (EDD §4.2), behind the same bearer auth as `/mcp` and
+not exposed to harnesses. It serves `GET /v1/render`, `GET /v1/skills/manifest`,
+`POST /v1/memory/batch`, `GET /v1/memory/cache`, review create/list/decide, `GET /v1/events`
+(SSE wake-ups when `substrate_audit` fires; the payload carries no audit metadata), and
+`GET /v1/health/git`. `/v1/memory/batch` is the idempotency boundary: `ingest_receipt` and the
+memory row are created in one transaction, and a replay with a known `client_id` returns the
+original id with `duplicate: true`. Render `sha256` values are `render.DriftHash` of the content
+(footer excluded). `POST /v1/import` is not served here.
 
-The operator CLI mints and revokes bearer tokens. The token is printed once
-and stored only as a SHA-256 hash; agent tokens expire in 24 hours (EDD R3).
+Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
+(EDD R3). `--for agent` is the only accepted kind today. Revoke with
+`./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
+arguments reports the version. `substrate-adapter` is the per-machine daemon — render, skills,
+outbox, and cache loops (EDD §5); today the binary only reports its version.
 
-```sh
-./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl --scopes memory:write --dsn "$SUBSTRATE_DSN"
-./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"
-```
+**Configuration:** `-addr` (listen address), `-dsn` / `SUBSTRATE_DSN`, `-ollama` /
+`SUBSTRATE_OLLAMA_URL` (empty means keyword-only), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
+(skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). The rest of the
+intended surface is specified in [`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and gets
+documented here as it lands.
 
-`./bin/substrate` with no arguments still reports the version. The adapter
-binary is the per-machine daemon (render, skills, outbox, cache loops).
+</details>
 
-## Configuration
+## Where to run it
 
-`-addr` (listen address), `-dsn` / `SUBSTRATE_DSN` (Postgres), `-ollama` /
-`SUBSTRATE_OLLAMA_URL` (embeddings; empty means keyword-only), and
-`-skills-repo` / `SUBSTRATE_SKILLS_REPO` (skills git remote; probed by
-`GET /v1/health/git`, never by `/readyz`). The rest of the intended
-surface — repo roots, the OTel endpoint — is specified in
-[`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and will be documented here as it lands.
+| | Try it | Homelab | Team |
+|---|---|---|---|
+| **Setup** | `make build`, local Postgres | k8s: CloudNativePG on Longhorn, Traefik v3 | Later horizon |
+| **Store** | one Postgres | CloudNativePG + MinIO backups | same, RLS-isolated per team |
+| **Embeddings** | keyword-only (fine) | Ollama on your GPU | " |
+| **Network** | localhost | Tailscale, no public exposure | OIDC + Tailscale |
 
-## Deployment
+Keyword-only retrieval is a supported mode, not a degraded one. `memory.search` never fails
+because embeddings are unavailable. Topology, backup/restore, and failure modes:
+[`docs/ops/runbook.md`](docs/ops/runbook.md).
 
-Single node, homelab, Tailscale-only, no public exposure: CloudNativePG on Longhorn, Traefik v3
-with cert-manager, MinIO for transcripts and backups, Ollama on a T4 for embeddings. Topology,
-backup/restore, and failure modes: [`docs/ops/runbook.md`](docs/ops/runbook.md).
+## How it fits together
+
+Harnesses are clients. Substrate is the plane underneath. Writes hit the store; the compiler reads the store and emits a **context pack** (`context.get`, shipped); the per-machine adapter — a version-reporting stub today, the render/skills/outbox/drift daemon by the end of Phase 1 — writes that pack into the files your harness already reads. The full engineering diagram is in [`docs/design/edd.md`](docs/design/edd.md).
+
+## What's here, what isn't
+
+**Now — building.** Postgres store · scope chain · deterministic instruction resolution · `context.get` + `memory.*` MCP tools · per-machine adapter (render, link skills, outbox, drift review) · import reconcile of existing rule files.
+
+**Designed, not shipped.** Ranked and explainable context packs (`context.explain`) · trust-weighted contradiction handling · symbol-level staleness · transcript offload between machines · task leases · multi-team RLS · review UI.
+
+**Not building.** A new IDE or harness. A hosted multi-tenant SaaS. "Prompt injection, solved." Details in [`docs/product/non-goals.md`](docs/product/non-goals.md).
+
+Confidence horizons, not dates: [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
-| Doc | What it is |
+| | |
 |---|---|
-| [AGENTS.md](AGENTS.md) | The contract every AI agent working in this repo reads first |
-| [ROADMAP.md](ROADMAP.md) | Now / Next / Later as confidence horizons |
-| [docs/product/](docs/product/) | Problem statement, non-goals, positioning |
-| [docs/design/prd.md](docs/design/prd.md) | Requirements, with the IDs (`MEM-7`, `CTX-2`) used everywhere |
-| [docs/design/edd.md](docs/design/edd.md) | Engineering design, reviewed twice and signed off |
+| [AGENTS.md](AGENTS.md) | The contract every agent working in this repo reads first |
+| [docs/product/](docs/product/) | Problem, positioning, non-goals |
+| [docs/design/prd.md](docs/design/prd.md) · [edd.md](docs/design/edd.md) | Requirements (with the `MEM-7` / `CTX-2` IDs used everywhere) and the signed-off engineering design |
 | [docs/ops/runbook.md](docs/ops/runbook.md) | Deploy, migrate, back up, restore, alert |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to get a change merged |
 | [SECURITY.md](SECURITY.md) | Reporting, and what is deliberately not a vulnerability |
 
 ## Licence
 
-[Apache-2.0](LICENSE). Permissive on purpose: the adapter contract, the MCP tool surface, and
-the rendered-file targets are all interfaces a third harness might implement, and nobody writes
-an adapter against a contract they cannot read.
+[Apache-2.0](LICENSE). Permissive on purpose: the adapter contract, the MCP tool surface, and the rendered-file targets are all interfaces a third harness might implement. Nobody writes an adapter against a contract they can't read.
