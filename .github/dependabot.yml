@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Actions first and deliberately: a SHA pin never floats, so without this a
+  # security fix in a pinned action would sit unnoticed forever.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    # Grouped from the start. Ungrouped, a fresh repo gets one PR per dependency
+    # within minutes of the first push, which saturates runner concurrency.
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]

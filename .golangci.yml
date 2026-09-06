@@ -1,0 +1,18 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which is on by default in the standard set.
+        - G104
+formatters:
+  enable:
+    - gofmt
