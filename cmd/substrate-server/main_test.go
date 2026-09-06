@@ -6,8 +6,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/agentic-substrate/substrate/internal/identity"
 )
 
 func TestHealthzWithoutStore(t *testing.T) {
@@ -78,6 +83,55 @@ func TestProtectedRouteRequiresBearer(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("/v1/review without bearer = %d, want 401", res.StatusCode)
 	}
+}
+
+func TestMCPRequiresBearer(t *testing.T) {
+	h := newHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/mcp without bearer = %d, want 401", rec.Code)
+	}
+}
+
+func TestMCPInitializeAndListTools(t *testing.T) {
+	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+		return &identity.Principal{DisplayName: "test", Trust: identity.TrustHuman}, nil
+	})
+	httpSrv := httptest.NewServer(h)
+	defer httpSrv.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "cmd-test", Version: "v0"}, nil)
+	sess, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:             httpSrv.URL + "/mcp",
+		HTTPClient:           &http.Client{Transport: bearerRT{token: "test"}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+	listed, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed == nil {
+		t.Fatal("tools/list returned nil")
+	}
+	for _, tool := range listed.Tools {
+		if strings.HasPrefix(tool.Name, "memory.") || tool.Name == "context.get" || strings.HasPrefix(tool.Name, "skill.") {
+			t.Fatalf("mcpx must not register domain tools; found %q", tool.Name)
+		}
+	}
+}
+
+type bearerRT struct{ token string }
+
+func (b bearerRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+b.token)
+	return http.DefaultTransport.RoundTrip(req)
 }
 
 func get(t *testing.T, h http.Handler, path string) *http.Response {

@@ -12,16 +12,29 @@ import (
 )
 
 // Machine-readable denial codes. Hooks branch on these, never on prose.
+// The EDD spells them ACP_*; AGENTS.md translates every one to SUBSTRATE_*.
 const (
-	CodeDeniedScope = "SUBSTRATE_DENIED_SCOPE"
-	CodeNeedsReview = "SUBSTRATE_NEEDS_REVIEW"
+	CodeDeniedScope      = "SUBSTRATE_DENIED_SCOPE"
+	CodeDeniedVisibility = "SUBSTRATE_DENIED_VISIBILITY"
+	CodeNeedsReview      = "SUBSTRATE_NEEDS_REVIEW"
+	CodeBudgetTooSmall   = "SUBSTRATE_BUDGET_TOO_SMALL"
+	CodeSecretDetected   = "SUBSTRATE_SECRET_DETECTED"
 )
 
 // ErrDeniedScope is returned when the principal may not act at this scope.
 var ErrDeniedScope = errors.New(CodeDeniedScope)
 
+// ErrDeniedVisibility is returned when the principal may not see this item.
+var ErrDeniedVisibility = errors.New(CodeDeniedVisibility)
+
 // ErrNeedsReview is returned when the write must go through a review item.
 var ErrNeedsReview = errors.New(CodeNeedsReview)
+
+// ErrBudgetTooSmall is returned when instructions alone exceed the token budget.
+var ErrBudgetTooSmall = errors.New(CodeBudgetTooSmall)
+
+// ErrSecretDetected is returned when a write is rejected by the secret scanner.
+var ErrSecretDetected = errors.New(CodeSecretDetected)
 
 // Check is the primary authorization gate and runs before SQL. RLS is the
 // backstop so a missing filter cannot leak a row; Check exists so the caller

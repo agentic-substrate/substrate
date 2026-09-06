@@ -75,6 +75,11 @@ background rather than exiting. `/healthz` is **200** whenever the process is al
 otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
 not check Git or the skills repo (EDD R27).
 
+`POST /mcp` is the streamable-HTTP MCP endpoint (EDD §4.1). Bearer auth is required;
+unauthenticated requests are rejected before the MCP handler runs. Rate limiting is
+Traefik's job, not the process. Domain packages register tools; the server ships with
+none until those packages land.
+
 The operator CLI mints and revokes bearer tokens. The token is printed once
 and stored only as a SHA-256 hash; agent tokens expire in 24 hours (EDD R3).
 
