@@ -1,12 +1,15 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/policy"
+	"github.com/agentic-substrate/substrate/internal/scope"
 )
 
 func TestLookupMintedToken(t *testing.T) {
@@ -309,5 +312,71 @@ func TestHumanAdminGUCTrue(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDisabledPrincipalTokenRejected(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedTwoTeams(t, conn)
+	ctx := t.Context()
+	st, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	raw, err := identity.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, conn, `INSERT INTO api_token (id, principal_id, machine, token_hash, scopes)
+		VALUES (gen_random_uuid(), $1, 'wsl', $2, ARRAY['memory:write'])`, w.alice, identity.HashToken(raw))
+	mustExec(t, conn, `UPDATE principal SET disabled_at = now() WHERE id = $1`, w.alice)
+
+	if _, err := identity.Lookup(ctx, st.Pool(), identity.EncodeToken(raw)); !errors.Is(err, identity.ErrUnauthorized) {
+		t.Fatalf("disabled principal token: %v, want unauthorized", err)
+	}
+}
+
+func TestTxRequiresPrincipal(t *testing.T) {
+	dsn, _ := startMigrated(t)
+	ctx := t.Context()
+	st, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	ran := false
+	err = st.Tx(ctx, func(_ pgx.Tx) error {
+		ran = true
+		return nil
+	})
+	if !errors.Is(err, ErrNoPrincipal) {
+		t.Fatalf("Tx without a principal: %v, want ErrNoPrincipal", err)
+	}
+	if ran {
+		t.Fatal("Tx ran the query function with no principal on context")
+	}
+
+	sc, err := scope.Parse("global:/org:acme/team:alpha/project:plotlens")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &identity.Principal{
+		Trust:        identity.TrustHuman,
+		Capabilities: []string{"instruction:propose"},
+	}
+	ctx = identity.WithPrincipal(ctx, p)
+	ran = false
+	err = st.TxChecked(ctx, "memory.write", sc, func(_ pgx.Tx) error {
+		ran = true
+		return nil
+	})
+	if !errors.Is(err, policy.ErrDeniedScope) {
+		t.Fatalf("TxChecked skipped policy.Check: %v", err)
+	}
+	if ran {
+		t.Fatal("TxChecked ran SQL after a policy denial")
 	}
 }

@@ -54,9 +54,6 @@ func Lookup(ctx context.Context, db DBTX, token string) (*Principal, error) {
 		}
 		return nil, fmt.Errorf("token lookup: %w", err)
 	}
-	if revokedAt != nil || disabledAt != nil {
-		return nil, ErrUnauthorized
-	}
 	if expiresAt != nil && !expiresAt.After(time.Now()) {
 		return nil, ErrUnauthorized
 	}
@@ -70,6 +67,10 @@ func Lookup(ctx context.Context, db DBTX, token string) (*Principal, error) {
 		Trust:        Trust(trust),
 		DisplayName:  display,
 		Capabilities: scopes,
+		Disabled:     disabledAt != nil,
+	}
+	if revokedAt != nil || p.Disabled {
+		return nil, ErrUnauthorized
 	}
 	if err := loadMemberships(ctx, db, p); err != nil {
 		return nil, err

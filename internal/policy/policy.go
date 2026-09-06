@@ -13,16 +13,12 @@ import (
 
 // Machine-readable denial codes. Hooks branch on these, never on prose.
 const (
-	CodeDeniedScope      = "SUBSTRATE_DENIED_SCOPE"
-	CodeDeniedVisibility = "SUBSTRATE_DENIED_VISIBILITY"
-	CodeNeedsReview      = "SUBSTRATE_NEEDS_REVIEW"
+	CodeDeniedScope = "SUBSTRATE_DENIED_SCOPE"
+	CodeNeedsReview = "SUBSTRATE_NEEDS_REVIEW"
 )
 
 // ErrDeniedScope is returned when the principal may not act at this scope.
 var ErrDeniedScope = errors.New(CodeDeniedScope)
-
-// ErrDeniedVisibility is returned when visibility rules refuse the action.
-var ErrDeniedVisibility = errors.New(CodeDeniedVisibility)
 
 // ErrNeedsReview is returned when the write must go through a review item.
 var ErrNeedsReview = errors.New(CodeNeedsReview)
@@ -46,7 +42,7 @@ func Check(action string, sc scope.Path, p identity.Principal) error {
 	switch sc.Leaf().Kind {
 	case scope.Global, scope.Org:
 		if isWrite(action) {
-			return fmt.Errorf("%w: org/global writes require human_admin", ErrDeniedScope)
+			return fmt.Errorf("%w: org/global writes require human_admin", ErrNeedsReview)
 		}
 	case scope.Team, scope.Project, scope.Repo, scope.Branch, scope.Task, scope.Session:
 		if len(p.TeamIDs) == 0 {

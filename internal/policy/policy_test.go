@@ -22,8 +22,8 @@ func TestCheckDeniesOrgWriteForTeamAdminMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = Check("memory.write", sc, p)
-	if !errors.Is(err, ErrDeniedScope) {
-		t.Fatalf("human with membership.role unused still has trust=human; org write: %v, want SUBSTRATE_DENIED_SCOPE", err)
+	if !errors.Is(err, ErrNeedsReview) {
+		t.Fatalf("human with membership.role unused still has trust=human; org write: %v, want SUBSTRATE_NEEDS_REVIEW", err)
 	}
 	if p.IsAdmin() {
 		t.Fatal("precondition: IsAdmin must be false")
@@ -75,5 +75,21 @@ func TestCheckRequiresCapability(t *testing.T) {
 	}
 	if err := Check("memory.write", sc, p); !errors.Is(err, ErrDeniedScope) {
 		t.Fatalf("missing memory:write: %v, want denied", err)
+	}
+}
+
+func TestCheckDisabledPrincipal(t *testing.T) {
+	sc, err := scope.Parse("global:/org:acme/team:alpha/project:plotlens")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := identity.Principal{
+		Trust:        identity.TrustHuman,
+		TeamIDs:      []uuid.UUID{uuid.Must(uuid.NewV7())},
+		Capabilities: []string{"memory:write"},
+		Disabled:     true,
+	}
+	if err := Check("memory.write", sc, p); !errors.Is(err, ErrDeniedScope) {
+		t.Fatalf("disabled principal: %v, want denied", err)
 	}
 }

@@ -1,11 +1,13 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // rlsWorld is two teams in one org. Team B has no grant on projectA, so a
@@ -15,7 +17,8 @@ type rlsWorld struct {
 	orgID, orgScope                          string
 	teamAID, teamAScope, teamBID, teamBScope string
 	projectA, projectGranted                 string
-	alice, bob, carol, dave, admin           string
+	alice, bob, carol, dave, admin, erin     string
+	aliceUser, bobUser                       string
 	memOwner, memTeam, memOrg, memGlobal     string
 	memGranted                               string
 	reviewA                                  string
@@ -37,6 +40,9 @@ func seedTwoTeams(t *testing.T, conn *pgx.Conn) rlsWorld {
 		carol:          newID(t, conn),
 		dave:           newID(t, conn),
 		admin:          newID(t, conn),
+		erin:           newID(t, conn),
+		aliceUser:      newID(t, conn),
+		bobUser:        newID(t, conn),
 		memOwner:       newID(t, conn),
 		memTeam:        newID(t, conn),
 		memOrg:         newID(t, conn),
@@ -50,16 +56,22 @@ func seedTwoTeams(t *testing.T, conn *pgx.Conn) rlsWorld {
 		($2, 'user', 'bob', 'human'),
 		($3, 'user', 'carol', 'human'),
 		($4, 'user', 'dave', 'human'),
-		($5, 'user', 'root', 'human_admin')`,
-		w.alice, w.bob, w.carol, w.dave, w.admin)
+		($5, 'user', 'root', 'human_admin'),
+		($6, 'user', 'erin', 'human')`,
+		w.alice, w.bob, w.carol, w.dave, w.admin, w.erin)
 	mustExec(t, conn, `INSERT INTO org (id, name) VALUES ($1, 'acme-rls')`, w.orgID)
 	mustExec(t, conn, `INSERT INTO team (id, org_id, name) VALUES ($1, $2, 'alpha'), ($3, $2, 'beta')`,
 		w.teamAID, w.orgID, w.teamBID)
 	mustExec(t, conn, `INSERT INTO membership (principal_id, team_id, role) VALUES
 		($1, $2, 'member'),
 		($3, $4, 'member'),
-		($5, $4, 'admin')`,
-		w.alice, w.teamAID, w.bob, w.teamBID, w.carol)
+		($5, $4, 'admin'),
+		($6, $2, 'member')`,
+		w.alice, w.teamAID, w.bob, w.teamBID, w.carol, w.erin)
+	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES
+		($1, 'user', NULL, $2, 0, 'placeholder'),
+		($3, 'user', NULL, $4, 0, 'placeholder')`,
+		w.aliceUser, w.alice, w.bobUser, w.bob)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'global', NULL, '', 0, 'placeholder')`, global)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'org', $2, 'acme-rls', 0, 'placeholder')`, w.orgScope, global)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
@@ -138,7 +150,10 @@ func countMemory(t *testing.T, tx pgx.Tx, id string) (int, error) {
 
 func TestRLSForceAndHelpersExist(t *testing.T) {
 	_, conn := startMigrated(t)
-	for _, table := range []string{"instruction", "preference", "memory", "skill", "review_item"} {
+	for _, table := range []string{
+		"instruction", "preference", "memory", "skill", "review_item",
+		"skill_version", "memory_edge", "memory_feedback", "ingest_receipt",
+	} {
 		var rls, force bool
 		if err := conn.QueryRow(t.Context(),
 			`SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = $1 AND relkind = 'r'`,
@@ -282,12 +297,13 @@ func TestRLSSelectInsertUpdateMatrix(t *testing.T) {
 	})
 
 	t.Run("INSERT spoofed owner is refused", func(t *testing.T) {
-		tx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
+		// projectGranted is a scope bob CAN write (grant); owner_id = alice is the conjunct under test.
+		tx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, []string{w.projectGranted}, false)
 		_, err := tx.Exec(t.Context(), `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
 			VALUES (gen_random_uuid(), $1, 'team', $2, 'working', 'fact', 't', 'b', '{"machine":"wsl"}', '{"type":"human"}', $2)`,
-			w.projectA, w.alice)
+			w.projectGranted, w.alice)
 		if err == nil {
-			t.Fatal("bob inserted a row owned by alice")
+			t.Fatal("bob inserted a row owned by alice on a scope he can write")
 		}
 	})
 
@@ -359,33 +375,97 @@ func TestRLSSameShapeOnSiblingTables(t *testing.T) {
 	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
 		VALUES ($1, 'team/alpha/rls', $2, 'team', $3, 'd')`, skillID, w.projectA, w.alice)
 
-	tx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
-	for _, q := range []struct {
-		name string
-		sql  string
-		id   string
-	}{
-		{"instruction", `SELECT count(*) FROM instruction WHERE id = $1`, insID},
-		{"preference", `SELECT count(*) FROM preference WHERE id = $1`, prefID},
-		{"skill", `SELECT count(*) FROM skill WHERE id = $1`, skillID},
-		{"review_item", `SELECT count(*) FROM review_item WHERE id = $1`, w.reviewA},
-	} {
-		var n int
-		if err := tx.QueryRow(t.Context(), q.sql, q.id).Scan(&n); err != nil {
-			t.Fatalf("%s denied read errored: %v", q.name, err)
-		}
-		if n != 0 {
-			t.Errorf("%s: team-B read team-A team-visible row", q.name)
-		}
-	}
-
+	bobTx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
 	aliceTx := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
-	var n int
-	if err := aliceTx.QueryRow(t.Context(), `SELECT count(*) FROM review_item WHERE id = $1`, w.reviewA).Scan(&n); err != nil {
-		t.Fatal(err)
+
+	type tbl struct {
+		name       string
+		countSQL   string
+		id         string
+		insert     string
+		insertArgs []any
+		update     string
 	}
-	if n != 1 {
-		t.Fatalf("owning team cannot read its review_item: count=%d", n)
+	tables := []tbl{
+		{
+			name:     "instruction",
+			countSQL: `SELECT count(*) FROM instruction WHERE id = $1`,
+			id:       insID,
+			insert: `INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, created_by)
+				VALUES (gen_random_uuid(), $1, 'team', $2, 'rule', 'rls.allow', 'x', $2)`,
+			insertArgs: []any{w.projectA, w.alice},
+			update:     `UPDATE instruction SET body = 'edited' WHERE id = $1`,
+		},
+		{
+			name:     "preference",
+			countSQL: `SELECT count(*) FROM preference WHERE id = $1`,
+			id:       prefID,
+			insert: `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+				VALUES (gen_random_uuid(), $1, 'team', $2, 'quote', 'single', $2)`,
+			insertArgs: []any{w.teamAScope, w.alice},
+			update:     `UPDATE preference SET body = 'edited' WHERE id = $1`,
+		},
+		{
+			name:     "skill",
+			countSQL: `SELECT count(*) FROM skill WHERE id = $1`,
+			id:       skillID,
+			insert: `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+				VALUES (gen_random_uuid(), 'team/alpha/rls-allow', $1, 'team', $2, 'd')`,
+			insertArgs: []any{w.projectA, w.alice},
+			update:     `UPDATE skill SET description = 'edited' WHERE id = $1`,
+		},
+		{
+			name:     "review_item",
+			countSQL: `SELECT count(*) FROM review_item WHERE id = $1`,
+			id:       w.reviewA,
+			insert: `INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
+				VALUES (gen_random_uuid(), 'drift_proposal', $1, $2, '{"subject":"y"}', $3)`,
+			insertArgs: []any{w.projectA, w.teamAID, w.alice},
+			update:     `UPDATE review_item SET status = 'withdrawn' WHERE id = $1`,
+		},
+	}
+	for _, tb := range tables {
+		t.Run(tb.name+"/deny-select", func(t *testing.T) {
+			var n int
+			if err := bobTx.QueryRow(t.Context(), tb.countSQL, tb.id).Scan(&n); err != nil {
+				t.Fatalf("denied read errored: %v", err)
+			}
+			if n != 0 {
+				t.Errorf("team-B read team-A team-visible row")
+			}
+		})
+		t.Run(tb.name+"/allow-select", func(t *testing.T) {
+			var n int
+			if err := aliceTx.QueryRow(t.Context(), tb.countSQL, tb.id).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 1 {
+				t.Fatalf("owning team cannot read %s: count=%d (missing policy looks the same as deny)", tb.name, n)
+			}
+		})
+		t.Run(tb.name+"/allow-insert", func(t *testing.T) {
+			if _, err := aliceTx.Exec(t.Context(), tb.insert, tb.insertArgs...); err != nil {
+				t.Fatalf("owning writer INSERT denied: %v", err)
+			}
+		})
+		t.Run(tb.name+"/allow-update", func(t *testing.T) {
+			tag, err := aliceTx.Exec(t.Context(), tb.update, tb.id)
+			if err != nil {
+				t.Fatalf("owning writer UPDATE errored: %v", err)
+			}
+			if tag.RowsAffected() != 1 {
+				t.Fatalf("owning writer UPDATE rows=%d, want 1", tag.RowsAffected())
+			}
+		})
+		t.Run(tb.name+"/deny-update", func(t *testing.T) {
+			tag, err := bobTx.Exec(t.Context(), tb.update, tb.id)
+			if err != nil {
+				t.Fatalf("denied UPDATE leaked an error: %v", err)
+			}
+			if tag.RowsAffected() != 0 {
+				t.Fatalf("team-B UPDATE rows=%d, want 0", tag.RowsAffected())
+			}
+		})
 	}
 }
 
@@ -407,4 +487,205 @@ func TestRLSHelpersAreStableNotDefiner(t *testing.T) {
 			t.Errorf("%s is SECURITY DEFINER; that bypasses RLS", fn)
 		}
 	}
+}
+
+func TestRLSUserScopeIsCallerOwn(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedTwoTeams(t, conn)
+	st, err := Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	bobTx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
+	_, err = bobTx.Exec(t.Context(), `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'indent', 'tabs', $2)`, w.aliceUser, w.bob)
+	if err == nil {
+		t.Fatal("bob wrote into alice's user scope")
+	}
+
+	aliceTx := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
+	if _, err := aliceTx.Exec(t.Context(), `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'indent', 'tabs', $2)`, w.aliceUser, w.alice); err != nil {
+		t.Fatalf("alice writing her own user scope: %v", err)
+	}
+}
+
+func TestRLSChildTablesAndFKOracle(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedTwoTeams(t, conn)
+	st, err := Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	skillID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+		VALUES ($1, 'team/alpha/oracle', $2, 'team', $3, 'd')`, skillID, w.projectA, w.alice)
+	verID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill_version (id, skill_id, semver, git_sha, git_path, author_id)
+		VALUES ($1, $2, '1.0.0', 'abc', 'skills/x', $3)`, verID, skillID, w.alice)
+
+	bobTx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
+	aliceTx := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
+
+	t.Run("skill_version deny/allow", func(t *testing.T) {
+		var n int
+		if err := bobTx.QueryRow(t.Context(), `SELECT count(*) FROM skill_version WHERE id = $1`, verID).Scan(&n); err != nil {
+			t.Fatalf("denied read errored: %v", err)
+		}
+		if n != 0 {
+			t.Fatal("bob read a skill_version whose parent skill is team-A")
+		}
+		if err := aliceTx.QueryRow(t.Context(), `SELECT count(*) FROM skill_version WHERE id = $1`, verID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("alice cannot read her skill_version: count=%d", n)
+		}
+		tag, err := bobTx.Exec(t.Context(), `UPDATE skill_version SET git_sha = 'evil', approval = 'approved' WHERE id = $1`, verID)
+		if err != nil {
+			t.Fatalf("denied UPDATE leaked an error: %v", err)
+		}
+		if tag.RowsAffected() != 0 {
+			t.Fatal("bob rewrote git_sha/approval on a skill_version he cannot see")
+		}
+	})
+
+	t.Run("fk oracle on memory_edge", func(t *testing.T) {
+		missing := newID(t, conn)
+		hiddenTx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
+		hiddenErr := insertEdge(t, hiddenTx, w.memTeam, w.memTeam, w.bob)
+		missingTx := beginApp(t, st, w.bob, w.orgID, []string{w.teamBID}, nil, false)
+		missingErr := insertEdge(t, missingTx, missing, missing, w.bob)
+		if hiddenErr == nil {
+			t.Fatal("edge insert naming a memory bob cannot see succeeded")
+		}
+		if missingErr == nil {
+			t.Fatal("edge insert naming a missing memory succeeded")
+		}
+		if pgErrCode(hiddenErr) != pgErrCode(missingErr) {
+			t.Fatalf("hidden memory error %q (%s) vs missing %q (%s): FK is an existence oracle",
+				hiddenErr, pgErrCode(hiddenErr), missingErr, pgErrCode(missingErr))
+		}
+		if err := insertEdge(t, aliceTx, w.memTeam, w.memTeam, w.alice); err != nil {
+			t.Fatalf("alice edge on her visible memory: %v", err)
+		}
+	})
+
+	t.Run("ingest_receipt is caller-owned", func(t *testing.T) {
+		_, err := bobTx.Exec(t.Context(), `INSERT INTO ingest_receipt (client_id, principal_id, subject_type, subject_id)
+			VALUES (gen_random_uuid(), $1, 'memory', gen_random_uuid())`, w.alice)
+		if err == nil {
+			t.Fatal("bob claimed alice's ingest_receipt principal_id")
+		}
+		if _, err := aliceTx.Exec(t.Context(), `INSERT INTO ingest_receipt (client_id, principal_id, subject_type, subject_id)
+			VALUES (gen_random_uuid(), $1, 'memory', gen_random_uuid())`, w.alice); err != nil {
+			t.Fatalf("alice own receipt: %v", err)
+		}
+	})
+
+	t.Run("memory_feedback follows parent visibility", func(t *testing.T) {
+		_, err := bobTx.Exec(t.Context(), `INSERT INTO memory_feedback (id, memory_id, principal_id, trust, useful)
+			VALUES (gen_random_uuid(), $1, $2, 'human', true)`, w.memTeam, w.bob)
+		if err == nil {
+			t.Fatal("bob left feedback on a memory he cannot see")
+		}
+	})
+}
+
+func TestRLSReviewItemUpdateForgery(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedTwoTeams(t, conn)
+	st, err := Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	erinTx := beginApp(t, st, w.erin, w.orgID, []string{w.teamAID}, nil, false)
+	tag, err := erinTx.Exec(t.Context(), `UPDATE review_item SET status = 'approved', decided_by = $1 WHERE id = $2`, w.erin, w.reviewA)
+	if err != nil {
+		t.Fatalf("forged decide leaked an error: %v", err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Fatal("teammate forged decided_by / status on another member's review_item")
+	}
+
+	// Own transaction: WITH CHECK failure aborts the tx, and withdraw must still run.
+	aliceForge := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
+	tag, err = aliceForge.Exec(t.Context(), `UPDATE review_item SET status = 'approved', decided_by = $1 WHERE id = $2`, w.alice, w.reviewA)
+	if err == nil && tag.RowsAffected() > 0 {
+		t.Fatal("proposer self-approved a review_item")
+	}
+
+	aliceTx := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
+	tag, err = aliceTx.Exec(t.Context(), `UPDATE review_item SET proposed_by = $1 WHERE id = $2`, w.erin, w.reviewA)
+	if err == nil && tag.RowsAffected() > 0 {
+		t.Fatal("proposed_by was rewritten")
+	}
+
+	tag, err = aliceTx.Exec(t.Context(), `UPDATE review_item SET status = 'withdrawn' WHERE id = $1`, w.reviewA)
+	if err != nil {
+		t.Fatalf("proposer withdraw: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("proposer withdraw rows=%d, want 1", tag.RowsAffected())
+	}
+
+	adminTx := beginApp(t, st, w.admin, w.orgID, nil, nil, true)
+	openID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
+		VALUES ($1, 'promotion', $2, $3, '{"subject":"z"}', $4)`, openID, w.projectA, w.teamAID, w.alice)
+	tag, err = adminTx.Exec(t.Context(), `UPDATE review_item SET status = 'approved', decided_by = $1 WHERE id = $2`, w.admin, openID)
+	if err != nil {
+		t.Fatalf("human_admin decide: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("human_admin decide rows=%d, want 1", tag.RowsAffected())
+	}
+}
+
+func TestRLSFrozenColumns(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedTwoTeams(t, conn)
+	st, err := Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	aliceTx := beginApp(t, st, w.alice, w.orgID, []string{w.teamAID}, nil, false)
+	tag, err := aliceTx.Exec(t.Context(), `UPDATE memory SET status = 'confirmed' WHERE id = $1`, w.memTeam)
+	if err != nil {
+		t.Fatalf("frozen status UPDATE leaked an error: %v", err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Fatal("owner changed memory.status; agents must not self-service status (MEM-6)")
+	}
+	if err := aliceTx.Rollback(t.Context()); err != nil {
+		t.Fatalf("rollback owner tx: %v", err)
+	}
+
+	adminTx := beginApp(t, st, w.admin, w.orgID, nil, nil, true)
+	if _, err := adminTx.Exec(t.Context(), `UPDATE memory SET status = 'confirmed' WHERE id = $1`, w.memTeam); err != nil {
+		t.Fatalf("human_admin status change: %v", err)
+	}
+}
+
+func insertEdge(t *testing.T, tx pgx.Tx, from, to, actor string) error {
+	t.Helper()
+	_, err := tx.Exec(t.Context(), `INSERT INTO memory_edge (from_id, to_id, relation, created_by)
+		VALUES ($1, $2, 'relates_to', $3)`, from, to, actor)
+	return err
+}
+
+func pgErrCode(err error) string {
+	var e *pgconn.PgError
+	if errors.As(err, &e) {
+		return e.Code
+	}
+	return "none"
 }

@@ -2,13 +2,19 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/policy"
+	"github.com/agentic-substrate/substrate/internal/scope"
 )
+
+// ErrNoPrincipal is returned when Tx runs without identity.FromContext.
+var ErrNoPrincipal = errors.New("store: no principal on context")
 
 // Store is a migrated Postgres pool. /readyz pings it and nothing else.
 // The pool operates as substrate_app so REVOKEs on DELETE and on audit bind.
@@ -86,15 +92,17 @@ func (s *Store) Tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("store not configured")
 	}
+	p := identity.FromContext(ctx)
+	if p == nil {
+		return ErrNoPrincipal
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if p := identity.FromContext(ctx); p != nil {
-		if err := identity.ApplySession(ctx, tx, p); err != nil {
-			return err
-		}
+	if err := identity.ApplySession(ctx, tx, p); err != nil {
+		return err
 	}
 	if err := fn(tx); err != nil {
 		return err
@@ -118,4 +126,17 @@ func (s *Store) Ping(ctx context.Context) error {
 		return fmt.Errorf("store not configured")
 	}
 	return s.pool.Ping(ctx)
+}
+
+// TxChecked is the request-path gate: policy.Check first so denials carry a
+// machine-readable code, then Tx as the RLS backstop (EDD §4.3).
+func (s *Store) TxChecked(ctx context.Context, action string, sc scope.Path, fn func(pgx.Tx) error) error {
+	p := identity.FromContext(ctx)
+	if p == nil {
+		return ErrNoPrincipal
+	}
+	if err := policy.Check(action, sc, *p); err != nil {
+		return err
+	}
+	return s.Tx(ctx, fn)
 }
