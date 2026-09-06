@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
@@ -123,6 +124,19 @@ func newHandler(getStore func() *store.Store) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
+	return newHandlerLookup(getStore, func(ctx context.Context, tok string) (*identity.Principal, error) {
+		st := getStore()
+		if st == nil {
+			return nil, identity.ErrUnauthorized
+		}
+		return identity.Lookup(ctx, st.Pool(), tok)
+	})
+}
+
+func newHandlerLookup(getStore func() *store.Store, lookup identity.LookupFunc) http.Handler {
+	if getStore == nil {
+		getStore = func() *store.Store { return nil }
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{
@@ -141,13 +155,8 @@ func newHandler(getStore func() *store.Store) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	lookup := func(ctx context.Context, tok string) (*identity.Principal, error) {
-		st := getStore()
-		if st == nil {
-			return nil, identity.ErrUnauthorized
-		}
-		return identity.Lookup(ctx, st.Pool(), tok)
-	}
+	mcpSrv := mcpx.New("substrate", version.Version)
+	mux.Handle("/mcp", mcpSrv.Handler())
 	return identity.Middleware(lookup)(mux)
 }
 

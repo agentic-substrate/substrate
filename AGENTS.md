@@ -44,7 +44,7 @@ translate:
 |---|---|
 | `cp-server`, `cp-adapter`, `cp` | `substrate-server`, `substrate-adapter`, `substrate` |
 | `~/.acp/` | `~/.substrate/` |
-| `ACP_DENIED_SCOPE`, `ACP_NEEDS_REVIEW` | `SUBSTRATE_DENIED_SCOPE`, `SUBSTRATE_NEEDS_REVIEW` |
+| `ACP_DENIED_SCOPE`, `ACP_DENIED_VISIBILITY`, `ACP_NEEDS_REVIEW`, `ACP_BUDGET_TOO_SMALL`, `ACP_SECRET_DETECTED` | `SUBSTRATE_DENIED_SCOPE`, `SUBSTRATE_DENIED_VISIBILITY`, `SUBSTRATE_NEEDS_REVIEW`, `SUBSTRATE_BUDGET_TOO_SMALL`, `SUBSTRATE_SECRET_DETECTED` |
 | `acp_audit`, `acp_tool_latency_seconds` | `substrate_audit`, `substrate_tool_latency_seconds` |
 | database `acp`, buckets `acp-sessions` / `acp-backups` | `substrate`, `substrate-sessions` / `substrate-backups` |
 | module `acp/` | `github.com/agentic-substrate/substrate` |
