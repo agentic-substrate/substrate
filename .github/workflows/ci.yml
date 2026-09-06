@@ -40,7 +40,12 @@ jobs:
           version: v2.13.2
 
       - name: test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
+        # pipefail is NOT on by default in Actions' `bash -e` shell: without it
+        # `tee` supplies the exit code and a failing test reports success. A
+        # canary PR caught exactly that here — do not remove this line.
+        run: |
+          set -o pipefail
+          go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
 
       # Fail loudly, never skip: a skipped test is a silently missing check.
       - name: assert nothing skipped
@@ -109,13 +114,16 @@ jobs:
   # The single required check. Its name is stable, so job names above can churn
   # without ever touching branch protection again.
   #
-  # `!cancelled()` fails OPEN on a cancelled run, which is safe here only because
-  # `main` requires a merge queue: the queue re-runs this gate against the merge
-  # commit, so a human cancelling a PR run cannot merge past it. If the merge
-  # queue is ever removed, switch this to `always()` — see CONTRIBUTING.md.
+  # `always()` fails CLOSED: a cancelled run leaves the gate red rather than
+  # letting a cancelled PR merge. The alternative, `!cancelled()`, fails OPEN and
+  # is only safe behind a merge queue that re-runs this gate against the merge
+  # commit — and merge queue requires an organization-owned repo, which this is
+  # not. If this repo ever moves to an org and gains a queue, `!cancelled()`
+  # becomes the better choice. Until then, closed is correct: the cost is
+  # re-running a cancelled job, not a bypassed check.
   gate:
     name: gate
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     needs: [go, smoke, docs, workflows]
     runs-on: ubuntu-latest
     steps:
