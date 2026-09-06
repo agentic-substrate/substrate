@@ -63,12 +63,17 @@ make check     # everything CI runs: fmt, vet, lint, race tests, govulncheck
 Run the server directly:
 
 ```sh
-./bin/substrate-server -addr :8080
+./bin/substrate-server -addr :8080 -dsn 'postgres://…'
 curl localhost:8080/healthz
+curl localhost:8080/readyz
 ```
 
-`/readyz` returns **503 `store not configured`** today, which is correct — the Postgres store
-lands with Phase 1's schema work.
+`-dsn` (or `SUBSTRATE_DSN`) is the Postgres connection string. The server listens first.
+If a DSN is set, it applies goose migrations under an advisory lock and retries in the
+background rather than exiting. `/healthz` is **200** whenever the process is alive.
+`/readyz` returns **200** only after migrations have applied and the pool can ping Postgres;
+otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
+not check Git or the skills repo (EDD R27).
 
 The other two binaries report their version and little else so far:
 
@@ -79,9 +84,9 @@ The other two binaries report their version and little else so far:
 
 ## Configuration
 
-Nothing to configure yet beyond `-addr`. The intended surface — bearer tokens per
-(principal, machine), Ollama endpoint, Postgres DSN, repo roots — is specified in
-[`docs/design/edd.md`](docs/design/edd.md) §4.3 and §7 and will be documented here as it lands.
+`-addr` (listen address) and `-dsn` / `SUBSTRATE_DSN` (Postgres). The rest of the intended
+surface — bearer tokens per (principal, machine), Ollama endpoint, repo roots — is specified
+in [`docs/design/edd.md`](docs/design/edd.md) §4.3 and §7 and will be documented here as it lands.
 
 ## Deployment
 
