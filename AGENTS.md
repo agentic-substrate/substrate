@@ -96,6 +96,10 @@ makes a novel instance of the same trap recognizable.
 10. **Outbox writes carry a `client_id` (UUIDv7) and the server keeps an `ingest_receipt`.**
     *Failure mode:* a retried batch after a network blip duplicates memories, and the duplicates
     then corroborate each other into promotion.
+11. **RLS session settings are `substrate.*` on both sides.** The middleware `SET LOCAL` and the
+    SQL policies must spell the same names. *Failure mode:* a typo (`acp.actor_id` in a policy,
+    `substrate.actor_id` in Go) makes every policy match nothing — reads come back empty, writes
+    are refused, and no error names the cause.
 
 ## Conventions
 

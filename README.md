@@ -75,12 +75,16 @@ background rather than exiting. `/healthz` is **200** whenever the process is al
 otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
 not check Git or the skills repo (EDD R27).
 
-The other two binaries report their version and little else so far:
+The operator CLI mints and revokes bearer tokens. The token is printed once
+and stored only as a SHA-256 hash; agent tokens expire in 24 hours (EDD R3).
 
 ```sh
-./bin/substrate-adapter    # per-machine daemon: render, skills, outbox, cache loops
-./bin/substrate            # operator CLI: import, review, token, offload, doctor
+./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl --scopes memory:write --dsn "$SUBSTRATE_DSN"
+./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"
 ```
+
+`./bin/substrate` with no arguments still reports the version. The adapter
+binary is the per-machine daemon (render, skills, outbox, cache loops).
 
 ## Configuration
 
