@@ -166,7 +166,11 @@ func TestProductionSchemaSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := mcpx.DiffToolSchemas(got, want); err != nil {
-		t.Fatal(err)
+		b, mErr := json.MarshalIndent(got, "", "  ")
+		if mErr != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("%v\ncurrent schemas:\n%s", err, b)
 	}
 }
 
@@ -195,9 +199,13 @@ func TestMCPInitializeAndListTools(t *testing.T) {
 	if listed == nil {
 		t.Fatal("tools/list returned nil")
 	}
+	names := map[string]bool{}
 	for _, tool := range listed.Tools {
-		if strings.HasPrefix(tool.Name, "memory.") || tool.Name == "context.get" || strings.HasPrefix(tool.Name, "skill.") {
-			t.Fatalf("mcpx must not register domain tools; found %q", tool.Name)
+		names[tool.Name] = true
+	}
+	for _, want := range []string{"memory.write", "memory.search", "memory.supersede"} {
+		if !names[want] {
+			t.Fatalf("production MCP missing %s; got %v", want, names)
 		}
 	}
 }
