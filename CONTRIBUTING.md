@@ -68,5 +68,3 @@ reason unrelated to what it is meant to catch.
 ## Licence
 
 By contributing you agree your contributions are licensed under [Apache-2.0](LICENSE).
-
-<!-- canary: scripts/ -> CONTRIBUTING.md pair -->

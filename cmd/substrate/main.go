@@ -14,5 +14,3 @@ func main() {
 	flag.Parse()
 	fmt.Printf("substrate %s (%s)\n", version.Version, version.Revision())
 }
-
-// canary: a cmd/ surface change with no README update.

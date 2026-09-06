@@ -107,5 +107,3 @@ backup/restore, and failure modes: [`docs/ops/runbook.md`](docs/ops/runbook.md).
 [Apache-2.0](LICENSE). Permissive on purpose: the adapter contract, the MCP tool surface, and
 the rendered-file targets are all interfaces a third harness might implement, and nobody writes
 an adapter against a contract they cannot read.
-
-<!-- canary: satisfies the cmd/ -> README.md docs pair so the link checker can run. -->
