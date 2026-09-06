@@ -1,8 +1,8 @@
 // Command substrate-server is the control plane: MCP tools at /mcp, the
 // adapter/CLI REST surface at /v1, and in-process scheduled jobs.
 //
-// Phase 1 status: HTTP skeleton only. /readyz reports not-ready until a
-// Postgres store is wired in — see AGENTS.md "Gotchas".
+// /readyz is Postgres-only (EDD R27): a Git or skills-repo outage must never
+// take the service out of rotation.
 package main
 
 import (
@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
 
@@ -30,9 +31,23 @@ func main() {
 
 func run() error {
 	addr := flag.String("addr", ":8080", "listen address")
+	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run at start under an advisory lock")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var st *store.Store
+	if *dsn != "" {
+		var err error
+		st, err = store.Open(ctx, *dsn)
+		if err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		defer st.Close()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -42,13 +57,15 @@ func run() error {
 			"revision": version.Revision(),
 		})
 	})
-	// Readiness is Postgres-only by design (EDD R27): a Git or skills-repo
-	// outage must never take the service out of rotation.
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"status": "not_ready",
-			"reason": "store not configured",
-		})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := st.Ping(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status": "not_ready",
+				"reason": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	srv := &http.Server{
@@ -56,9 +73,6 @@ func run() error {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errc := make(chan error, 1)
 	go func() {

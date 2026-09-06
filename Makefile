@@ -5,7 +5,7 @@ BIN     ?= bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/agentic-substrate/substrate/internal/version.Version=$(VERSION)
 
-.PHONY: all build test lint vet fmt-check vuln smoke clean check
+.PHONY: all build test lint vet fmt-check vuln smoke clean check sqlc
 
 all: check
 
@@ -31,7 +31,11 @@ fmt-check:
 vuln:
 	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-## smoke: build the real server, boot it against empty state, hit it.
+## sqlc: regenerate internal/store from migrations/ and queries.sql.
+sqlc:
+	sqlc generate
+
+## smoke: build the real server, boot it against Postgres, hit it.
 smoke: build
 	./scripts/smoke.sh
 

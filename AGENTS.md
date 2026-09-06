@@ -80,11 +80,10 @@ makes a novel instance of the same trap recognizable.
 6. **Never `DELETE` from a domain table.** Supersession sets `superseded_by` and keeps an edge;
    retirement sets `status`. *Failure mode:* GOV-2 ("why do agents believe Y") becomes
    unanswerable, and it fails silently — the query just returns fewer rows.
-7. **`/readyz` checks Postgres only** (EDD R27). It currently returns **503 with
-   `reason: store not configured`**, which is correct — there is no store yet. *Failure mode:*
-   making Git or the skills repo part of readiness takes the whole service out of rotation for
-   an outage it is designed to survive. When the store lands, flip both the handler and the
-   assertion in `scripts/smoke.sh` in the same commit.
+7. **`/readyz` checks Postgres only** (EDD R27). It pings the pool after migrations; Git and
+   the skills repo are not part of readiness. *Failure mode:* making Git or the skills repo
+   part of readiness takes the whole service out of rotation for an outage it is designed
+   to survive.
 8. **Hooks must exit in under 2 seconds**, with a 1.5s server timeout and a fallback to the
    local cache or outbox. *Failure mode:* a slow server stalls every harness on every machine,
    and it looks like the harness is broken, not Substrate.
