@@ -24,7 +24,7 @@ import (
 var schemaSnapshot []byte
 
 func TestHealthzWithoutStore(t *testing.T) {
-	h := newHandler(nil)
+	h := newHandler(nil, nil)
 	healthz := get(t, h, "/healthz")
 	defer func() { _ = healthz.Body.Close() }()
 	if healthz.StatusCode != http.StatusOK {
@@ -47,7 +47,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
+		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", nil)
 	}()
 
 	url := "http://" + ln.Addr().String()
@@ -85,7 +85,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 }
 
 func TestProtectedRouteRequiresBearer(t *testing.T) {
-	h := newHandler(nil)
+	h := newHandler(nil, nil)
 	res := get(t, h, "/v1/review")
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusUnauthorized {
@@ -96,7 +96,7 @@ func TestProtectedRouteRequiresBearer(t *testing.T) {
 func TestMCPRequiresBearer(t *testing.T) {
 	var lookedUp bool
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		lookedUp = true
 		return p, nil
 	})
@@ -134,7 +134,7 @@ func TestMCPRequiresBearer(t *testing.T) {
 
 func TestProductionSchemaSnapshot(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
 	})
 	httpSrv := httptest.NewServer(h)
@@ -176,7 +176,7 @@ func TestProductionSchemaSnapshot(t *testing.T) {
 
 func TestMCPInitializeAndListTools(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
-	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+	h := newHandlerLookup(nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
 	})
 	httpSrv := httptest.NewServer(h)

@@ -535,7 +535,7 @@ func TestWriteRejectsControlByteSplitSecretsStored(t *testing.T) {
 
 func TestRegisterExposesMemoryTools(t *testing.T) {
 	srv := mcpx.New("substrate-test", "v0")
-	Register(srv, func() *store.Store { return nil })
+	Register(srv, func() *store.Store { return nil }, nil)
 	sess := connectMCP(t, srv)
 	listed, err := sess.ListTools(t.Context(), nil)
 	if err != nil {
@@ -597,4 +597,208 @@ func (b bearerRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+b.token)
 	return http.DefaultTransport.RoundTrip(req)
+}
+
+// MEM-3 with vectors in play: a PERFECT semantic match must still lose to an
+// exact identifier hit. This is the regression that adding embeddings is most
+// likely to cause, and it is invisible without a stored vector — the keyword
+// version of this test passes either way.
+func TestIdentifierStillOutranksAPerfectSemanticMatch(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+
+	// The distractor embeds onto the query's axis (cosine distance 0, the full
+	// 25 points); the identifier row embeds orthogonally and gets none. A fake
+	// returning one fixed vector would boost BOTH rows equally and the test
+	// would pass with the semantic weight set arbitrarily high.
+	svc = svc.WithEmbedder(&axisEmbedder{query: "validation.py", document: "nothing textually similar"})
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	target := aliceWrite(w)
+	target.Title = "the identifier row"
+	written, err := svc.Write(ctx, target)
+	if err != nil {
+		t.Fatalf("target write: %v", err)
+	}
+
+	distractor := aliceWrite(w)
+	distractor.Title = "the semantic row"
+	distractor.Body = "nothing textually similar whatsoever"
+	distractor.Identifiers = nil
+	other, err := svc.Write(ctx, distractor)
+	if err != nil {
+		t.Fatalf("distractor write: %v", err)
+	}
+
+	out, err := svc.Search(ctx, SearchIn{Query: "validation.py", Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("search returned no hits")
+	}
+	if out.Results[0].ID != written.ID {
+		t.Fatalf("rank 1 is %s (%q), want the exact identifier hit %s; a semantic neighbour outranked a typed filename (MEM-3)",
+			out.Results[0].ID, out.Results[0].Title, written.ID)
+	}
+	_ = other
+}
+
+// MEM-5 end to end: with the embedder failing on every call, search still
+// returns real keyword hits, and does so well inside the 2s bound.
+func TestSearchDegradesToKeywordWhenEmbedderIsDown(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	svc = svc.WithEmbedder(&fakeEmbedder{err: errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")})
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	if _, err := svc.Write(ctx, aliceWrite(w)); err != nil {
+		t.Fatalf("write with a dead embedder must still succeed: %v", err)
+	}
+
+	start := time.Now()
+	out, err := svc.Search(ctx, SearchIn{Query: "validation.py", Limit: 10})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("search must not fail because embeddings failed (MEM-5): %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("search returned no hits; degradation dropped the keyword path too")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("search took %v with a dead embedder, want under 2s (MEM-5)", elapsed)
+	}
+}
+
+// The write path must actually persist a vector. Without this, every semantic
+// assertion in this file is vacuous: the ranking term is multiplied by an
+// embedding that is NULL.
+func TestWriteStoresAnEmbedding(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	svc = svc.WithEmbedder(&fakeEmbedder{vec: unitVec(768)})
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	written, err := svc.Write(ctx, aliceWrite(w))
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var present bool
+	if err := conn.QueryRow(t.Context(),
+		`SELECT embedding IS NOT NULL FROM memory WHERE id = $1`, written.ID).Scan(&present); err != nil {
+		t.Fatalf("query embedding: %v", err)
+	}
+	if !present {
+		t.Fatal("embedding is NULL after a write with a working embedder; the vector never reached the row")
+	}
+}
+
+// A write whose embed call failed leaves embedding NULL and still succeeds;
+// backfill fills it later and is idempotent (EDD §8.4).
+func TestBackfillFillsNullEmbeddingsAndIsIdempotent(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	// The GPU is busy: the write must still land.
+	down := &fakeEmbedder{err: errors.New("connection refused")}
+	written, err := svc.WithEmbedder(down).Write(ctx, aliceWrite(w))
+	if err != nil {
+		t.Fatalf("write must succeed when embedding fails: %v", err)
+	}
+	var present bool
+	if err := conn.QueryRow(t.Context(),
+		`SELECT embedding IS NOT NULL FROM memory WHERE id = $1`, written.ID).Scan(&present); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if present {
+		t.Fatal("embedding is set after a failed embed; the failure was not tolerated as NULL")
+	}
+
+	up := &fakeEmbedder{vec: unitVec(768)}
+	svc = svc.WithEmbedder(up)
+	n, err := svc.Backfill(ctx, 64)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("backfill filled 0 rows, want at least the row left NULL")
+	}
+	if err := conn.QueryRow(t.Context(),
+		`SELECT embedding IS NOT NULL FROM memory WHERE id = $1`, written.ID).Scan(&present); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !present {
+		t.Fatal("backfill reported success but the embedding is still NULL")
+	}
+
+	// Idempotence is about this row, not about the call count: the suite shares
+	// one database, so a second pass legitimately picks up rows other tests
+	// left NULL. What must never happen is an existing vector being rewritten —
+	// the UPDATE is guarded on embedding IS NULL precisely so a concurrent or
+	// repeated run cannot clobber one.
+	var before string
+	if err := conn.QueryRow(t.Context(),
+		`SELECT embedding::text FROM memory WHERE id = $1`, written.ID).Scan(&before); err != nil {
+		t.Fatalf("read embedding: %v", err)
+	}
+	if _, err := svc.WithEmbedder(&fakeEmbedder{vec: orthoVec(768)}).Backfill(ctx, 64); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	var after string
+	if err := conn.QueryRow(t.Context(),
+		`SELECT embedding::text FROM memory WHERE id = $1`, written.ID).Scan(&after); err != nil {
+		t.Fatalf("re-read embedding: %v", err)
+	}
+	if after != before {
+		t.Fatal("backfill rewrote an embedding that was already set; the IS NULL guard is not holding")
+	}
+}
+
+// The semantic term must actually contribute. Neither row shares a word with
+// the query, so keyword scoring ties them at zero and the tie breaks on
+// created_at DESC — which favours the row written SECOND. The aligned row is
+// written FIRST, so it can only come back rank 1 if similarity moved it there.
+// Delete the vector term from searchSQL and this test fails.
+func TestSemanticSimilarityActuallyRanks(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	const query = "zzqq unrelated lexeme"
+	svc = svc.WithEmbedder(&axisEmbedder{query: query, document: "aligned marker"})
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	aligned := aliceWrite(w)
+	aligned.Title = "aligned marker"
+	aligned.Body = "carries no query words at all"
+	aligned.Identifiers = nil
+	first, err := svc.Write(ctx, aligned)
+	if err != nil {
+		t.Fatalf("aligned write: %v", err)
+	}
+
+	inert := aliceWrite(w)
+	inert.Title = "inert row"
+	inert.Body = "also carries no query words at all"
+	inert.Identifiers = nil
+	if _, err := svc.Write(ctx, inert); err != nil {
+		t.Fatalf("inert write: %v", err)
+	}
+
+	out, err := svc.Search(ctx, SearchIn{Query: query, Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("search returned no hits")
+	}
+	if out.Results[0].ID != first.ID {
+		t.Fatalf("rank 1 is %q, want the semantically aligned row; with no keyword overlap the "+
+			"only thing that can promote it is the vector term, so that term is not contributing",
+			out.Results[0].Title)
+	}
 }

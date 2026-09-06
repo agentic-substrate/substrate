@@ -15,7 +15,8 @@ import (
 // Service is the memory domain. Tools register on an mcpx.Server; tests call
 // Write/Search/Supersede directly.
 type Service struct {
-	store func() *store.Store
+	store    func() *store.Store
+	embedder Embedder
 }
 
 // New returns a Service that loads the store per request so /mcp can serve
@@ -27,9 +28,27 @@ func New(getStore func() *store.Store) *Service {
 	return &Service{store: getStore}
 }
 
-// Register attaches memory.write, memory.search, and memory.supersede.
-func Register(s *mcpx.Server, getStore func() *store.Store) {
+// WithEmbedder returns s using e for semantic search and write-path
+// vectorisation. Without one the service is keyword-only, which is a supported
+// configuration: search must never fail because embeddings are unavailable
+// (MEM-5).
+func (s *Service) WithEmbedder(e Embedder) *Service {
+	s.embedder = e
+	return s
+}
+
+// Register attaches memory.write, memory.search, and memory.supersede. A nil
+// embedder is valid and means keyword-only retrieval (MEM-5).
+//
+// It returns the Service so a caller can assert what was actually wired: the
+// embedder being dropped here is invisible at runtime (search silently falls
+// back to keyword-only) and invisible in tests that construct their own
+// Service.
+func Register(s *mcpx.Server, getStore func() *store.Store, e Embedder) *Service {
 	svc := New(getStore)
+	if e != nil {
+		svc = svc.WithEmbedder(e)
+	}
 	mcpx.AddTool(s, &mcp.Tool{
 		Name:        "memory.write",
 		Description: "Store a memory. Agents are always unverified. Call when a fact, decision, incident, lesson, or observation should persist across sessions.",
@@ -42,6 +61,7 @@ func Register(s *mcpx.Server, getStore func() *store.Store) {
 		Name:        "memory.supersede",
 		Description: "Replace a memory's body without deleting the old row. Requires an audit reason. Call when a stored fact is outdated.",
 	}, svc.supersedeTool)
+	return svc
 }
 
 func (s *Service) writeTool(ctx context.Context, _ *mcp.CallToolRequest, in WriteIn) (*mcp.CallToolResult, WriteOut, error) {

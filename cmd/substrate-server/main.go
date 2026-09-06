@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentic-substrate/substrate/internal/embed"
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
@@ -38,6 +39,7 @@ func main() {
 func run() error {
 	addr := flag.String("addr", ":8080", "listen address")
 	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run under an advisory lock")
+	ollama := flag.String("ollama", os.Getenv("SUBSTRATE_OLLAMA_URL"), "Ollama base URL for embeddings; empty means keyword-only retrieval")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -49,17 +51,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return serve(ctx, ln, *dsn)
+	// A nil embedder is a supported configuration, not a degraded one: search
+	// must never fail because embeddings are unavailable (MEM-5). Constructing
+	// it here rather than inside the handler keeps the "unwired in production
+	// while every test passes" failure impossible to reach by accident.
+	var embedder memory.Embedder
+	if *ollama != "" {
+		embedder = embed.New(*ollama)
+		slog.Info("embeddings enabled", "model", embed.Model, "dim", embed.Dim)
+	} else {
+		slog.Info("embeddings disabled; retrieval is keyword-only")
+	}
+	return serve(ctx, ln, *dsn, embedder)
 }
 
 type runtime struct {
 	store atomic.Pointer[store.Store]
 }
 
-func serve(ctx context.Context, ln net.Listener, dsn string) error {
+func serve(ctx context.Context, ln net.Listener, dsn string, embedder memory.Embedder) error {
 	rt := &runtime{}
 	srv := &http.Server{
-		Handler:           newHandler(rt.getStore),
+		Handler:           newHandler(rt.getStore, embedder),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -121,11 +134,11 @@ func connectLoop(ctx context.Context, dsn string, rt *runtime) {
 	}
 }
 
-func newHandler(getStore func() *store.Store) http.Handler {
+func newHandler(getStore func() *store.Store, embedder memory.Embedder) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
-	return newHandlerLookup(getStore, func(ctx context.Context, tok string) (*identity.Principal, error) {
+	return newHandlerLookup(getStore, embedder, func(ctx context.Context, tok string) (*identity.Principal, error) {
 		st := getStore()
 		if st == nil {
 			return nil, identity.ErrUnauthorized
@@ -134,7 +147,7 @@ func newHandler(getStore func() *store.Store) http.Handler {
 	})
 }
 
-func newHandlerLookup(getStore func() *store.Store, lookup identity.LookupFunc) http.Handler {
+func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, lookup identity.LookupFunc) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
@@ -157,7 +170,7 @@ func newHandlerLookup(getStore func() *store.Store, lookup identity.LookupFunc) 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mcpSrv := mcpx.New("substrate", version.Version)
-	memory.Register(mcpSrv, getStore)
+	memory.Register(mcpSrv, getStore, embedder)
 	mux.Handle("/mcp", mcpSrv.Handler())
 	return identity.Middleware(lookup)(mux)
 }
