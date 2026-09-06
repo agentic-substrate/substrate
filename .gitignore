@@ -16,3 +16,7 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Test output
+coverage.out
+test.log

@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through GitHub's **[Private vulnerability
-reporting](https://github.com/jacorbello/substrate/security/advisories/new)** — the Security tab
+reporting](https://github.com/agentic-substrate/substrate/security/advisories/new)** — the Security tab
 of this repository. Please do not open a public issue for a suspected vulnerability.
 
 This is a personal project without a staffed on-call rotation. Expect an acknowledgement within
