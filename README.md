@@ -68,10 +68,12 @@ curl localhost:8080/healthz
 curl localhost:8080/readyz
 ```
 
-`-dsn` (or `SUBSTRATE_DSN`) is the Postgres connection string. The server applies goose
-migrations at start under an advisory lock, then `/readyz` returns **200** when the pool
-can ping Postgres. Without a DSN it still serves `/healthz` and `/readyz` returns 503
-`store not configured`. `/readyz` does not check Git or the skills repo (EDD R27).
+`-dsn` (or `SUBSTRATE_DSN`) is the Postgres connection string. The server listens first.
+If a DSN is set, it applies goose migrations under an advisory lock and retries in the
+background rather than exiting. `/healthz` is **200** whenever the process is alive.
+`/readyz` returns **200** only after migrations have applied and the pool can ping Postgres;
+otherwise **503**. Without a DSN, `/readyz` is 503 `store not configured`. `/readyz` does
+not check Git or the skills repo (EDD R27).
 
 The other two binaries report their version and little else so far:
 

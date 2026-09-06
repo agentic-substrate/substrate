@@ -4,20 +4,36 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Store is a migrated Postgres pool. /readyz pings it and nothing else.
+// The pool operates as substrate_app so REVOKEs on DELETE and on audit bind.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
-// Open applies goose migrations under an advisory lock, then pings the pool.
+// Open applies goose migrations under an advisory lock as the bootstrap DSN,
+// then opens a pool that assumes substrate_app on connect and on every acquire.
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	if err := Migrate(ctx, dsn); err != nil {
 		return nil, err
 	}
-	pool, err := pgxpool.New(ctx, dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("pool config: %w", err)
+	}
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		return assumeAppRole(ctx, conn)
+	}
+	cfg.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
+		if err := assumeAppRole(ctx, conn); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("pool: %w", err)
 	}
@@ -26,6 +42,32 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 	return &Store{pool: pool}, nil
+}
+
+// assumeAppRole makes the connection operate as substrate_app. Superusers keep
+// their privileges across SET ROLE, so they need SET SESSION AUTHORIZATION.
+func assumeAppRole(ctx context.Context, conn *pgx.Conn) error {
+	var role string
+	if err := conn.QueryRow(ctx, `SELECT current_user`).Scan(&role); err != nil {
+		return fmt.Errorf("current_user: %w", err)
+	}
+	if role == "substrate_app" {
+		return nil
+	}
+	var super bool
+	if err := conn.QueryRow(ctx, `SELECT current_setting('is_superuser') = 'on'`).Scan(&super); err != nil {
+		return fmt.Errorf("is_superuser: %w", err)
+	}
+	if super {
+		if _, err := conn.Exec(ctx, `SET SESSION AUTHORIZATION substrate_app`); err != nil {
+			return fmt.Errorf("session authorization substrate_app: %w", err)
+		}
+		return nil
+	}
+	if _, err := conn.Exec(ctx, `SET ROLE substrate_app`); err != nil {
+		return fmt.Errorf("set role substrate_app: %w", err)
+	}
+	return nil
 }
 
 // Close releases the pool.

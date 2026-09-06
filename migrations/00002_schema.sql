@@ -148,7 +148,7 @@ END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
-CREATE TRIGGER scope_chain BEFORE INSERT OR UPDATE OF id, kind, parent_id ON scope
+CREATE TRIGGER scope_chain BEFORE INSERT OR UPDATE ON scope
   FOR EACH ROW EXECUTE FUNCTION scope_chain_enforce();
 
 CREATE TYPE instruction_kind   AS ENUM ('rule','constraint','convention');
@@ -263,21 +263,28 @@ CREATE TABLE memory_feedback (
   CHECK (useful IS NOT NULL OR incorrect IS NOT NULL)
 );
 
--- useful_count/incorrect_count are int; agent_autonomous 0.25 rounds to 0.
+-- useful_count/incorrect_count stay int; accumulate in hundredths so
+-- agent_autonomous 0.25 is not rounded to 0. Weight comes from principal.trust
+-- so an inserter cannot spoof NEW.trust.
 -- +goose StatementBegin
 CREATE FUNCTION memory_feedback_apply() RETURNS trigger AS $$
 DECLARE
-  w numeric;
+  lvl trust_level;
+  hundredths int;
 BEGIN
-  w := CASE NEW.trust
-    WHEN 'human_admin' THEN 3
-    WHEN 'human' THEN 2
-    WHEN 'agent_interactive' THEN 1
-    WHEN 'agent_autonomous' THEN 0.25
+  SELECT trust INTO lvl FROM principal WHERE id = NEW.principal_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'principal % not found', NEW.principal_id;
+  END IF;
+  hundredths := CASE lvl
+    WHEN 'human_admin' THEN 300
+    WHEN 'human' THEN 200
+    WHEN 'agent_interactive' THEN 100
+    WHEN 'agent_autonomous' THEN 25
   END;
   UPDATE memory SET
-    useful_count = useful_count + CASE WHEN NEW.useful THEN round(w)::int ELSE 0 END,
-    incorrect_count = incorrect_count + CASE WHEN NEW.incorrect THEN round(w)::int ELSE 0 END,
+    useful_count = useful_count + CASE WHEN NEW.useful THEN hundredths ELSE 0 END,
+    incorrect_count = incorrect_count + CASE WHEN NEW.incorrect THEN hundredths ELSE 0 END,
     updated_at = now()
   WHERE id = NEW.memory_id;
   RETURN NEW;
@@ -330,6 +337,24 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER skill_active_version BEFORE INSERT OR UPDATE OF active_version_id ON skill
   FOR EACH ROW EXECUTE FUNCTION skill_active_version_approved();
+
+-- +goose StatementBegin
+CREATE FUNCTION skill_version_keep_active_approved() RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM skill
+    WHERE active_version_id = NEW.id AND id = NEW.skill_id
+  ) AND NEW.approval IS DISTINCT FROM 'approved' THEN
+    RAISE EXCEPTION 'cannot change approval of an active skill version away from approved';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER skill_version_keep_active_approved
+  BEFORE UPDATE OF approval ON skill_version
+  FOR EACH ROW EXECUTE FUNCTION skill_version_keep_active_approved();
 
 CREATE TYPE review_kind   AS ENUM ('promotion','instruction_change','skill_proposal','contradiction','drift_proposal','import_conflict');
 CREATE TYPE review_status AS ENUM ('open','approved','rejected','withdrawn');
@@ -439,6 +464,7 @@ DROP TABLE IF EXISTS org CASCADE;
 DROP TABLE IF EXISTS principal CASCADE;
 
 DROP FUNCTION IF EXISTS audit_row() CASCADE;
+DROP FUNCTION IF EXISTS skill_version_keep_active_approved() CASCADE;
 DROP FUNCTION IF EXISTS skill_active_version_approved() CASCADE;
 DROP FUNCTION IF EXISTS memory_feedback_apply() CASCADE;
 DROP FUNCTION IF EXISTS preference_scope_kind() CASCADE;

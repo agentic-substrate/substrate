@@ -15,6 +15,7 @@ END $$;
 -- +goose StatementEnd
 
 GRANT substrate_migrate TO CURRENT_USER;
+GRANT substrate_app TO CURRENT_USER;
 
 -- +goose StatementBegin
 DO $$
@@ -36,6 +37,7 @@ ALTER FUNCTION scope_chain_enforce() OWNER TO substrate_migrate;
 ALTER FUNCTION preference_scope_kind() OWNER TO substrate_migrate;
 ALTER FUNCTION memory_feedback_apply() OWNER TO substrate_migrate;
 ALTER FUNCTION skill_active_version_approved() OWNER TO substrate_migrate;
+ALTER FUNCTION skill_version_keep_active_approved() OWNER TO substrate_migrate;
 ALTER FUNCTION memory_identifiers_text(text[]) OWNER TO substrate_migrate;
 ALTER FUNCTION memory_verification_type(jsonb) OWNER TO substrate_migrate;
 ALTER FUNCTION audit_row() OWNER TO substrate_migrate;
@@ -55,6 +57,19 @@ REVOKE DELETE ON
 GRANT SELECT, INSERT ON audit TO substrate_app;
 REVOKE UPDATE, DELETE ON audit FROM substrate_app;
 GRANT USAGE, SELECT ON SEQUENCE audit_id_seq TO substrate_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO substrate_app;
+
+-- +goose StatementBegin
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOR t IN SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'
+  LOOP
+    EXECUTE format('GRANT USAGE ON TYPE %I TO substrate_app', t);
+  END LOOP;
+END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 

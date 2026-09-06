@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -260,17 +261,39 @@ func TestVerificationTypeIsGenerated(t *testing.T) {
 func TestFeedbackTrustWeights(t *testing.T) {
 	_, conn := startMigrated(t)
 	c := seedChain(t, conn)
-	mem := newID(t, conn)
-	mustExec(t, conn, `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
-		VALUES ($1, $2, 'owner', $3, 'working', 'observation', 't', 'b', '{"machine":"wsl"}', '{"type":"agent_inference"}', $3)`, mem, c.project, c.actor)
-	mustExec(t, conn, `INSERT INTO memory_feedback (id, memory_id, principal_id, trust, useful)
-		VALUES (gen_random_uuid(), $1, $2, 'human_admin', true)`, mem, c.actor)
-	var useful int
-	if err := conn.QueryRow(t.Context(), `SELECT useful_count FROM memory WHERE id = $1`, mem).Scan(&useful); err != nil {
-		t.Fatal(err)
+	admin := newID(t, conn)
+	interactive := newID(t, conn)
+	autonomous := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust) VALUES ($1, 'user', 'admin', 'human_admin')`, admin)
+	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust, minted_by) VALUES ($1, 'agent', 'interactive', 'agent_interactive', $2)`, interactive, c.actor)
+	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust, minted_by) VALUES ($1, 'agent', 'autonomous', 'agent_autonomous', $2)`, autonomous, c.actor)
+
+	// hundredths so agent_autonomous 0.25 is kept on an int column
+	cases := []struct {
+		name      string
+		principal string
+		want      int
+	}{
+		{"human_admin", admin, 300},
+		{"human", c.actor, 200},
+		{"agent_interactive", interactive, 100},
+		{"agent_autonomous", autonomous, 25},
 	}
-	if useful != 3 {
-		t.Fatalf("useful_count = %d, want 3 (human_admin weight)", useful)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := newID(t, conn)
+			mustExec(t, conn, `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
+				VALUES ($1, $2, 'owner', $3, 'working', 'observation', 't', 'b', '{"machine":"wsl"}', '{"type":"agent_inference"}', $3)`, mem, c.project, c.actor)
+			mustExec(t, conn, `INSERT INTO memory_feedback (id, memory_id, principal_id, trust, useful)
+				VALUES (gen_random_uuid(), $1, $2, 'human_admin', true)`, mem, tc.principal)
+			var useful int
+			if err := conn.QueryRow(t.Context(), `SELECT useful_count FROM memory WHERE id = $1`, mem).Scan(&useful); err != nil {
+				t.Fatal(err)
+			}
+			if useful != tc.want {
+				t.Fatalf("useful_count = %d, want %d (weight from principal.trust, scaled hundredths)", useful, tc.want)
+			}
+		})
 	}
 }
 
@@ -302,6 +325,19 @@ func TestDownThenUp(t *testing.T) {
 	if err := migrateDown(ctx, dsn); err != nil {
 		t.Fatalf("down: %v", err)
 	}
+	probe, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = probe.Exec(ctx, `SELECT 1 FROM scope`)
+	if err == nil {
+		t.Fatal("scope still exists after Down; a no-op Down would hide a missing reverse migration")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42P01" {
+		t.Fatalf("after Down, SELECT FROM scope: %v, want undefined_table (42P01)", err)
+	}
+	_ = probe.Close(ctx)
 	if err := Migrate(ctx, dsn); err != nil {
 		t.Fatalf("up after down: %v", err)
 	}
@@ -313,5 +349,119 @@ func TestDownThenUp(t *testing.T) {
 	var n int
 	if err := conn2.QueryRow(ctx, `SELECT count(*) FROM scope`).Scan(&n); err != nil {
 		t.Fatalf("scope missing after down/up: %v", err)
+	}
+}
+
+func TestPathCannotBeOverwritten(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	mustExec(t, conn, `UPDATE scope SET path = 'tampered'::ltree WHERE id = $1`, c.repo)
+	var path string
+	if err := conn.QueryRow(t.Context(), `SELECT path::text FROM scope WHERE id = $1`, c.repo).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	want := "k" + strings.ReplaceAll(c.repo, "-", "")
+	if path == "tampered" || !strings.HasSuffix(path, want) {
+		t.Fatalf("path %q was not recomputed from the UUID after UPDATE (EDD R23)", path)
+	}
+}
+
+func TestCannotUnapproveActiveSkillVersion(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	skillID := newID(t, conn)
+	verID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+		VALUES ($1, 'team/plotlens/validation-regression', $2, 'team', $3, 'd')`, skillID, c.project, c.actor)
+	mustExec(t, conn, `INSERT INTO skill_version (id, skill_id, semver, git_sha, git_path, author_id, approval)
+		VALUES ($1, $2, '1.0.0', 'abc', 'skills/x', $3, 'approved')`, verID, skillID, c.actor)
+	mustExec(t, conn, `UPDATE skill SET active_version_id = $1 WHERE id = $2`, verID, skillID)
+	err := mustFail(t, conn, `UPDATE skill_version SET approval = 'rejected' WHERE id = $1`, verID)
+	if !strings.Contains(strings.ToLower(err.Error()), "approved") {
+		t.Fatalf("error %q does not mention the active-version approval rule", err)
+	}
+}
+
+func TestPoolRoleCannotDeleteOrUpdateAudit(t *testing.T) {
+	dsn, _ := startMigrated(t)
+	ctx := t.Context()
+	st, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	var role string
+	if err := st.pool.QueryRow(ctx, `SELECT current_user`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != "substrate_app" {
+		t.Fatalf("pool current_user = %q, want substrate_app", role)
+	}
+	_, err = st.pool.Exec(ctx, `DELETE FROM memory`)
+	if err == nil {
+		t.Fatal("pool DELETE FROM memory succeeded; the pool must operate as substrate_app")
+	}
+	_, err = st.pool.Exec(ctx, `UPDATE audit SET action = 'tamper'`)
+	if err == nil {
+		t.Fatal("pool UPDATE audit succeeded; the pool must operate as substrate_app")
+	}
+}
+
+func TestPreferenceConstraints(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	_ = mustFail(t, conn, `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'indent', 'tabs', $2)`, c.project, c.actor)
+	mustExec(t, conn, `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'indent', 'tabs', $2)`, c.userScope, c.actor)
+	err := mustFail(t, conn, `INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'indent', 'spaces', $2)`, c.userScope, c.actor)
+	if !isUniqueViolation(err) {
+		t.Fatalf("want unique violation on a second active preference, got %v", err)
+	}
+}
+
+func TestMemoryAndPrincipalChecks(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	_ = mustFail(t, conn, `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'working', 'fact', 't', 'b', '{"project":"x"}', '{"type":"human"}', $2)`, c.project, c.actor)
+	_ = mustFail(t, conn, `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
+		VALUES (gen_random_uuid(), $1, 'owner', $2, 'working', 'fact', 't', 'b', '{"machine":"wsl"}', '{"repo":"x"}', $2)`, c.project, c.actor)
+	mem := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO memory (id, scope_id, visibility, owner_id, tier, kind, title, body, source, verification, created_by)
+		VALUES ($1, $2, 'owner', $3, 'working', 'fact', 't', 'b', '{"machine":"wsl"}', '{"type":"human"}', $3)`, mem, c.project, c.actor)
+	_ = mustFail(t, conn, `INSERT INTO memory_feedback (id, memory_id, principal_id, trust)
+		VALUES (gen_random_uuid(), $1, $2, 'human')`, mem, c.actor)
+	_ = mustFail(t, conn, `INSERT INTO principal (id, kind, display_name, trust) VALUES (gen_random_uuid(), 'agent', 'bot', 'agent_interactive')`)
+}
+
+func TestAuditRowAndNotify(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	listen, err := pgx.Connect(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listen.Close(context.Background()) })
+	if _, err := listen.Exec(t.Context(), `LISTEN substrate_audit`); err != nil {
+		t.Fatal(err)
+	}
+	id := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust) VALUES ($1, 'user', 'auditor', 'human')`, id)
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM audit WHERE subject_type = 'principal' AND subject_id = $1`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("audit rows for principal %s = %d, want 1", id, n)
+	}
+	nctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	note, err := listen.WaitForNotification(nctx)
+	if err != nil {
+		t.Fatalf("pg_notify('substrate_audit') did not fire: %v", err)
+	}
+	if note.Channel != "substrate_audit" {
+		t.Fatalf("channel %q, want substrate_audit", note.Channel)
 	}
 }

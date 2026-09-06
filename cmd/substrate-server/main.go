@@ -2,7 +2,8 @@
 // adapter/CLI REST surface at /v1, and in-process scheduled jobs.
 //
 // /readyz is Postgres-only (EDD R27): a Git or skills-repo outage must never
-// take the service out of rotation.
+// take the service out of rotation. The process stays up when Postgres is down;
+// only /readyz goes 503. /healthz is 200 whenever the process is alive.
 package main
 
 import (
@@ -12,9 +13,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -31,7 +34,7 @@ func main() {
 
 func run() error {
 	addr := flag.String("addr", ":8080", "listen address")
-	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run at start under an advisory lock")
+	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run under an advisory lock")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -39,45 +42,32 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var st *store.Store
-	if *dsn != "" {
-		var err error
-		st, err = store.Open(ctx, *dsn)
-		if err != nil {
-			return fmt.Errorf("store: %w", err)
-		}
-		defer st.Close()
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		return err
+	}
+	return serve(ctx, ln, *dsn)
+}
+
+type runtime struct {
+	store atomic.Pointer[store.Store]
+}
+
+func serve(ctx context.Context, ln net.Listener, dsn string) error {
+	rt := &runtime{}
+	srv := &http.Server{
+		Handler:           newHandler(rt.getStore),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"status":   "ok",
-			"version":  version.Version,
-			"revision": version.Revision(),
-		})
-	})
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := st.Ping(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-				"status": "not_ready",
-				"reason": err.Error(),
-			})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-
-	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+	if dsn != "" {
+		go connectLoop(ctx, dsn, rt)
 	}
 
 	errc := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", *addr, "version", version.Version)
-		errc <- srv.ListenAndServe()
+		slog.Info("listening", "addr", ln.Addr().String(), "version", version.Version)
+		errc <- srv.Serve(ln)
 	}()
 
 	select {
@@ -90,8 +80,67 @@ func run() error {
 		slog.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		err := srv.Shutdown(shutdownCtx)
+		if st := rt.getStore(); st != nil {
+			st.Close()
+		}
+		return err
 	}
+}
+
+func (rt *runtime) getStore() *store.Store {
+	if rt == nil {
+		return nil
+	}
+	return rt.store.Load()
+}
+
+func connectLoop(ctx context.Context, dsn string, rt *runtime) {
+	backoff := time.Second
+	for {
+		st, err := store.Open(ctx, dsn)
+		if err == nil {
+			if old := rt.store.Swap(st); old != nil {
+				old.Close()
+			}
+			slog.Info("store ready")
+			return
+		}
+		slog.Error("store unavailable; retrying", "err", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+		}
+	}
+}
+
+func newHandler(getStore func() *store.Store) http.Handler {
+	if getStore == nil {
+		getStore = func() *store.Store { return nil }
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":   "ok",
+			"version":  version.Version,
+			"revision": version.Revision(),
+		})
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := getStore().Ping(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"status": "not_ready",
+				"reason": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

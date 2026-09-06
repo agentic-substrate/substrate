@@ -35,7 +35,7 @@ vuln:
 sqlc:
 	sqlc generate
 
-## smoke: build the real server, boot it against Postgres, hit it.
+## smoke: boot the real server with no database; /healthz 200, /readyz 503.
 smoke: build
 	./scripts/smoke.sh
 

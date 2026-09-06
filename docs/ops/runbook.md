@@ -28,10 +28,13 @@ What has shipped:
 |---|---|---|
 | 1 | `00001_extensions.sql` | `vector`, `pg_trgm`, `ltree` |
 | 2 | `00002_schema.sql` | EDD §3 identity, scopes (ltree `path`, chain trigger), instructions, memory, skills, review, audit (INSERT-only trigger + `pg_notify('substrate_audit')`) |
-| 3 | `00003_roles.sql` | `substrate_migrate` owns the tables; `substrate_app` is DML-only, **no** `BYPASSRLS`, no `DELETE` on domain tables, `REVOKE UPDATE, DELETE` on `audit` |
+| 3 | `00003_roles.sql` | `substrate_migrate` owns the tables; `substrate_app` is DML-only, **no** `BYPASSRLS`, no `DELETE` on domain tables, `REVOKE UPDATE, DELETE` on `audit`. The request pool assumes `substrate_app` on acquire |
 
-The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. After that the server
-can keep using that DSN; request-path RLS as `substrate_app` is a later issue.
+The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. Migrations run on
+that connection; the request pool then `SET SESSION AUTHORIZATION` / `SET ROLE` to
+`substrate_app` so REVOKEs on `DELETE` and on `audit` actually bind (GOV-1, gotcha 6).
+A Postgres outage must not kill the process: `/healthz` stays 200, `/readyz` is 503, and
+the server retries `store.Open` in the background until the pool pings.
 
 - **Forward:** deploy the new image; the server migrates on boot (`-dsn` / `SUBSTRATE_DSN`).
 - **Backward:** every migration ships a `-- +goose Down`. Roll back by deploying the previous
@@ -69,7 +72,7 @@ restored is not a backup.
 | Failure | Behavior | Recovery |
 |---|---|---|
 | Server down | Adapter serves already-rendered config; `context.get` falls back to the local FTS cache; writes queue in the outbox | Automatic on reconnect |
-| Postgres down | `/readyz` fails, server returns 503, adapters treat it as "server down" | Restart; restore if needed |
+| Postgres down | `/healthz` stays 200; `/readyz` is 503; the process retries the store in the background | Automatic when Postgres returns |
 | Ollama down | Memories store with `embedding NULL`; search degrades to FTS/trigram | Backfill job |
 | Skills repo unreachable | Adapter keeps the last linked versions; `/readyz` is unaffected by design | Automatic |
 | Bad instruction rendered everywhere | — | `substrate review revert <audit-id>` → broadcast → all machines re-render within 5 min |

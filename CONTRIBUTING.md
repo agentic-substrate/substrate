@@ -18,7 +18,7 @@ resolve, a failure mode the runbook misses.
 ```sh
 make check     # fmt, vet, lint, race tests, govulncheck — everything CI's `go` job runs
 make build     # static binaries into ./bin
-make smoke     # boots the real server against Postgres (Docker or SUBSTRATE_DSN) and hits /healthz and /readyz
+make smoke     # boots the real server with no database; /healthz 200 and /readyz 503
 make test      # tests alone; coverage is printed, never gated
 sqlc generate  # or `make sqlc` — regenerate internal/store after changing migrations/ or queries.sql
 
@@ -31,9 +31,10 @@ stdlib CVEs and CI fails on them. On this project's dev machine Go lives at `/us
 `govulncheck` is fetched on demand by `make vuln`. `sqlc` is needed when changing `migrations/`
 or `internal/store/queries.sql`; generated files are committed.
 
-`make smoke` and the store integration tests boot Postgres 16 with pgvector via Docker. They
-prefer `pgvector/pgvector:pg16`, and fall back to building `testdata/pgvector` from
-`postgres:16-alpine` if that pull fails. Set `SUBSTRATE_DSN` to skip the throwaway container.
+`make smoke` boots the server with no database and asserts `/healthz` 200 and `/readyz` 503
+(EDD §16: a Postgres outage must not kill the process). Store integration tests boot Postgres 16
+with pgvector via Docker. They prefer `pgvector/pgvector:pg16`, and fall back to building
+`testdata/pgvector` from `postgres:16-alpine` if that pull fails.
 
 ## Tests
 
