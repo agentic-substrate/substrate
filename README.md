@@ -52,7 +52,7 @@ Reasoning and what we're *not* building: [`docs/product/positioning.md`](docs/pr
 Requires Go 1.26.6+ (the floor in `go.mod`; earlier 1.26 patches carry stdlib CVEs that `govulncheck` fails CI on).
 
 ```sh
-git clone https://github.com/jacorbello/substrate.git
+git clone https://github.com/agentic-substrate/substrate.git
 cd substrate
 
 make build     # static binaries into ./bin

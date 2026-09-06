@@ -42,4 +42,4 @@ See [`docs/product/non-goals.md`](docs/product/non-goals.md) for the reasoning. 
 harness, not a tracker, not SaaS, not event-sourced, no auto-promotion to global scope, and no
 claim that prompt injection is solved.
 
-[project board]: https://github.com/users/jacorbello/projects
+[project board]: https://github.com/orgs/agentic-substrate/projects/1
