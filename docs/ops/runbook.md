@@ -29,6 +29,7 @@ What has shipped:
 | 1 | `00001_extensions.sql` | `vector`, `pg_trgm`, `ltree` |
 | 2 | `00002_schema.sql` | EDD §3 identity, scopes (ltree `path`, chain trigger), instructions, memory, skills, review, audit (INSERT-only trigger + `pg_notify('substrate_audit')`) |
 | 3 | `00003_roles.sql` | `substrate_migrate` owns the tables; `substrate_app` is DML-only, **no** `BYPASSRLS`, no `DELETE` on domain tables, `REVOKE UPDATE, DELETE` on `audit`. The request pool assumes `substrate_app` on acquire |
+| 4 | `00004_rls.sql` | `ENABLE` + `FORCE ROW LEVEL SECURITY` on `instruction`, `preference`, `memory`, `skill`, `review_item`; `content_read` / `content_write` / `content_update` policies; STABLE `scope_org` / `scope_team` / `scope_project` / `scope_writable`. Session GUCs are `substrate.actor_id`, `substrate.team_ids`, `substrate.org_id`, `substrate.granted_project_ids`, `substrate.is_admin` — spelled identically in SQL and in the Go middleware. |
 
 The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. Migrations run on
 that connection; the request pool then `SET SESSION AUTHORIZATION` / `SET ROLE` to
