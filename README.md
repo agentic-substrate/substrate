@@ -86,8 +86,11 @@ vector neighbour can never outrank a typed filename or symbol (MEM-3).
 `POST /mcp` is the streamable-HTTP MCP endpoint (EDD §4.1). Bearer auth is required;
 unauthenticated requests are rejected before the MCP handler runs. Rate limiting is
 Traefik's job, not the process. Domain packages register tools on the server
-`internal/mcpx` provides. Phase 1 exposes `memory.write`, `memory.search`, and
-`memory.supersede`. Agents always write `unverified`; supersede never deletes.
+`internal/mcpx` provides. Phase 1 exposes `context.get`, `memory.write`, `memory.search`,
+and `memory.supersede`. `context.get` compiles instructions, preferences, mandatory
+items, keyword-retrieved memories, and a skill index under the documented conservative
+token estimator; instructions, preferences, and mandatory items are never trimmed.
+Agents always write `unverified`; supersede never deletes.
 
 The operator CLI mints and revokes bearer tokens. The token is printed once
 and stored only as a SHA-256 hash; agent tokens expire in 24 hours (EDD R3).
