@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentic-substrate/substrate/internal/compiler"
 	"github.com/agentic-substrate/substrate/internal/embed"
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
@@ -170,7 +171,8 @@ func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, lo
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mcpSrv := mcpx.New("substrate", version.Version)
-	memory.Register(mcpSrv, getStore, embedder)
+	memSvc := memory.Register(mcpSrv, getStore, embedder)
+	compiler.Register(mcpSrv, getStore, memSvc)
 	mux.Handle("/mcp", mcpSrv.Handler())
 	return identity.Middleware(lookup)(mux)
 }

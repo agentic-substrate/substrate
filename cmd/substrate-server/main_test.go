@@ -203,7 +203,7 @@ func TestMCPInitializeAndListTools(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"memory.write", "memory.search", "memory.supersede"} {
+	for _, want := range []string{"context.get", "memory.write", "memory.search", "memory.supersede"} {
 		if !names[want] {
 			t.Fatalf("production MCP missing %s; got %v", want, names)
 		}
