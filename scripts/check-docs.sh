@@ -19,12 +19,12 @@ changed=$(git diff --name-only "$BASE"...HEAD)
 
 # surface-glob<TAB>required-doc<TAB>why
 PAIRS=$(cat <<'EOF'
-cmd/*	README.md	the commands and quickstart README documents
-scripts/*	CONTRIBUTING.md	the verification commands contributors run
-Makefile	CONTRIBUTING.md	the verification commands contributors run
-.github/workflows/*	CONTRIBUTING.md	what CI requires of a PR
-migrations/*	docs/ops/runbook.md	the migration and restore procedure
-deploy/*	docs/ops/runbook.md	how the system is deployed and recovered
+cmd/*	README.md	it documents the commands and the quickstart
+scripts/*	CONTRIBUTING.md	it documents the verification commands contributors run
+Makefile	CONTRIBUTING.md	it documents the verification commands contributors run
+.github/workflows/*	CONTRIBUTING.md	it documents what CI requires of a PR
+migrations/*	docs/ops/runbook.md	it documents the migration and restore procedure
+deploy/*	docs/ops/runbook.md	it documents how the system is deployed and recovered
 EOF
 )
 
@@ -40,7 +40,7 @@ while IFS=$'\t' read -r glob doc why; do
   done <<<"$changed"
   [[ -n "$hit" ]] || continue
   if ! grep -qxF "$doc" <<<"$changed"; then
-    echo "check-docs: '$hit' changed but '$doc' did not — it documents $why." >&2
+    echo "check-docs: '$hit' changed but '$doc' did not — $why." >&2
     fail=1
   fi
 done <<<"$PAIRS"
