@@ -3,7 +3,7 @@
 GO      ?= go
 BIN     ?= bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/jacorbello/substrate/internal/version.Version=$(VERSION)
+LDFLAGS := -X github.com/agentic-substrate/substrate/internal/version.Version=$(VERSION)
 
 .PHONY: all build test lint vet fmt-check vuln smoke clean check
 

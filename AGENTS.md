@@ -47,7 +47,7 @@ translate:
 | `ACP_DENIED_SCOPE`, `ACP_NEEDS_REVIEW` | `SUBSTRATE_DENIED_SCOPE`, `SUBSTRATE_NEEDS_REVIEW` |
 | `acp_audit`, `acp_tool_latency_seconds` | `substrate_audit`, `substrate_tool_latency_seconds` |
 | database `acp`, buckets `acp-sessions` / `acp-backups` | `substrate`, `substrate-sessions` / `substrate-backups` |
-| module `acp/` | `github.com/jacorbello/substrate` |
+| module `acp/` | `github.com/agentic-substrate/substrate` |
 
 **Never introduce a new `acp` identifier.** These strings end up in error messages, backup
 paths, and Kubernetes object names, where renaming them later is a migration.

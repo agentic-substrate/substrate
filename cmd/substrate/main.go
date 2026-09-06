@@ -7,7 +7,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/jacorbello/substrate/internal/version"
+	"github.com/agentic-substrate/substrate/internal/version"
 )
 
 func main() {

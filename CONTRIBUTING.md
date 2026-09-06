@@ -57,10 +57,12 @@ the only status branch protection knows about, so job names can change without t
 settings. `main` is protected: linear history, squash-only, no force-push, no deletion, and the
 `gate` check required.
 
-There is **no merge queue** — GitHub only offers one on organization-owned repositories, and
-this repo lives on a personal account. Because of that the gate uses `if: always()` so it fails
-*closed*: cancelling a run leaves the gate red rather than letting the PR through. Re-run the
-job rather than looking for a way around it.
+PRs land through a **merge queue** (squash, all-green grouping), which re-runs the gate against
+the queued merge commit rather than trusting the result from your branch. That is what makes the
+gate's `if: !cancelled()` safe: cancelling a run cannot get a change past the queue's own re-run.
+
+Merge queue requires an organization-owned repository, which is why this repo lives under
+`agentic-substrate` rather than a personal account.
 
 If the gate is red, read the failing job's log rather than its status — a check can go red for a
 reason unrelated to what it is meant to catch.

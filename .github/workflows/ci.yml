@@ -114,16 +114,15 @@ jobs:
   # The single required check. Its name is stable, so job names above can churn
   # without ever touching branch protection again.
   #
-  # `always()` fails CLOSED: a cancelled run leaves the gate red rather than
-  # letting a cancelled PR merge. The alternative, `!cancelled()`, fails OPEN and
-  # is only safe behind a merge queue that re-runs this gate against the merge
-  # commit — and merge queue requires an organization-owned repo, which this is
-  # not. If this repo ever moves to an org and gains a queue, `!cancelled()`
-  # becomes the better choice. Until then, closed is correct: the cost is
-  # re-running a cancelled job, not a bypassed check.
+  # `!cancelled()` rather than `always()`, and the merge queue is why. `always()`
+  # keeps the gate red forever on a cancelled run, which can wedge the queue;
+  # `!cancelled()` fails OPEN on cancellation, which would be unsafe on its own
+  # but is not here — `main` requires the queue, and the queue re-runs this gate
+  # against the merge commit, so a human cancelling a PR run cannot merge past
+  # it. If the merge queue is ever removed, switch this back to `always()`.
   gate:
     name: gate
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [go, smoke, docs, workflows]
     runs-on: ubuntu-latest
     steps:
