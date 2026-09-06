@@ -349,7 +349,11 @@ func TestMapOrderDeterminism(t *testing.T) {
 func TestSkillsIndexNeverInlinesBody(t *testing.T) {
 	const planted = "SKILL_BODY_MUST_NOT_INLINE"
 	cfg := EffectiveConfig{
-		Skills:      []Skill{{Name: "team/plotlens/validation", Description: "regression checks"}},
+		Skills: []Skill{{
+			Name:        "team/plotlens/validation",
+			Description: "regression checks",
+			Body:        planted,
+		}},
 		GeneratedAt: "2026-01-02T15:04:05Z",
 	}
 	got := mustRender(t, TargetAgents, cfg)
@@ -410,10 +414,11 @@ func TestAgentsSectionOrder(t *testing.T) {
 }
 
 func stripFooter(s string) string {
-	if i := strings.LastIndex(s, "<!-- sha256:"); i >= 0 {
-		return s[:i]
+	body, ok := dropTrailingFooterLine(s)
+	if !ok {
+		return s
 	}
-	return s
+	return body
 }
 
 func TestDriftHashIsSha256OfBody(t *testing.T) {
@@ -427,6 +432,84 @@ func TestDriftHashIsSha256OfBody(t *testing.T) {
 	if DriftHash(got) != want {
 		t.Fatalf("DriftHash %q, want sha256(body) %q", DriftHash(got), want)
 	}
+}
+
+func TestDriftHashTrailingFooterOnly(t *testing.T) {
+	const planted = "<!-- sha256:deadbeef -->"
+	cfg := EffectiveConfig{
+		Instructions: []instruction.Record{
+			{Kind: "rule", Key: "trap.marker", Body: "\n" + planted},
+			{Kind: "rule", Key: "zzz.after", Body: "must-be-hashed"},
+		},
+		GeneratedAt: "2026-01-02T15:04:05Z",
+	}
+	full := mustRender(t, TargetAgents, cfg)
+	if !strings.Contains(full, "\n"+planted+"\n") {
+		t.Fatalf("planted marker is not on its own line:\n%s", full)
+	}
+	body, ok := dropTrailingFooterLine(full)
+	if !ok {
+		t.Fatal("rendered output missing trailing footer")
+	}
+	if !strings.Contains(body, planted) {
+		t.Fatal("interior marker was dropped with the footer")
+	}
+	if !strings.Contains(body, "must-be-hashed") {
+		t.Fatal("content after interior marker missing from body")
+	}
+
+	t.Run("interior marker does not change coverage", func(t *testing.T) {
+		if DriftHash(full) != sha256Hex(body) {
+			t.Fatalf("DriftHash cut at interior %q\n got %s\nwant %s", planted, DriftHash(full), sha256Hex(body))
+		}
+		edited := strings.Replace(full, "must-be-hashed", "TAMPERED", 1)
+		if DriftHash(full) == DriftHash(edited) {
+			t.Fatal("edit after interior <!-- sha256: did not change DriftHash")
+		}
+	})
+
+	t.Run("footer removed hashes all remaining bytes", func(t *testing.T) {
+		if DriftHash(body) != sha256Hex(body) {
+			t.Fatalf("footer removed: DriftHash cut at an interior marker\n got %s\nwant %s", DriftHash(body), sha256Hex(body))
+		}
+		tampered := strings.Replace(body, "must-be-hashed", "TAMPERED", 1)
+		if DriftHash(body) == DriftHash(tampered) {
+			t.Fatal("edit after interior <!-- sha256: was invisible once the real footer was gone")
+		}
+	})
+
+	t.Run("mangled trailing footer is not stripped", func(t *testing.T) {
+		mangled := body + planted + "\n"
+		if DriftHash(mangled) == DriftHash(full) {
+			t.Fatal("replacing the real footer with <!-- sha256:deadbeef --> left DriftHash unchanged")
+		}
+		if DriftHash(mangled) != sha256Hex(mangled) {
+			t.Fatal("mangled footer was still excluded from the hash")
+		}
+	})
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// dropTrailingFooterLine removes the last line of a freshly rendered file when
+// that line is an appendFooter comment. It finds the last newline, not a
+// substring a body can contain.
+func dropTrailingFooterLine(s string) (string, bool) {
+	if !strings.HasSuffix(s, " -->\n") {
+		return "", false
+	}
+	i := strings.LastIndex(s[:len(s)-1], "\n")
+	if i < 0 {
+		return "", false
+	}
+	line := s[i+1:]
+	if !strings.HasPrefix(line, "<!-- sha256:") || !strings.Contains(line, " generated-at:") {
+		return "", false
+	}
+	return s[:i+1], true
 }
 
 func TestNoTimestampOutsideFooter(t *testing.T) {

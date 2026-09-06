@@ -38,10 +38,12 @@ const (
 
 const cursorFrontmatter = "---\nalwaysApply: true\n---\n"
 
-// Skill is an index entry. A SKILL.md body is never inlined (EDD §5.2).
+// Skill is an index entry. Body, if present, is the SKILL.md contents and
+// must never be inlined (EDD §5.2, CTX-2).
 type Skill struct {
 	Name        string
 	Description string
+	Body        string
 }
 
 // EffectiveConfig is the canonical intermediate rendered per target (EDD §6).
@@ -216,6 +218,7 @@ func buildView(cfg EffectiveConfig) view {
 	})
 	skillItems := make([]skillItem, 0, len(skills))
 	for _, s := range skills {
+		// Body stays off the view so a template change alone cannot inline it (CTX-2).
 		skillItems = append(skillItems, skillItem{Name: lf(s.Name), Description: lf(s.Description)})
 	}
 
@@ -247,13 +250,44 @@ func appendFooter(body, generatedAt string) string {
 	return body + fmt.Sprintf("<!-- sha256:%s generated-at:%s -->\n", hex.EncodeToString(sum[:]), generatedAt)
 }
 
-// DriftHash is the sha256 of content with the footer comment excluded (R14).
-// Including the footer would make generated-at look like drift on every cycle.
+// DriftHash is the sha256 of content with a trailing appendFooter comment
+// excluded (R14). Including the footer would make generated-at look like
+// drift on every cycle. The adapter hashes files read from disk, so the cut
+// must be a suffix of the exact footer shape — not a substring search a
+// hand-edit can plant in the body.
 func DriftHash(content string) string {
-	body := content
-	if i := strings.LastIndex(content, "<!-- sha256:"); i >= 0 {
-		body = content[:i]
-	}
-	sum := sha256.Sum256([]byte(body))
+	sum := sha256.Sum256([]byte(stripTrailingFooter(content)))
 	return hex.EncodeToString(sum[:])
+}
+
+func stripTrailingFooter(content string) string {
+	const suffix = " -->\n"
+	if !strings.HasSuffix(content, suffix) {
+		return content
+	}
+	i := strings.LastIndex(content[:len(content)-1], "\n")
+	if i < 0 {
+		return content
+	}
+	line := content[i+1:]
+	const head = "<!-- sha256:"
+	const mid = " generated-at:"
+	if !strings.HasPrefix(line, head) {
+		return content
+	}
+	hexPart, after, ok := strings.Cut(line[len(head):], mid)
+	if !ok || len(hexPart) != 64 || !lowerHex(hexPart) || !strings.HasSuffix(after, suffix) {
+		return content
+	}
+	return content[:i+1]
+}
+
+func lowerHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
