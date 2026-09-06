@@ -67,7 +67,7 @@ func Check(action string, sc scope.Path, p identity.Principal) error {
 
 func isWrite(action string) bool {
 	switch action {
-	case "memory.write", "memory.supersede", "instruction.propose", "instruction.write", "preference.write", "skill.propose":
+	case "memory.write", "memory.supersede", "instruction.propose", "instruction.write", "preference.write", "skill.propose", "review.create":
 		return true
 	default:
 		return false

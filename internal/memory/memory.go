@@ -17,6 +17,10 @@ import (
 type Service struct {
 	store    func() *store.Store
 	embedder Embedder
+	// FailAfterReceipt is invoked inside the batch transaction after the
+	// ingest_receipt row and before the memory row so tests can abort the
+	// transaction (Gotcha 10). Production leaves it nil.
+	FailAfterReceipt func() error
 }
 
 // New returns a Service that loads the store per request so /mcp can serve

@@ -19,33 +19,76 @@ import (
 // requested status (Gotcha 4). Missing scope, source, or verification is
 // rejected with a message naming the field (MEM-1).
 func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
-	if err := validateWrite(in); err != nil {
+	prep, err := prepareWrite(ctx, in)
+	if err != nil {
 		return WriteOut{}, err
+	}
+	st, err := s.requireStore()
+	if err != nil {
+		return WriteOut{}, err
+	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return WriteOut{}, fmt.Errorf("memory.write: %w", err)
+	}
+
+	var stored store.MemoryStatus
+	err = st.TxChecked(ctx, "memory.write", prep.sc, func(tx pgx.Tx) error {
+		stored, err = prep.insert(ctx, tx, id, prep.owner)
+		return err
+	})
+	if err != nil {
+		return WriteOut{}, err
+	}
+	// After the row is durable. A failure here leaves embedding NULL for the
+	// backfill job rather than failing a write that already succeeded — losing
+	// the memory because the GPU is busy would be the worse outcome (EDD §8.4).
+	_ = s.storeEmbedding(ctx, st, id.String(), prep.title, prep.body)
+	return WriteOut{ID: id.String(), Status: string(stored)}, nil
+}
+
+type preparedWrite struct {
+	sc     scope.Path
+	owner  uuid.UUID
+	vis    store.Visibility
+	kind   store.MemoryKind
+	tier   store.MemoryTier
+	status store.MemoryStatus
+	title  string
+	body   string
+	ids    []string
+	src    []byte
+	ver    []byte
+}
+
+func prepareWrite(ctx context.Context, in WriteIn) (preparedWrite, error) {
+	if err := validateWrite(in); err != nil {
+		return preparedWrite{}, err
 	}
 
 	p := identity.FromContext(ctx)
 	if p == nil {
-		return WriteOut{}, store.ErrNoPrincipal
+		return preparedWrite{}, store.ErrNoPrincipal
 	}
 	if err := agentVerification(p, in.Verification.Type); err != nil {
-		return WriteOut{}, err
+		return preparedWrite{}, err
 	}
 
 	sc, err := scope.Parse(in.Scope)
 	if err != nil {
-		return WriteOut{}, fmt.Errorf("memory.write: scope: %w", err)
+		return preparedWrite{}, fmt.Errorf("memory.write: scope: %w", err)
 	}
 	kind, err := parseKind(in.Kind)
 	if err != nil {
-		return WriteOut{}, err
+		return preparedWrite{}, err
 	}
 	vis, err := parseVisibility(in.Visibility)
 	if err != nil {
-		return WriteOut{}, err
+		return preparedWrite{}, err
 	}
 	tier, err := parseTier(in.Tier)
 	if err != nil {
-		return WriteOut{}, err
+		return preparedWrite{}, err
 	}
 	status := decideStatus(p, in.Status)
 
@@ -59,69 +102,56 @@ func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
 		idIn = append(idIn, stripControls(id))
 	}
 	ids := extractIdentifiers(body, idIn)
+	if ids == nil {
+		ids = []string{}
+	}
 	machine := ""
 	if in.Source != nil {
 		machine = in.Source.Machine
 	}
 	if err := scanStored(title, body, in.Kind, in.Verification.Type, machine, ids); err != nil {
-		return WriteOut{}, err
+		return preparedWrite{}, err
 	}
 
 	src, err := json.Marshal(map[string]string{"machine": in.Source.Machine})
 	if err != nil {
-		return WriteOut{}, fmt.Errorf("memory.write: source: %w", err)
+		return preparedWrite{}, fmt.Errorf("memory.write: source: %w", err)
 	}
 	ver, err := json.Marshal(map[string]string{"type": in.Verification.Type})
 	if err != nil {
-		return WriteOut{}, fmt.Errorf("memory.write: verification: %w", err)
+		return preparedWrite{}, fmt.Errorf("memory.write: verification: %w", err)
 	}
+	return preparedWrite{
+		sc: sc, owner: p.ID, vis: vis, kind: kind, tier: tier, status: status,
+		title: title, body: body, ids: ids, src: src, ver: ver,
+	}, nil
+}
 
-	st, err := s.requireStore()
+func (p preparedWrite) insert(ctx context.Context, tx pgx.Tx, id, owner uuid.UUID) (store.MemoryStatus, error) {
+	q := store.New(tx)
+	scopeID, err := resolveScopeID(ctx, q, p.sc)
 	if err != nil {
-		return WriteOut{}, err
+		return "", err
 	}
-
-	id, err := uuid.NewV7()
-	if err != nil {
-		return WriteOut{}, fmt.Errorf("memory.write: %w", err)
-	}
-
-	var stored store.MemoryStatus
-	err = st.TxChecked(ctx, "memory.write", sc, func(tx pgx.Tx) error {
-		q := store.New(tx)
-		scopeID, err := resolveScopeID(ctx, q, sc)
-		if err != nil {
-			return err
-		}
-		row, err := q.InsertMemory(ctx, store.InsertMemoryParams{
-			ID:           pgUUID(id),
-			ScopeID:      pgUUID(scopeID),
-			Visibility:   vis,
-			OwnerID:      pgUUID(p.ID),
-			Tier:         tier,
-			Kind:         kind,
-			Title:        title,
-			Body:         body,
-			Identifiers:  ids,
-			Status:       status,
-			Source:       src,
-			Verification: ver,
-			CreatedBy:    pgUUID(p.ID),
-		})
-		if err != nil {
-			return fmt.Errorf("memory.write: %w", err)
-		}
-		stored = row.Status
-		return nil
+	row, err := q.InsertMemory(ctx, store.InsertMemoryParams{
+		ID:           pgUUID(id),
+		ScopeID:      pgUUID(scopeID),
+		Visibility:   p.vis,
+		OwnerID:      pgUUID(owner),
+		Tier:         p.tier,
+		Kind:         p.kind,
+		Title:        p.title,
+		Body:         p.body,
+		Identifiers:  p.ids,
+		Status:       p.status,
+		Source:       p.src,
+		Verification: p.ver,
+		CreatedBy:    pgUUID(owner),
 	})
 	if err != nil {
-		return WriteOut{}, err
+		return "", fmt.Errorf("memory.write: %w", err)
 	}
-	// After the row is durable. A failure here leaves embedding NULL for the
-	// backfill job rather than failing a write that already succeeded — losing
-	// the memory because the GPU is busy would be the worse outcome (EDD §8.4).
-	_ = s.storeEmbedding(ctx, st, id.String(), title, body)
-	return WriteOut{ID: id.String(), Status: string(stored)}, nil
+	return row.Status, nil
 }
 
 func validateWrite(in WriteIn) error {

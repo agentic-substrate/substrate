@@ -11,6 +11,71 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const decideReviewItem = `-- name: DecideReviewItem :one
+UPDATE review_item
+SET status = $2, decided_by = $3, decided_at = now(), reason = $4
+WHERE id = $1 AND status = 'open'
+RETURNING id, status, decided_by, decided_at, reason
+`
+
+type DecideReviewItemParams struct {
+	ID        pgtype.UUID
+	Status    ReviewStatus
+	DecidedBy pgtype.UUID
+	Reason    *string
+}
+
+type DecideReviewItemRow struct {
+	ID        pgtype.UUID
+	Status    ReviewStatus
+	DecidedBy pgtype.UUID
+	DecidedAt pgtype.Timestamptz
+	Reason    *string
+}
+
+func (q *Queries) DecideReviewItem(ctx context.Context, arg DecideReviewItemParams) (DecideReviewItemRow, error) {
+	row := q.db.QueryRow(ctx, decideReviewItem,
+		arg.ID,
+		arg.Status,
+		arg.DecidedBy,
+		arg.Reason,
+	)
+	var i DecideReviewItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.Reason,
+	)
+	return i, err
+}
+
+const getIngestReceipt = `-- name: GetIngestReceipt :one
+SELECT client_id, principal_id, subject_type, subject_id
+FROM ingest_receipt
+WHERE client_id = $1
+`
+
+type GetIngestReceiptRow struct {
+	ClientID    pgtype.UUID
+	PrincipalID pgtype.UUID
+	SubjectType string
+	SubjectID   pgtype.UUID
+}
+
+func (q *Queries) GetIngestReceipt(ctx context.Context, clientID pgtype.UUID) (GetIngestReceiptRow, error) {
+	row := q.db.QueryRow(ctx, getIngestReceipt, clientID)
+	var i GetIngestReceiptRow
+	err := row.Scan(
+		&i.ClientID,
+		&i.PrincipalID,
+		&i.SubjectType,
+		&i.SubjectID,
+	)
+	return i, err
+}
+
 const getMemory = `-- name: GetMemory :one
 SELECT id, scope_id, visibility, owner_id, tier, kind, title, body, identifiers,
   status, superseded_by, source, verification, created_by
@@ -116,6 +181,28 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 	return err
 }
 
+const insertIngestReceipt = `-- name: InsertIngestReceipt :exec
+INSERT INTO ingest_receipt (client_id, principal_id, subject_type, subject_id)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertIngestReceiptParams struct {
+	ClientID    pgtype.UUID
+	PrincipalID pgtype.UUID
+	SubjectType string
+	SubjectID   pgtype.UUID
+}
+
+func (q *Queries) InsertIngestReceipt(ctx context.Context, arg InsertIngestReceiptParams) error {
+	_, err := q.db.Exec(ctx, insertIngestReceipt,
+		arg.ClientID,
+		arg.PrincipalID,
+		arg.SubjectType,
+		arg.SubjectID,
+	)
+	return err
+}
+
 const insertMemory = `-- name: InsertMemory :one
 INSERT INTO memory (
   id, scope_id, visibility, owner_id, tier, kind, title, body, identifiers,
@@ -190,6 +277,55 @@ func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgePara
 	return err
 }
 
+const insertReviewItem = `-- name: InsertReviewItem :one
+INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, kind, scope_id, team_id, payload, status, proposed_by, created_at
+`
+
+type InsertReviewItemParams struct {
+	ID         pgtype.UUID
+	Kind       ReviewKind
+	ScopeID    pgtype.UUID
+	TeamID     pgtype.UUID
+	Payload    []byte
+	ProposedBy pgtype.UUID
+}
+
+type InsertReviewItemRow struct {
+	ID         pgtype.UUID
+	Kind       ReviewKind
+	ScopeID    pgtype.UUID
+	TeamID     pgtype.UUID
+	Payload    []byte
+	Status     ReviewStatus
+	ProposedBy pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) InsertReviewItem(ctx context.Context, arg InsertReviewItemParams) (InsertReviewItemRow, error) {
+	row := q.db.QueryRow(ctx, insertReviewItem,
+		arg.ID,
+		arg.Kind,
+		arg.ScopeID,
+		arg.TeamID,
+		arg.Payload,
+		arg.ProposedBy,
+	)
+	var i InsertReviewItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ScopeID,
+		&i.TeamID,
+		&i.Payload,
+		&i.Status,
+		&i.ProposedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listActiveInstructions = `-- name: ListActiveInstructions :many
 SELECT id, scope_id, kind, key, body
 FROM instruction
@@ -259,6 +395,145 @@ func (q *Queries) ListActivePreferences(ctx context.Context, scopeIds []pgtype.U
 			&i.ScopeID,
 			&i.Key,
 			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listApprovedSkills = `-- name: ListApprovedSkills :many
+SELECT s.name, v.git_path, v.git_sha
+FROM skill s
+JOIN skill_version v ON v.id = s.active_version_id
+WHERE s.active_version_id IS NOT NULL
+ORDER BY s.name
+`
+
+type ListApprovedSkillsRow struct {
+	Name    string
+	GitPath string
+	GitSha  string
+}
+
+func (q *Queries) ListApprovedSkills(ctx context.Context) ([]ListApprovedSkillsRow, error) {
+	rows, err := q.db.Query(ctx, listApprovedSkills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListApprovedSkillsRow
+	for rows.Next() {
+		var i ListApprovedSkillsRow
+		if err := rows.Scan(&i.Name, &i.GitPath, &i.GitSha); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemoryCache = `-- name: ListMemoryCache :many
+SELECT id, scope_id, title, body, identifiers, status, updated_at
+FROM memory
+WHERE status IN ('confirmed', 'probable')
+  AND updated_at > $1
+ORDER BY updated_at ASC
+`
+
+type ListMemoryCacheRow struct {
+	ID          pgtype.UUID
+	ScopeID     pgtype.UUID
+	Title       string
+	Body        string
+	Identifiers []string
+	Status      MemoryStatus
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListMemoryCache(ctx context.Context, since pgtype.Timestamptz) ([]ListMemoryCacheRow, error) {
+	rows, err := q.db.Query(ctx, listMemoryCache, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMemoryCacheRow
+	for rows.Next() {
+		var i ListMemoryCacheRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Title,
+			&i.Body,
+			&i.Identifiers,
+			&i.Status,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviewItems = `-- name: ListReviewItems :many
+SELECT id, kind, scope_id, team_id, payload, status, proposed_by, decided_by, decided_at, reason, created_at
+FROM review_item
+WHERE ($1::uuid IS NULL OR team_id = $1)
+  AND ($2::text IS NULL OR status = $2::review_status)
+ORDER BY created_at DESC
+`
+
+type ListReviewItemsParams struct {
+	TeamID pgtype.UUID
+	Status *string
+}
+
+type ListReviewItemsRow struct {
+	ID         pgtype.UUID
+	Kind       ReviewKind
+	ScopeID    pgtype.UUID
+	TeamID     pgtype.UUID
+	Payload    []byte
+	Status     ReviewStatus
+	ProposedBy pgtype.UUID
+	DecidedBy  pgtype.UUID
+	DecidedAt  pgtype.Timestamptz
+	Reason     *string
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ListReviewItems(ctx context.Context, arg ListReviewItemsParams) ([]ListReviewItemsRow, error) {
+	rows, err := q.db.Query(ctx, listReviewItems, arg.TeamID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReviewItemsRow
+	for rows.Next() {
+		var i ListReviewItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.ScopeID,
+			&i.TeamID,
+			&i.Payload,
+			&i.Status,
+			&i.ProposedBy,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.Reason,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
