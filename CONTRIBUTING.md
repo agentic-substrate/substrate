@@ -54,8 +54,13 @@ whose message names the fix, not a `t.Skip`. CI asserts that no test skipped.
 
 One workflow, `ci.yml`. A single required check named **`gate`** aggregates every job; that is
 the only status branch protection knows about, so job names can change without touching repo
-settings. `main` is protected and PRs land through a merge queue, which re-runs the gate against
-the queued merge commit.
+settings. `main` is protected: linear history, squash-only, no force-push, no deletion, and the
+`gate` check required.
+
+There is **no merge queue** — GitHub only offers one on organization-owned repositories, and
+this repo lives on a personal account. Because of that the gate uses `if: always()` so it fails
+*closed*: cancelling a run leaves the gate red rather than letting the PR through. Re-run the
+job rather than looking for a way around it.
 
 If the gate is red, read the failing job's log rather than its status — a check can go red for a
 reason unrelated to what it is meant to catch.
