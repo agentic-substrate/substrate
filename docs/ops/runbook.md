@@ -57,3 +57,5 @@ restored is not a backup.
 | Skills repo unreachable | Adapter keeps the last linked versions; `/readyz` is unaffected by design | Automatic |
 | Bad instruction rendered everywhere | — | `substrate review revert <audit-id>` → broadcast → all machines re-render within 5 min |
 | Token leaked | — | `substrate token revoke`; the audit log shows every use by `request_id` |
+
+See [the nonexistent section](docs/ops/runbook.md#there-is-no-such-heading) and [a missing file](docs/nope.md).
