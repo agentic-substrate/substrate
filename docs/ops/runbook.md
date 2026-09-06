@@ -1,6 +1,6 @@
 # Operations runbook
 
-**Last reviewed:** 2026-09-05 · **Re-read cadence:** after every incident, and at each phase exit
+**Last reviewed:** 2026-09-06 · **Re-read cadence:** after every incident, and at each phase exit
 
 Substrate is a homelab single-node deployment behind Tailscale. There is no HA and none is
 planned; adapters are designed to survive a 24-hour server outage without data loss, and that
@@ -19,9 +19,21 @@ is the availability story.
 ## Migrations
 
 Migrations are `goose` SQL files in `migrations/`, applied by `substrate-server` at startup
-under a Postgres advisory lock so a second replica cannot double-apply.
+under a Postgres advisory lock (`pg_try_advisory_lock` via goose's session locker) so a second
+replica cannot double-apply.
 
-- **Forward:** deploy the new image; the server migrates on boot and logs each version.
+What has shipped:
+
+| Version | File | What it does |
+|---|---|---|
+| 1 | `00001_extensions.sql` | `vector`, `pg_trgm`, `ltree` |
+| 2 | `00002_schema.sql` | EDD §3 identity, scopes (ltree `path`, chain trigger), instructions, memory, skills, review, audit (INSERT-only trigger + `pg_notify('substrate_audit')`) |
+| 3 | `00003_roles.sql` | `substrate_migrate` owns the tables; `substrate_app` is DML-only, **no** `BYPASSRLS`, no `DELETE` on domain tables, `REVOKE UPDATE, DELETE` on `audit` |
+
+The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. After that the server
+can keep using that DSN; request-path RLS as `substrate_app` is a later issue.
+
+- **Forward:** deploy the new image; the server migrates on boot (`-dsn` / `SUBSTRATE_DSN`).
 - **Backward:** every migration ships a `-- +goose Down`. Roll back by deploying the previous
   image *and* running `goose down-to <version>` manually — the server never auto-downgrades.
 - Domain tables are never `DELETE`d from; state retires via `status`. A migration that drops a
