@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+# Least privilege. Any job needing more asks for it at the job level.
+permissions:
+  contents: read
+
+# Cancel superseded PR runs, but never cancel main or a merge-queue run — a
+# cancelled queue run would leave the gate reporting on nothing.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+
+      - name: test
+        run: go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
+
+      # Fail loudly, never skip: a skipped test is a silently missing check.
+      - name: assert nothing skipped
+        run: |
+          if grep -q -- '--- SKIP' test.log; then
+            echo "A test skipped. Tests must fail with a message naming the fix, not skip." >&2
+            grep -- '--- SKIP' test.log >&2
+            exit 1
+          fi
+          echo "no skipped tests"
+
+      # Printed, not gated. A coverage threshold on a young repo produces tests
+      # shaped like coverage instead of tests shaped like behaviour.
+      - name: coverage (informational)
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Builds the real artifact, boots it against empty state, and hits it.
+      # This catches the class of bug unit tests structurally cannot.
+      - run: make smoke
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: docs currency
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch --no-tags origin "$BASE"
+          scripts/check-docs.sh "origin/$BASE"
+
+      - name: link check
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --no-progress --offline --include-fragments .
+          fail: true
+
+  workflows:
+    name: workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  # The single required check. Its name is stable, so job names above can churn
+  # without ever touching branch protection again.
+  #
+  # `!cancelled()` fails OPEN on a cancelled run, which is safe here only because
+  # `main` requires a merge queue: the queue re-runs this gate against the merge
+  # commit, so a human cancelling a PR run cannot merge past it. If the merge
+  # queue is ever removed, switch this to `always()` — see CONTRIBUTING.md.
+  gate:
+    name: gate
+    if: ${{ !cancelled() }}
+    needs: [go, smoke, docs, workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: check results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "gate: a required job reported '$r'" >&2; exit 1 ;;
+            esac
+          done
+          echo "gate: all required jobs passed"

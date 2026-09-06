@@ -1,0 +1,18 @@
+# Build output
+/bin/
+/dist/
+
+# Local state — the adapter's SQLite store and rendered caches never get committed
+*.sqlite
+*.sqlite-*
+/.substrate/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
