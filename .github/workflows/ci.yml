@@ -40,7 +40,12 @@ jobs:
           version: v2.13.2
 
       - name: test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
+        # pipefail is NOT on by default in Actions' `bash -e` shell: without it
+        # `tee` supplies the exit code and a failing test reports success. A
+        # canary PR caught exactly that here — do not remove this line.
+        run: |
+          set -o pipefail
+          go test -race -covermode=atomic -coverprofile=coverage.out -v ./... 2>&1 | tee test.log
 
       # Fail loudly, never skip: a skipped test is a silently missing check.
       - name: assert nothing skipped
