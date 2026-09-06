@@ -10,10 +10,12 @@ import (
 )
 
 // toolNamePattern is the SDK-permitted set. Dots are required by the EDD;
-// falling back to underscores is a one-line change here (EDD R12).
+// falling back to underscores is a one-line change in CheckToolNames (EDD R12).
 var toolNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
-func checkToolNames(tools []*mcp.Tool) error {
+// CheckToolNames enforces the SDK charset and the EDD's required dot
+// (memory.write). Falling back to underscores is a one-line change here (EDD R12).
+func CheckToolNames(tools []*mcp.Tool) error {
 	for _, t := range tools {
 		if t == nil || t.Name == "" {
 			return fmt.Errorf("tool with empty name")
@@ -28,7 +30,9 @@ func checkToolNames(tools []*mcp.Tool) error {
 	return nil
 }
 
-func toolSchemas(tools []*mcp.Tool) (map[string]json.RawMessage, error) {
+// ToolSchemas returns canonical input schemas keyed by tool name. The error
+// names the tool so a snapshot mismatch is actionable.
+func ToolSchemas(tools []*mcp.Tool) (map[string]json.RawMessage, error) {
 	out := make(map[string]json.RawMessage, len(tools))
 	for _, t := range tools {
 		if t == nil {
@@ -47,7 +51,8 @@ func toolSchemas(tools []*mcp.Tool) (map[string]json.RawMessage, error) {
 	return out, nil
 }
 
-func diffToolSchemas(got, want map[string]json.RawMessage) error {
+// DiffToolSchemas reports the first mismatch. Every error names the tool.
+func DiffToolSchemas(got, want map[string]json.RawMessage) error {
 	seen := make(map[string]struct{}, len(got)+len(want))
 	for name := range got {
 		seen[name] = struct{}{}

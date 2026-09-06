@@ -7,15 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	_ "embed"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/agentic-substrate/substrate/internal/policy"
 )
-
-//go:embed testdata/tool_schemas.json
-var schemaSnapshot []byte
 
 func TestSchemaSnapshotFailsNamingTheTool(t *testing.T) {
 	srv := New("substrate-test", "v0")
@@ -30,21 +25,21 @@ func TestSchemaSnapshotFailsNamingTheTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := toolSchemas(listed.Tools)
+	got, err := ToolSchemas(listed.Tools)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := got["mcpx.test.echo"]; !ok {
 		t.Fatal("expected generated schema for mcpx.test.echo")
 	}
-	if err := checkToolNames(listed.Tools); err != nil {
+	if err := CheckToolNames(listed.Tools); err != nil {
 		t.Fatal(err)
 	}
 
 	want := map[string]json.RawMessage{
 		"mcpx.test.echo": json.RawMessage(`{"type":"object","properties":{"other":{"type":"string"}}}`),
 	}
-	err = diffToolSchemas(got, want)
+	err = DiffToolSchemas(got, want)
 	if err == nil {
 		t.Fatal("expected a mismatch when the input schema changes")
 	}
@@ -53,34 +48,8 @@ func TestSchemaSnapshotFailsNamingTheTool(t *testing.T) {
 	}
 }
 
-func TestSchemaSnapshotMatchesGolden(t *testing.T) {
-	srv := New("substrate-test", "v0")
-	AddTool(srv, &mcp.Tool{
-		Name:        "mcpx.test.echo",
-		Description: "Echo a message.",
-	}, echoTool)
-
-	sess := connect(t, srv)
-	listed, err := sess.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := toolSchemas(listed.Tools)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := loadSchemaSnapshot(schemaSnapshot)
-	if err != nil {
-		b, _ := json.MarshalIndent(got, "", "  ")
-		t.Fatalf("%v\ncurrent schemas:\n%s", err, b)
-	}
-	if err := diffToolSchemas(got, want); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDiffToolSchemasEmptyWant(t *testing.T) {
-	err := diffToolSchemas(map[string]json.RawMessage{
+	err := DiffToolSchemas(map[string]json.RawMessage{
 		"mcpx.test.echo": json.RawMessage(`{}`),
 	}, map[string]json.RawMessage{})
 	if err == nil || !strings.Contains(err.Error(), "mcpx.test.echo") {
@@ -89,11 +58,11 @@ func TestDiffToolSchemasEmptyWant(t *testing.T) {
 }
 
 func TestCheckToolNamesRejectsUnderscoreFallbackNeeded(t *testing.T) {
-	err := checkToolNames([]*mcp.Tool{{Name: "memory write"}})
+	err := CheckToolNames([]*mcp.Tool{{Name: "memory write"}})
 	if err == nil {
 		t.Fatal("expected invalid name")
 	}
-	err = checkToolNames([]*mcp.Tool{{Name: "memory_write"}})
+	err = CheckToolNames([]*mcp.Tool{{Name: "memory_write"}})
 	if err == nil || !strings.Contains(err.Error(), "memory_write") {
 		t.Fatalf("names without dots must name the tool, got %v", err)
 	}
@@ -101,8 +70,19 @@ func TestCheckToolNamesRejectsUnderscoreFallbackNeeded(t *testing.T) {
 
 func TestMapErrorKnownCodes(t *testing.T) {
 	t.Parallel()
-	if mapped := MapError(errors.New("not a policy error")); mapped != nil {
-		t.Fatalf("unknown errors must not be remapped, got %+v", mapped)
+	internalMsg := `pq: relation "memory" does not exist`
+	mapped := MapError(t.Context(), errors.New(internalMsg))
+	if mapped == nil || !mapped.IsError {
+		t.Fatal("unknown errors must become a generic isError result")
+	}
+	for _, c := range mapped.Content {
+		text, ok := c.(*mcp.TextContent)
+		if !ok {
+			continue
+		}
+		if strings.Contains(text.Text, "memory") || strings.Contains(text.Text, internalMsg) {
+			t.Fatalf("internal error leaked to client: %q", text.Text)
+		}
 	}
 
 	cases := []struct {
@@ -116,7 +96,7 @@ func TestMapErrorKnownCodes(t *testing.T) {
 		{policy.ErrSecretDetected, policy.CodeSecretDetected},
 	}
 	for _, tc := range cases {
-		res := MapError(fmt.Errorf("%w: detail", tc.err))
+		res := MapError(t.Context(), fmt.Errorf("%w: detail", tc.err))
 		if res == nil || !res.IsError {
 			t.Fatalf("%v: want isError mapping", tc.err)
 		}
@@ -128,20 +108,4 @@ func TestMapErrorKnownCodes(t *testing.T) {
 			t.Fatalf("error code %q must be SUBSTRATE_*, never ACP_*", tc.code)
 		}
 	}
-}
-
-func loadSchemaSnapshot(b []byte) (map[string]json.RawMessage, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
-	}
-	out := make(map[string]json.RawMessage, len(raw))
-	for name, schema := range raw {
-		canon, err := canonicalJSON(schema)
-		if err != nil {
-			return nil, fmt.Errorf("schema for tool %q: %w", name, err)
-		}
-		out[name] = canon
-	}
-	return out, nil
 }

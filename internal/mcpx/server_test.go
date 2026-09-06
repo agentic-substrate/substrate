@@ -1,14 +1,19 @@
 package mcpx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
@@ -31,27 +36,23 @@ func denyTool(_ context.Context, _ *mcp.CallToolRequest, _ echoIn) (*mcp.CallToo
 	return nil, echoOut{}, fmt.Errorf("%w: not a member of a team at this scope", policy.ErrDeniedScope)
 }
 
-func TestUnauthenticatedRejectedBeforeHandler(t *testing.T) {
-	srv := New("substrate-test", "v0")
-	reached := false
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reached = true
-		srv.Handler().ServeHTTP(w, r)
-	})
-	h := identity.Middleware(func(context.Context, string) (*identity.Principal, error) {
-		t.Fatal("lookup must not run without a bearer")
-		return nil, identity.ErrUnauthorized
-	})(inner)
+func leakTool(_ context.Context, _ *mcp.CallToolRequest, _ echoIn) (*mcp.CallToolResult, echoOut, error) {
+	return nil, echoOut{}, errors.New(`pq: relation "memory" does not exist`)
+}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status %d, want 401", rec.Code)
+type whoIn struct{}
+
+type whoOut struct {
+	PrincipalID string `json:"principal_id" jsonschema:"id of the principal FromContext returned"`
+	Label       string `json:"label" jsonschema:"display name from the principal on the handler context"`
+}
+
+func whoTool(ctx context.Context, _ *mcp.CallToolRequest, _ whoIn) (*mcp.CallToolResult, whoOut, error) {
+	p := identity.FromContext(ctx)
+	if p == nil {
+		return nil, whoOut{}, nil
 	}
-	if reached {
-		t.Fatal("MCP handler ran before auth middleware")
-	}
+	return nil, whoOut{PrincipalID: p.ID.String(), Label: p.DisplayName}, nil
 }
 
 func TestInitializeAndListTools(t *testing.T) {
@@ -148,20 +149,174 @@ func TestPolicyDenialIsErrorWithCodeFirst(t *testing.T) {
 	}
 }
 
-func connect(t *testing.T, srv *Server) *mcp.ClientSession {
-	t.Helper()
+func TestInternalErrorDoesNotLeak(t *testing.T) {
+	srv := New("substrate-test", "v0")
+	AddTool(srv, &mcp.Tool{
+		Name:        "mcpx.test.echo",
+		Description: "Echo a message.",
+	}, leakTool)
+
+	sess := connect(t, srv)
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "mcpx.test.echo",
+		Arguments: echoIn{Message: "x"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatal("internal error must set isError")
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "memory") || strings.Contains(string(raw), "relation") {
+		t.Fatalf("internal error leaked to client: %s", raw)
+	}
+}
+
+func TestSessionHijackDoesNotExecuteAsInitializer(t *testing.T) {
+	alice := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "alice", Trust: identity.TrustHuman}
+	bob := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "bob", Trust: identity.TrustHuman}
+	lookup := func(_ context.Context, tok string) (*identity.Principal, error) {
+		switch tok {
+		case "alice":
+			return alice, nil
+		case "bob":
+			return bob, nil
+		default:
+			return nil, identity.ErrUnauthorized
+		}
+	}
+
+	var seen atomic.Value // string principal id, empty if handler did not run
+	srv := New("substrate-test", "v0")
+	AddTool(srv, &mcp.Tool{
+		Name:        "mcpx.test.who",
+		Description: "Report the principal on the handler context. Test-only.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ whoIn) (*mcp.CallToolResult, whoOut, error) {
+		p := identity.FromContext(ctx)
+		id := ""
+		if p != nil {
+			id = p.ID.String()
+		}
+		seen.Store(id)
+		return nil, whoOut{PrincipalID: id}, nil
+	})
+
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", srv.Handler())
-	h := identity.Middleware(func(context.Context, string) (*identity.Principal, error) {
-		return &identity.Principal{DisplayName: "test", Trust: identity.TrustHuman}, nil
-	})(mux)
+	h := identity.Middleware(lookup)(mux)
 	httpSrv := httptest.NewServer(h)
 	t.Cleanup(httpSrv.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "mcpx-test", Version: "v0"}, nil)
 	sess, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
 		Endpoint:             httpSrv.URL + "/mcp",
-		HTTPClient:           &http.Client{Transport: bearerRT{token: "test-token"}},
+		HTTPClient:           &http.Client{Transport: bearerRT{token: "alice"}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	sessionID := sess.ID()
+	if sessionID == "" {
+		t.Fatal("missing Mcp-Session-Id")
+	}
+
+	call := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mcpx.test.who","arguments":{}}}`)
+	req, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/mcp", bytes.NewReader(call))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer bob")
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	got, _ := seen.Load().(string)
+	if got == alice.ID.String() {
+		t.Fatalf("tool executed as initializer %s; Bob's bearer hijacked Alice's session", alice.ID)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 session user mismatch; body %s; seen %q", resp.StatusCode, body, got)
+	}
+}
+
+func TestToolHandlerSeesCurrentRequestPrincipal(t *testing.T) {
+	id := uuid.Must(uuid.NewV7())
+	var n atomic.Int32
+	var last atomic.Value
+	lookup := func(context.Context, string) (*identity.Principal, error) {
+		label := fmt.Sprintf("n%d", n.Add(1))
+		last.Store(label)
+		return &identity.Principal{
+			ID:          id,
+			DisplayName: label,
+			Trust:       identity.TrustHuman,
+		}, nil
+	}
+	srv := New("substrate-test", "v0")
+	AddTool(srv, &mcp.Tool{
+		Name:        "mcpx.test.who",
+		Description: "Report the principal on the handler context. Test-only.",
+	}, whoTool)
+
+	sess := connectLookup(t, srv, lookup, "t")
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "mcpx.test.who",
+		Arguments: whoIn{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %+v", res.Content)
+	}
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out whoOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.PrincipalID != id.String() {
+		t.Fatalf("principal_id=%q, want current request %s", out.PrincipalID, id)
+	}
+	wantLabel, _ := last.Load().(string)
+	if out.Label != wantLabel {
+		t.Fatalf("label=%q, want current request %q (initialize would freeze n1)", out.Label, wantLabel)
+	}
+}
+
+func connect(t *testing.T, srv *Server) *mcp.ClientSession {
+	t.Helper()
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
+	return connectLookup(t, srv, func(context.Context, string) (*identity.Principal, error) {
+		return p, nil
+	}, "test-token")
+}
+
+func connectLookup(t *testing.T, srv *Server, lookup identity.LookupFunc, token string) *mcp.ClientSession {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", srv.Handler())
+	h := identity.Middleware(lookup)(mux)
+	httpSrv := httptest.NewServer(h)
+	t.Cleanup(httpSrv.Close)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "mcpx-test", Version: "v0"}, nil)
+	sess, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:             httpSrv.URL + "/mcp",
+		HTTPClient:           &http.Client{Transport: bearerRT{token: token}},
 		DisableStandaloneSSE: true,
 	}, nil)
 	if err != nil {

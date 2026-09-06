@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -10,10 +11,17 @@ import (
 	"testing"
 	"time"
 
+	_ "embed"
+
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/mcpx"
 )
+
+//go:embed testdata/tool_schemas.json
+var schemaSnapshot []byte
 
 func TestHealthzWithoutStore(t *testing.T) {
 	h := newHandler(nil)
@@ -86,18 +94,86 @@ func TestProtectedRouteRequiresBearer(t *testing.T) {
 }
 
 func TestMCPRequiresBearer(t *testing.T) {
-	h := newHandler(nil)
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	var lookedUp bool
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
+	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+		lookedUp = true
+		return p, nil
+	})
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions} {
+		lookedUp = false
+		req := httptest.NewRequest(method, "/mcp", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s /mcp without bearer = %d, want 401", method, rec.Code)
+		}
+		if lookedUp {
+			t.Fatalf("%s /mcp without bearer ran lookup", method)
+		}
+	}
+
+	lookedUp = false
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.Header.Set("Authorization", "Bearer test")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/mcp without bearer = %d, want 401", rec.Code)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("valid bearer still 401; auth ran after the handler or lookup failed")
+	}
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("/mcp is not mounted")
+	}
+	if !lookedUp {
+		t.Fatal("valid bearer never reached lookup; middleware did not wrap /mcp")
+	}
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusNotFound {
+		t.Fatalf("valid bearer did not reach the SDK: %d", rec.Code)
+	}
+}
+
+func TestProductionSchemaSnapshot(t *testing.T) {
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
+	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
+		return p, nil
+	})
+	httpSrv := httptest.NewServer(h)
+	defer httpSrv.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "cmd-test", Version: "v0"}, nil)
+	sess, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:             httpSrv.URL + "/mcp",
+		HTTPClient:           &http.Client{Transport: bearerRT{token: "test"}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+	listed, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpx.CheckToolNames(listed.Tools); err != nil {
+		t.Fatal(err)
+	}
+	got, err := mcpx.ToolSchemas(listed.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]json.RawMessage
+	if err := json.Unmarshal(schemaSnapshot, &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpx.DiffToolSchemas(got, want); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestMCPInitializeAndListTools(t *testing.T) {
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
 	h := newHandlerLookup(nil, func(context.Context, string) (*identity.Principal, error) {
-		return &identity.Principal{DisplayName: "test", Trust: identity.TrustHuman}, nil
+		return p, nil
 	})
 	httpSrv := httptest.NewServer(h)
 	defer httpSrv.Close()
