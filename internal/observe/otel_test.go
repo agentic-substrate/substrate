@@ -378,10 +378,30 @@ func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 	_ = rt.ForceFlush(flushCtx)
 	_ = rt.ForceFlush(flushCtx)
 
+	rt2, err := observe.Setup(t.Context(), observe.Config{
+		Endpoint:       "http://" + ln.Addr().String(),
+		Service:        "substrate-test-2",
+		ExportInterval: time.Hour,
+		ExportTimeout:  2 * time.Second,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("second Setup: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = rt2.Shutdown(ctx)
+	})
+	rt2.RecordToolLatency(t.Context(), "context.get", time.Millisecond)
+	flush2, cancel2 := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel2()
+	_ = rt2.ForceFlush(flush2)
+
 	logs := logBuf.String()
 	n := strings.Count(logs, "otlp export failed")
 	if n != 1 {
-		t.Fatalf("otlp export failed appeared %d times, want 1 (once, not per request):\n%s", n, logs)
+		t.Fatalf("otlp export failed appeared %d times, want 1 (once per process, not per Runtime):\n%s", n, logs)
 	}
 }
 

@@ -85,18 +85,22 @@ type Runtime struct {
 }
 
 type failLog struct {
-	once sync.Once
-	log  *slog.Logger
+	log *slog.Logger
 }
 
 func (f *failLog) record(err error) {
 	if f == nil || err == nil {
 		return
 	}
-	f.once.Do(func() {
+	exportFailOnce.Do(func() {
 		f.log.Error("otlp export failed", "err", err)
 	})
 }
+
+// exportFailOnce is process-global so two Setup calls (tests, or a
+// mistaken double-start) still log a collector outage once. Production
+// starts one Runtime per binary.
+var exportFailOnce sync.Once
 
 type requestFields struct {
 	mu        sync.Mutex
@@ -104,8 +108,8 @@ type requestFields struct {
 }
 
 // Setup builds a Runtime. An empty Endpoint returns a no-op Runtime that
-// still accepts Record* calls. Export errors are logged once and never
-// fail a request.
+// still accepts Record* calls. Export errors are logged once per process
+// and never fail a request.
 func Setup(ctx context.Context, cfg Config) (*Runtime, error) {
 	logger := cfg.Logger
 	if logger == nil {
