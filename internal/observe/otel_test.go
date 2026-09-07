@@ -205,23 +205,28 @@ func TestContextGetEmitsLatencyMetricAndCompileDatabaseSpans(t *testing.T) {
 	}
 
 	byID := map[string]spanRec{}
-	var rootTrace string
+	var tool spanRec
+	var foundTool bool
 	for _, s := range rec.allSpans() {
 		byID[s.SpanID] = s
-		if strings.Contains(s.Name, "context.get") {
-			rootTrace = s.TraceID
+		if s.Name == "context.get" {
+			tool = s
+			foundTool = true
 		}
 	}
-	if rootTrace == "" {
-		rootTrace = compileSpans[0].TraceID
+	if !foundTool {
+		t.Fatal("no span named context.get; falling back to compile's own trace would make this assertion tautological")
 	}
 	compile := compileSpans[0]
-	if compile.TraceID != rootTrace {
-		t.Fatalf("compile span is on trace %s, want the request trace %s", compile.TraceID, rootTrace)
+	if compile.TraceID != tool.TraceID {
+		t.Fatalf("compile span is on trace %s, want the context.get trace %s", compile.TraceID, tool.TraceID)
+	}
+	if compile.ParentSpanID != tool.SpanID {
+		t.Fatalf("compile parent %s, want context.get span %s", compile.ParentSpanID, tool.SpanID)
 	}
 	db := dbSpans[0]
-	if db.TraceID != rootTrace {
-		t.Fatalf("database span is on trace %s, want the request trace %s", db.TraceID, rootTrace)
+	if db.TraceID != tool.TraceID {
+		t.Fatalf("database span is on trace %s, want the context.get trace %s", db.TraceID, tool.TraceID)
 	}
 	if db.ParentSpanID == "" {
 		t.Fatal("database span has no parent; it must be a child of compile or the request")
