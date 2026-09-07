@@ -107,6 +107,14 @@ curl localhost:8080/readyz
     -out /abs/path/inventory.json [-memorix-json /abs/path/memorix.json] \
     [-exclude 'some/fixtures/**']
 ./bin/substrate import plan -out /abs/path/plan.json /abs/path/inventory.json
+./bin/substrate import apply -machine mac -trusted mac \
+    -server "$SUBSTRATE_URL" -token "$TOKEN" \
+    -scope 'global:/org:acme/team:core/project:plotlens' \
+    /abs/path/plan.json
+./bin/substrate import apply -machine mac -trusted mac -commit \
+    -server "$SUBSTRATE_URL" -token "$TOKEN" \
+    -scope 'global:/org:acme/team:core/project:plotlens' \
+    /abs/path/plan.json
 ```
 
 Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
@@ -137,12 +145,24 @@ instructions, preferences, and mandatory items are never trimmed.
 
 `/v1` is the adapter and CLI REST surface (EDD §4.2), behind the same bearer auth as `/mcp` and
 not exposed to harnesses. It serves `GET /v1/render`, `GET /v1/skills/manifest`,
-`POST /v1/memory/batch`, `GET /v1/memory/cache`, review create/list/decide, `GET /v1/events`
+`POST /v1/memory/batch`, `GET /v1/memory/cache`, review create/list/decide, `POST /v1/import`,
+`GET /v1/events`
 (SSE wake-ups when `substrate_audit` fires; the payload carries no audit metadata), and
 `GET /v1/health/git`. `/v1/memory/batch` is the idempotency boundary: `ingest_receipt` and the
 memory row are created in one transaction, and a replay with a known `client_id` returns the
 original id with `duplicate: true`. Render `sha256` values are `render.DriftHash` of the content
-(footer excluded). `POST /v1/import` is not served here.
+(footer excluded). `POST /v1/import` consumes a `plan.json` (SYNC-5, EDD §9). The most-trusted
+machine is applied first; only its non-conflict blocks that are not already byte-identical to
+an active row become `active`. The first successful trusted commit stores a per-scope
+marker; a later `-trusted` that names a different host is rejected, including when the
+later host uses a different token. Every later machine can only add `proposed` rows and
+`import_conflict` review items — it cannot promote anything to `active` or modify a row the
+trusted machine established. Each conflict payload carries the applying `hostname` and the
+pair sides' hostnames. Imported memory is always `episodic`/`unverified` even when the source
+claimed `confirmed` (Gotcha 4). A replay of the same machine+plan is idempotent via
+`ingest_receipt` keyed on `(machine, scope, plan-hash)`; an optional `client_id` is an
+alias of that key, never a second write. `dry_run` is the default: the server classifies and returns the planned set
+grouped by hostname without opening a write transaction. Writes require `"commit": true`.
 
 Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
 (EDD R3). `--for agent` is the only accepted kind today. Revoke with
@@ -171,7 +191,15 @@ classifies each unique block as `instruction` or `preference`. Classification is
 and will misfile (R15); confidence is never certainty. Identical blocks from two machines
 appear once in `plan.json`; differing blocks at the same heading from distinct hostnames
 or paths are a conflict pair tagged with hostname. Extra hashes from a single file stay
-in `blocks`. Apply and cutover are separate commands and are not served here.
+in `blocks`. `substrate import apply` POSTs that plan to `/v1/import`. It
+requires `-machine`, `-trusted` (the most-trusted hostname; apply it first),
+`-server` (or `SUBSTRATE_URL`), `-token` (or `SUBSTRATE_TOKEN`), `-scope`, and
+one `plan.json`. Without `-commit` the command is a dry-run: it performs every
+read and decision, prints counts and identities of rows that would become
+active, proposed, conflict, and memory grouped by hostname, and writes nothing.
+`-dry-run` is the same path. `-commit` performs the writes. The dry-run and the
+real run share one code path. Cutover is a separate command and is not served
+here.
 
 `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
 version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a

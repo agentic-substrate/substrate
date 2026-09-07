@@ -203,6 +203,46 @@ func (q *Queries) InsertIngestReceipt(ctx context.Context, arg InsertIngestRecei
 	return err
 }
 
+const insertInstruction = `-- name: InsertInstruction :one
+INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, status
+`
+
+type InsertInstructionParams struct {
+	ID         pgtype.UUID
+	ScopeID    pgtype.UUID
+	Visibility Visibility
+	OwnerID    pgtype.UUID
+	Kind       InstructionKind
+	Key        string
+	Body       string
+	Status     InstructionStatus
+	CreatedBy  pgtype.UUID
+}
+
+type InsertInstructionRow struct {
+	ID     pgtype.UUID
+	Status InstructionStatus
+}
+
+func (q *Queries) InsertInstruction(ctx context.Context, arg InsertInstructionParams) (InsertInstructionRow, error) {
+	row := q.db.QueryRow(ctx, insertInstruction,
+		arg.ID,
+		arg.ScopeID,
+		arg.Visibility,
+		arg.OwnerID,
+		arg.Kind,
+		arg.Key,
+		arg.Body,
+		arg.Status,
+		arg.CreatedBy,
+	)
+	var i InsertInstructionRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const insertMemory = `-- name: InsertMemory :one
 INSERT INTO memory (
   id, scope_id, visibility, owner_id, tier, kind, title, body, identifiers,
@@ -275,6 +315,44 @@ func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgePara
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const insertPreference = `-- name: InsertPreference :one
+INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, status
+`
+
+type InsertPreferenceParams struct {
+	ID         pgtype.UUID
+	ScopeID    pgtype.UUID
+	Visibility Visibility
+	OwnerID    pgtype.UUID
+	Key        string
+	Body       string
+	Status     InstructionStatus
+	CreatedBy  pgtype.UUID
+}
+
+type InsertPreferenceRow struct {
+	ID     pgtype.UUID
+	Status InstructionStatus
+}
+
+func (q *Queries) InsertPreference(ctx context.Context, arg InsertPreferenceParams) (InsertPreferenceRow, error) {
+	row := q.db.QueryRow(ctx, insertPreference,
+		arg.ID,
+		arg.ScopeID,
+		arg.Visibility,
+		arg.OwnerID,
+		arg.Key,
+		arg.Body,
+		arg.Status,
+		arg.CreatedBy,
+	)
+	var i InsertPreferenceRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
 }
 
 const insertReviewItem = `-- name: InsertReviewItem :one
@@ -477,6 +555,36 @@ func (q *Queries) ListMemoryCache(ctx context.Context, since pgtype.Timestamptz)
 			&i.Status,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenImportConflicts = `-- name: ListOpenImportConflicts :many
+SELECT id, payload FROM review_item
+WHERE kind = 'import_conflict' AND status = 'open'
+`
+
+type ListOpenImportConflictsRow struct {
+	ID      pgtype.UUID
+	Payload []byte
+}
+
+func (q *Queries) ListOpenImportConflicts(ctx context.Context) ([]ListOpenImportConflictsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenImportConflicts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenImportConflictsRow
+	for rows.Next() {
+		var i ListOpenImportConflictsRow
+		if err := rows.Scan(&i.ID, &i.Payload); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

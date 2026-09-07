@@ -473,6 +473,35 @@ func TestClassifyFirstPersonUserGlobalIsPreference(t *testing.T) {
 	}
 }
 
+func TestPlanExtractsMemorixMemories(t *testing.T) {
+	// Skipping memorix files in BuildPlan (the issue #18 continue) is the
+	// one-line change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+	exportPath := filepath.Join(t.TempDir(), "memorix.json")
+	payload := `{"memories":[{"title":"cluster","body":"the cluster is up","kind":"fact","status":"confirmed"}]}`
+	if err := os.WriteFile(exportPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "mac", MemorixJSON: exportPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := BuildPlan([]Inventory{*inv}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Memories) != 1 {
+		t.Fatalf("memories = %d, want 1 from memorix export", len(plan.Memories))
+	}
+	m := plan.Memories[0]
+	if m.Hostname != "mac" || m.Body != "the cluster is up" || m.SourceStatus != "confirmed" {
+		t.Fatalf("memory %#v, want mac/cluster/confirmed (status is recorded so apply can refuse it)", m)
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {

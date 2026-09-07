@@ -77,6 +77,20 @@ WHERE s.active_version_id IS NOT NULL
   AND s.scope_id = ANY(@scope_ids::uuid[])
 ORDER BY s.name;
 
+-- name: InsertInstruction :one
+INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, status;
+
+-- name: InsertPreference :one
+INSERT INTO preference (id, scope_id, visibility, owner_id, key, body, status, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, status;
+
+-- name: ListOpenImportConflicts :many
+SELECT id, payload FROM review_item
+WHERE kind = 'import_conflict' AND status = 'open';
+
 -- name: InsertReviewItem :one
 INSERT INTO review_item (id, kind, scope_id, team_id, payload, proposed_by)
 VALUES ($1, $2, $3, $4, $5, $6)
