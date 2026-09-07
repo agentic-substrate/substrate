@@ -41,9 +41,10 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 	if !*restore {
 		return fmt.Errorf("adapter uninstall: -restore is required (refuses to drop files without putting them back)")
 	}
-	if len(roots) == 0 {
-		return fmt.Errorf("adapter uninstall: -root is required (refuses to guess $HOME)")
-	}
+	// Mirror importCutover's default exactly. If cutover displaced /work because
+	// -root was omitted, an uninstall that errored here would leave every
+	// .pre-substrate orphaned and the rendered files live.
+	roots = scanRoots(roots)
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("adapter uninstall: -root must be an absolute path, got %q (refuses to guess $HOME)", root)

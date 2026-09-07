@@ -126,8 +126,12 @@ under home and checkouts live under the mount root.
 
 Nothing in this flow deletes. Live files and the `.memorix` store are renamed
 to `*.pre-substrate`, then rendered files are written. The adapter unit's
-`-home` is the first `-root`; `-roots` is always `/work` so Phase 3 cwd slugs
-match later (CONT-4). Cutover walks exactly the `-root` list it was given
+`-home` is the first `-root`; `-roots` is the set this cutover displaced, so
+the daemon only ever renders where a `*.pre-substrate` backup exists. With
+`-root` omitted that set is `/work`, keeping Phase 3 cwd slugs matching
+later (CONT-4). If you cut over `$HOME` only, the unit scans `$HOME` only —
+checkouts under `/work` stay unmanaged rather than being overwritten
+unrecoverably. Cutover walks exactly the `-root` list it was given
 (or `/work` when none was given). Restore is the inverse of that list and
 does not discover extra trees.
 

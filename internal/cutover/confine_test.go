@@ -8,10 +8,11 @@ import (
 )
 
 func TestCutoverCommitDoesNotTouchUnrelatedRoot(t *testing.T) {
-	// WithMountRoot(req.Roots) in planCutover's classifyStore loop is the
-	// one-line production change that makes this red. The sentinel lives in
-	// a second TempDir that stands in for DefaultMountRoot; the test never
-	// points at the real mount root.
+	// A forward guard, not a regression test: planCutover never appended the
+	// mount root (#56 lived in restore.go). Introducing a WithMountRoot-style
+	// append into planCutover's classifyStore loop is the one-line production
+	// change that makes this red. The sentinel lives in a second TempDir that
+	// stands in for DefaultMountRoot; the test never points at the real one.
 	owned := t.TempDir()
 	unrelated := t.TempDir()
 	setMountRoot(t, unrelated)

@@ -21,8 +21,10 @@ type UnitInstaller interface {
 	Uninstall(spec UnitSpec) error
 }
 
-// UnitSpec is what the unit file / plist would contain. Roots is always
-// DefaultMountRoot (/work) so CONT-4 holds even when tests use TempDir.
+// UnitSpec is what the unit file / plist would contain. Roots is the set the
+// installed daemon will scan, which unitRoots ties to the roots cutover
+// displaced; it falls back to DefaultMountRoot (/work) for CONT-4 only when the
+// request named none.
 type UnitSpec struct {
 	Binary  string
 	Home    string

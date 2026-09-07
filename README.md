@@ -227,7 +227,9 @@ real run share one code path.
 `substrate import cutover` replaces local harness files with `GET /v1/render`
 output, renames displaced files and the `.memorix` store to `*.pre-substrate`,
 and installs the adapter unit (systemd `--user` on Linux/WSL, launchd on macOS)
-with `-roots /work` (CONT-4). `-root` is repeatable and absolute, with no
+with `-roots` set to the roots this cutover displaced, so the daemon never
+renders over a tree that has no `*.pre-substrate` backup; with no `-root` that
+is `/work` (CONT-4). `-root` is repeatable and absolute, with no
 `$HOME` default; omit it to default to `/work`. It also requires `-server`
 (or `SUBSTRATE_URL`), `-token` (or `SUBSTRATE_TOKEN`), and `-machine`. Pass
 `-root "$HOME" -root /work` so home harness files and checkout files under
@@ -242,8 +244,10 @@ overwritten. Nothing in this flow deletes (Gotcha 6); originals are renamed.
 Rendered replacements are compared with `render.DriftHash` (footer excluded).
 The dry-run and the real run share one code path.
 
-`substrate adapter uninstall -restore` is the rollback. It requires `-restore`
-and `-root` (absolute; no `$HOME` default). Pass the same roots cutover used
+`substrate adapter uninstall -restore` is the rollback. It requires `-restore`;
+`-root` is absolute and defaults to `/work` when omitted, exactly as cutover
+does, so a rollback cannot walk a different tree than the cutover it inverts.
+Pass the same roots cutover used
 (`-root "$HOME" -root /work`); restore does not discover extra trees. It
 renames `*.pre-substrate` back
 over the live paths, removes generated files that still match the written

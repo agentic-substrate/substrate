@@ -92,8 +92,11 @@ func TestImportCutoverCommitThenRestoreRoundTrip(t *testing.T) {
 	if len(fake.Installs) != 1 {
 		t.Fatalf("Installs = %d, want 1", len(fake.Installs))
 	}
-	if fake.Installs[0].Roots[0] != cutover.DefaultMountRoot {
-		t.Fatalf("unit roots %v, want [%s]", fake.Installs[0].Roots, cutover.DefaultMountRoot)
+	// The installed daemon must scan exactly what cutover displaced. A wider
+	// set (the old unconditional DefaultMountRoot) means the adapter renders
+	// over live files that have no .pre-substrate backup.
+	if len(fake.Installs[0].Roots) != 1 || fake.Installs[0].Roots[0] != root {
+		t.Fatalf("unit roots %v, want [%s]", fake.Installs[0].Roots, root)
 	}
 	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
 	if err != nil {

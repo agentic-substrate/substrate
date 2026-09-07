@@ -114,8 +114,20 @@ func unitSpec(req Request) UnitSpec {
 		Server:  req.Server,
 		Token:   req.Token,
 		Machine: req.Machine,
-		Roots:   []string{DefaultMountRoot},
+		Roots:   unitRoots(req.Roots),
 	}
+}
+
+// unitRoots is what the installed daemon will scan. It must be the set cutover
+// actually displaced, never a wider one: a root the daemon scans but cutover
+// did not harness has no .pre-substrate backup, so the first render overwrites
+// live files with no way back. An empty request keeps the CONT-4 default, which
+// is also what the CLI defaults an omitted -root to.
+func unitRoots(roots []string) []string {
+	if len(roots) == 0 {
+		return []string{DefaultMountRoot}
+	}
+	return append([]string(nil), roots...)
 }
 
 func sha256Hex(b []byte) string {
