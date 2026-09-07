@@ -568,6 +568,86 @@ func TestApplyTrustedMarkerVisibleAcrossPrincipals(t *testing.T) {
 	}
 }
 
+func TestApplyDiscoversSlotConflictAcrossSeparatePlans(t *testing.T) {
+	// Copying Conflicts from plan.json and never comparing incoming Blocks
+	// against the active row at the same rel#heading is the one-line change
+	// that makes this red: two separately-planned machines leave the review
+	// queue empty.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	macPlan := Plan{Blocks: []Block{{
+		Hash: sha256Hex([]byte("Use vim.")), Heading: "Editor", Body: "Use vim.",
+		Kind: "instruction", Rel: ".claude/CLAUDE.md",
+		Sources: []Source{{Hostname: "mac"}},
+	}}}
+	wslPlan := Plan{Blocks: []Block{{
+		Hash: sha256Hex([]byte("Use emacs.")), Heading: "Editor", Body: "Use emacs.",
+		Kind: "instruction", Rel: ".claude/CLAUDE.md",
+		Sources: []Source{{Hostname: "wsl"}},
+	}}}
+	macReq := ApplyRequest{Plan: macPlan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
+	wslReq := ApplyRequest{Plan: wslPlan, Machine: "wsl", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
+	if _, err := Apply(ctx, st, macReq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(ctx, st, wslReq); err != nil {
+		t.Fatal(err)
+	}
+	got := countByBodyStatus(t, conn, "instruction", w.project)
+	if got["Use vim."] != "active" {
+		t.Fatalf("first-machine slot status %q, want active; %#v", got["Use vim."], got)
+	}
+	if got["Use emacs."] != "proposed" {
+		t.Fatalf("conflicting later-machine slot status %q, want proposed; %#v", got["Use emacs."], got)
+	}
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM review_item WHERE kind = 'import_conflict'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("separately-planned slot conflict left the review queue empty")
+	}
+	var raw []byte
+	if err := conn.QueryRow(t.Context(), `SELECT payload FROM review_item WHERE kind = 'import_conflict' LIMIT 1`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "mac") || !strings.Contains(string(raw), "wsl") {
+		t.Fatalf("discovered import_conflict missing both hostnames: %s", raw)
+	}
+}
+
+func TestApplyRefusesDistinctHashesSharingSlotWithoutConflict(t *testing.T) {
+	// Accepting two Blocks at the same rel#heading with distinct hashes and
+	// no Conflicts entry is the one-line change that makes this red.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	plan := Plan{Blocks: []Block{
+		{
+			Hash: sha256Hex([]byte("Use vim.")), Heading: "Editor", Body: "Use vim.",
+			Kind: "instruction", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: "mac"}},
+		},
+		{
+			Hash: sha256Hex([]byte("Use emacs.")), Heading: "Editor", Body: "Use emacs.",
+			Kind: "instruction", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: "mac"}},
+		},
+	}}
+	_, err := Apply(ctx, st, ApplyRequest{Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true})
+	if err == nil {
+		t.Fatal("accepted distinct hashes at one slot with no conflict pair")
+	}
+	if !strings.Contains(err.Error(), "slot") && !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("error %v, want it to name the slot or conflict", err)
+	}
+}
+
 func drySet(r *ApplyResult) string {
 	type item struct{ H, K, S, Hash string }
 	var items []item

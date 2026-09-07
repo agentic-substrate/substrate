@@ -114,6 +114,9 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 	} else if req.Machine != req.TrustedMachine {
 		return nil, fmt.Errorf("import apply: trusted machine %q must be imported first", req.TrustedMachine)
 	}
+	if err := validatePlanSlots(req.Plan); err != nil {
+		return nil, err
+	}
 
 	activeIns, err := q.ListActiveInstructions(ctx, ids)
 	if err != nil {
@@ -164,6 +167,32 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		}
 		if row.Kind == "" {
 			row.Kind = Classify(b).Kind
+		}
+		slot := b.Rel + "#" + b.Heading
+		if existing := activeBodyAtSlot(row.Kind, b.Rel, b.Heading, activeIns, activePref); existing != "" && existing != b.Body {
+			row.Status = string(store.InstructionStatusProposed)
+			row.Slot = slot
+			res.Proposed = append(res.Proposed, row)
+			if !reviewSlots[slot] {
+				other := storedHost
+				if other == "" {
+					other = req.Machine
+				}
+				res.Conflict = append(res.Conflict, PlannedRow{
+					Hostname: req.Machine,
+					Kind:     "import_conflict",
+					Status:   "conflict",
+					Hash:     b.Hash,
+					Body:     b.Body,
+					Slot:     slot,
+					Pair: []ConflictSide{
+						{Hash: sha256Hex([]byte(existing)), Hostnames: []string{other}, Body: existing},
+						{Hash: b.Hash, Hostnames: []string{req.Machine}, Body: b.Body},
+					},
+				})
+				reviewSlots[slot] = true
+			}
+			continue
 		}
 		if canActivate {
 			row.Status = string(store.InstructionStatusActive)
@@ -417,11 +446,13 @@ func storeTrustedHost(ctx context.Context, q *store.Queries, p *identity.Princip
 }
 
 func conflictPayload(req ApplyRequest, row PlannedRow) ([]byte, error) {
-	var pair []ConflictSide
-	for _, c := range req.Plan.Conflicts {
-		if c.Slot == row.Slot {
-			pair = c.Pair
-			break
+	pair := row.Pair
+	if len(pair) == 0 {
+		for _, c := range req.Plan.Conflicts {
+			if c.Slot == row.Slot {
+				pair = c.Pair
+				break
+			}
 		}
 	}
 	return json.Marshal(map[string]any{
@@ -429,6 +460,49 @@ func conflictPayload(req ApplyRequest, row PlannedRow) ([]byte, error) {
 		"slot":     row.Slot,
 		"pair":     pair,
 	})
+}
+
+func validatePlanSlots(plan Plan) error {
+	inConflict := map[string]bool{}
+	for _, c := range plan.Conflicts {
+		for _, side := range c.Pair {
+			inConflict[side.Hash] = true
+		}
+	}
+	slotHash := map[string]string{}
+	for _, b := range plan.Blocks {
+		slot := b.Rel + "#" + b.Heading
+		prev, ok := slotHash[slot]
+		if !ok {
+			slotHash[slot] = b.Hash
+			continue
+		}
+		if prev == b.Hash {
+			continue
+		}
+		if !inConflict[prev] || !inConflict[b.Hash] {
+			return fmt.Errorf("import apply: slot %q has distinct hashes not listed in conflicts", slot)
+		}
+	}
+	return nil
+}
+
+func activeBodyAtSlot(kind, rel, heading string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) string {
+	prefix := strings.Join([]string{"import", slug(kind), slug(rel), slug(heading)}, ".") + "."
+	if kind == "preference" {
+		for _, r := range pref {
+			if strings.HasPrefix(r.Key, prefix) {
+				return r.Body
+			}
+		}
+		return ""
+	}
+	for _, r := range ins {
+		if strings.HasPrefix(r.Key, prefix) {
+			return r.Body
+		}
+	}
+	return ""
 }
 
 func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgtype.UUID, teamID, leaf uuid.UUID, err error) {

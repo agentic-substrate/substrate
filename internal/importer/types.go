@@ -71,14 +71,15 @@ type ApplyRequest struct {
 
 // PlannedRow is one row the apply would insert, used by dry-run and commit.
 type PlannedRow struct {
-	Hostname string `json:"hostname"`
-	Kind     string `json:"kind"`
-	Status   string `json:"status"`
-	Key      string `json:"key,omitempty"`
-	Hash     string `json:"hash"`
-	Body     string `json:"body"`
-	Title    string `json:"title,omitempty"`
-	Slot     string `json:"slot,omitempty"`
+	Hostname string         `json:"hostname"`
+	Kind     string         `json:"kind"`
+	Status   string         `json:"status"`
+	Key      string         `json:"key,omitempty"`
+	Hash     string         `json:"hash"`
+	Body     string         `json:"body"`
+	Title    string         `json:"title,omitempty"`
+	Slot     string         `json:"slot,omitempty"`
+	Pair     []ConflictSide `json:"pair,omitempty"`
 }
 
 // HostSummary counts planned writes for one hostname.
