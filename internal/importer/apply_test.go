@@ -223,10 +223,30 @@ func itoa(n int) string {
 func TestApplyTrustedMachineNonConflictBecomesActive(t *testing.T) {
 	// Treating every imported row as proposed, including the trusted machine's
 	// unique blocks, is the one-line change that makes this red.
+	// Alice's count(*)=1 on the team-visible seed fails closed if ApplySession
+	// is deleted from Tx (constructed red: "alice did not see the team-visible seed").
 	dsn, conn := startMigrated(t)
 	w := seedImportWorld(t, conn)
 	st := openStore(t, dsn)
 	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	var aliceSeed, bobSeed int
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM instruction WHERE key = 'ci.required' AND body = 'true' AND scope_id = $1`, w.project).Scan(&aliceSeed)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if aliceSeed != 1 {
+		t.Fatal("alice did not see the team-visible seed; ApplySession is not reaching the query")
+	}
+	if err := st.Tx(identity.WithPrincipal(t.Context(), w.bobP), func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM instruction WHERE key = 'ci.required' AND body = 'true' AND scope_id = $1`, w.project).Scan(&bobSeed)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if bobSeed != 0 {
+		t.Fatal("bob (other team) saw the team-visible seed; RLS session settings were not applied")
+	}
 
 	res, err := Apply(ctx, st, applyReq(w, "mac", true))
 	if err != nil {
