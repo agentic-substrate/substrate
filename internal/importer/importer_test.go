@@ -1,0 +1,403 @@
+package importer
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestScanRequiresRoot(t *testing.T) {
+	canary := t.TempDir()
+	mustWrite(t, filepath.Join(canary, ".claude", "CLAUDE.md"), "# Canary\nfrom HOME\n")
+	t.Setenv("HOME", canary)
+
+	_, err := Scan(Request{Hostname: "wsl", LookPath: missingMemorix})
+	if err == nil || !strings.Contains(err.Error(), "-root") {
+		t.Fatalf("got %v, want error naming -root", err)
+	}
+}
+
+func TestScanRefusesRelativeRoot(t *testing.T) {
+	_, err := Scan(Request{Roots: []string{"."}, Hostname: "wsl", LookPath: missingMemorix})
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("got %v, want absolute-path error", err)
+	}
+}
+
+func TestScanDoesNotReadHOMEWhenRootGiven(t *testing.T) {
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), "# HomeCanary\nsecret-from-home\n")
+	t.Setenv("HOME", home)
+
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Always run gofmt.") {
+		t.Fatalf("scan missed the -root tree:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "secret-from-home") || strings.Contains(string(raw), home) {
+		t.Fatalf("scan consulted $HOME:\n%s", raw)
+	}
+}
+
+func TestScanDoesNotWriteUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".claude", "CLAUDE.md")
+	mustWrite(t, path, "# Shared\nAlways run gofmt.\n")
+	before := treeSnapshot(t, root)
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Files) == 0 {
+		t.Fatal("scan returned no files; a no-op would also look read-only")
+	}
+	after := treeSnapshot(t, root)
+	if after != before {
+		t.Fatalf("scan mutated the root\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+func TestScanInventoriesHarnessFiles(t *testing.T) {
+	root := t.TempDir()
+	claude := "# Shared\nAlways run gofmt.\n"
+	agents := "# Codex\nPrefer terse diffs.\n"
+	cursor := "# Cursor\nAlwaysApply.\n"
+	repoAgents := "# Repo\nUse modules.\n"
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), claude)
+	mustWrite(t, filepath.Join(root, ".codex", "AGENTS.md"), agents)
+	mustWrite(t, filepath.Join(root, ".cursor", "rules", "team.mdc"), cursor)
+	mustWrite(t, filepath.Join(root, "plotlens", "api", "AGENTS.md"), repoAgents)
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Hostname != "wsl" {
+		t.Fatalf("hostname %q, want wsl", inv.Hostname)
+	}
+	byRel := map[string]File{}
+	for _, f := range inv.Files {
+		byRel[filepath.ToSlash(f.Rel)] = f
+	}
+	assertFile := func(rel, detected, scope, body string) {
+		t.Helper()
+		f, ok := byRel[rel]
+		if !ok {
+			t.Fatalf("missing %s in %#v", rel, byRel)
+		}
+		if f.DetectedType != detected || f.ImpliedScope != scope {
+			t.Fatalf("%s: type %q scope %q, want %q %q", rel, f.DetectedType, f.ImpliedScope, detected, scope)
+		}
+		if f.Content != body {
+			t.Fatalf("%s content %q, want %q", rel, f.Content, body)
+		}
+		if f.Size != int64(len(body)) {
+			t.Fatalf("%s size %d, want %d", rel, f.Size, len(body))
+		}
+		if f.Hash != sha256Hex([]byte(body)) {
+			t.Fatalf("%s hash %s, want %s", rel, f.Hash, sha256Hex([]byte(body)))
+		}
+		if f.Path != filepath.Join(root, filepath.FromSlash(rel)) {
+			t.Fatalf("%s path %q", rel, f.Path)
+		}
+	}
+	assertFile(".claude/CLAUDE.md", "claude", "user", claude)
+	assertFile(".codex/AGENTS.md", "agents", "user", agents)
+	assertFile(".cursor/rules/team.mdc", "cursor", "user", cursor)
+	assertFile("plotlens/api/AGENTS.md", "agents", "repo", repoAgents)
+}
+
+func TestScanSkipsMissingMemorix(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Skipped) == 0 {
+		t.Fatal("want a skipped memorix source, got none")
+	}
+	found := false
+	for _, s := range inv.Skipped {
+		if s.Source == "memorix" && s.Reason != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("skipped = %#v, want memorix with a reason", inv.Skipped)
+	}
+	for _, f := range inv.Files {
+		if f.DetectedType == "memorix" {
+			t.Fatalf("missing binary still produced a memorix file: %#v", f)
+		}
+	}
+}
+
+func TestScanRecordsMemorixExportWithoutParsing(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+	payload := []byte(`{"memories":[{"id":"raw-export"}]}`)
+
+	inv, err := Scan(Request{
+		Roots:    []string{root},
+		Hostname: "wsl",
+		LookPath: func(string) (string, error) { return "/usr/bin/memorix", nil },
+		RunCmd: func(name string, args []string) ([]byte, error) {
+			if name != "/usr/bin/memorix" {
+				t.Fatalf("ran %s, want /usr/bin/memorix", name)
+			}
+			want := []string{"transfer", "export", "--format", "json"}
+			if strings.Join(args, " ") != strings.Join(want, " ") {
+				t.Fatalf("args %v, want %v", args, want)
+			}
+			return payload, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got File
+	for _, f := range inv.Files {
+		if f.DetectedType == "memorix" {
+			got = f
+		}
+	}
+	if got.Content != string(payload) {
+		t.Fatalf("memorix content %q, want raw export", got.Content)
+	}
+}
+
+func TestPlanTwoMachinesDifferingClaude(t *testing.T) {
+	tmp := t.TempDir()
+	aHome := filepath.Join(tmp, "machine-a")
+	bHome := filepath.Join(tmp, "machine-b")
+	mustWrite(t, filepath.Join(aHome, ".claude", "CLAUDE.md"), ""+
+		"# Shared\n"+
+		"Always run gofmt.\n"+
+		"\n"+
+		"# Indent\n"+
+		"Prefer tabs.\n")
+	mustWrite(t, filepath.Join(bHome, ".claude", "CLAUDE.md"), ""+
+		"# Shared\n"+
+		"Always run gofmt.\n"+
+		"\n"+
+		"# Indent\n"+
+		"Prefer spaces.\n")
+
+	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := BuildPlan([]Inventory{*invA, *invB}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Plan
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedHits := 0
+	for _, b := range got.Blocks {
+		if strings.Contains(b.Body, "Always run gofmt.") {
+			sharedHits++
+			hosts := hostSet(b.Sources)
+			if !hosts["wsl"] || !hosts["mac"] {
+				t.Fatalf("shared block sources %#v, want wsl and mac", b.Sources)
+			}
+		}
+		if strings.Contains(b.Body, "Prefer tabs.") || strings.Contains(b.Body, "Prefer spaces.") {
+			t.Fatalf("differing block %q listed under blocks; it belongs in a conflict pair", b.Body)
+		}
+	}
+	if sharedHits != 1 {
+		t.Fatalf("identical block appeared %d times, want 1\n%s", sharedHits, raw)
+	}
+
+	if len(got.Conflicts) != 1 {
+		t.Fatalf("conflicts = %d, want 1 pair\n%s", len(got.Conflicts), raw)
+	}
+	pair := got.Conflicts[0].Pair
+	if len(pair) != 2 {
+		t.Fatalf("pair length %d, want 2\n%s", len(pair), raw)
+	}
+	bodies := map[string]string{}
+	for _, side := range pair {
+		if len(side.Hostnames) != 1 {
+			t.Fatalf("conflict side hostnames %#v, want one hostname", side.Hostnames)
+		}
+		bodies[side.Hostnames[0]] = side.Body
+	}
+	if !strings.Contains(bodies["wsl"], "Prefer tabs.") {
+		t.Fatalf("wsl side %q, want Prefer tabs", bodies["wsl"])
+	}
+	if !strings.Contains(bodies["mac"], "Prefer spaces.") {
+		t.Fatalf("mac side %q, want Prefer spaces", bodies["mac"])
+	}
+}
+
+func TestPlanDedupesBeforeClassify(t *testing.T) {
+	tmp := t.TempDir()
+	aHome := filepath.Join(tmp, "machine-a")
+	bHome := filepath.Join(tmp, "machine-b")
+	mustWrite(t, filepath.Join(aHome, ".claude", "CLAUDE.md"), ""+
+		"# Shared\n"+
+		"Always run gofmt.\n"+
+		"\n"+
+		"# Indent\n"+
+		"Prefer tabs.\n")
+	mustWrite(t, filepath.Join(bHome, ".claude", "CLAUDE.md"), ""+
+		"# Shared\n"+
+		"Always run gofmt.\n"+
+		"\n"+
+		"# Indent\n"+
+		"Prefer spaces.\n")
+
+	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac", LookPath: missingMemorix})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	classified := map[string]int{}
+	plan, err := BuildPlan([]Inventory{*invA, *invB}, func(b Block) Classification {
+		calls++
+		classified[b.Hash]++
+		return Classify(b)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 4 source blocks, 3 unique hashes. Classify-after-dedupe → 3 calls.
+	// Moving classify before dedupe is the one-line change that makes this red.
+	if calls != 3 {
+		t.Fatalf("classify called %d times, want 3 (once per unique content hash); 4 means classify ran before dedupe", calls)
+	}
+	for h, n := range classified {
+		if n != 1 {
+			t.Fatalf("hash %s classified %d times; dedupe must run first", h, n)
+		}
+	}
+	if len(plan.Blocks)+len(plan.Conflicts[0].Pair) != 3 {
+		t.Fatalf("plan unique items %d+%d, want 3", len(plan.Blocks), len(plan.Conflicts[0].Pair))
+	}
+}
+
+func TestClassifyNeverClaimsCertainty(t *testing.T) {
+	cases := []Block{
+		{Heading: "Indent", Body: "Use 4-space indentation.", ImpliedScope: "user", DetectedType: "claude", Rel: ".claude/CLAUDE.md"},
+		{Heading: "Voice", Body: "I prefer terse replies.", ImpliedScope: "user", DetectedType: "claude", Rel: ".claude/CLAUDE.md"},
+		{Heading: "Shared", Body: "Always run gofmt.", ImpliedScope: "user", DetectedType: "claude", Rel: ".claude/CLAUDE.md"},
+		{Heading: "Python", Body: "Use 3.12", ImpliedScope: "repo", DetectedType: "agents", Rel: "plotlens/api/AGENTS.md"},
+	}
+	for _, b := range cases {
+		got := Classify(b)
+		if got.Confidence >= 1 {
+			t.Fatalf("classify(%q) confidence %v claims certainty; R15 forbids that", b.Body, got.Confidence)
+		}
+		if got.Kind != "instruction" && got.Kind != "preference" {
+			t.Fatalf("kind %q, want instruction or preference", got.Kind)
+		}
+		if got.Note == "" {
+			t.Fatalf("classify(%q) missing note that the heuristic will misfile", b.Body)
+		}
+	}
+}
+
+func TestClassifyStyleAllowlistIsPreference(t *testing.T) {
+	got := Classify(Block{Heading: "Indent", Body: "Use 4-space indentation.", ImpliedScope: "repo", Rel: "AGENTS.md"})
+	if got.Kind != "preference" {
+		t.Fatalf("kind %q, want preference", got.Kind)
+	}
+}
+
+func TestClassifyFirstPersonUserGlobalIsPreference(t *testing.T) {
+	got := Classify(Block{Body: "I prefer terse replies.", ImpliedScope: "user", Rel: ".claude/CLAUDE.md"})
+	if got.Kind != "preference" {
+		t.Fatalf("kind %q, want preference", got.Kind)
+	}
+}
+
+func missingMemorix(string) (string, error) {
+	return "", exec.ErrNotFound
+}
+
+func mustWrite(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func treeSnapshot(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		b.WriteString(filepath.ToSlash(rel))
+		b.WriteByte(' ')
+		b.WriteString(info.Mode().String())
+		if !d.IsDir() {
+			body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir
+			if err != nil {
+				return err
+			}
+			b.WriteByte(' ')
+			b.WriteString(sha256Hex(body))
+		}
+		b.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func hostSet(sources []Source) map[string]bool {
+	m := map[string]bool{}
+	for _, s := range sources {
+		m[s.Hostname] = true
+	}
+	return m
+}

@@ -102,6 +102,10 @@ curl localhost:8080/readyz
 
 ./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl \
     --scopes memory:write --dsn "$SUBSTRATE_DSN"
+
+./bin/substrate import scan -root /abs/machine-root -hostname wsl \
+    -out /abs/path/inventory.json
+./bin/substrate import plan -out /abs/path/plan.json /abs/path/inventory.json
 ```
 
 Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
@@ -142,7 +146,24 @@ original id with `duplicate: true`. Render `sha256` values are `render.DriftHash
 Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
 (EDD R3). `--for agent` is the only accepted kind today. Revoke with
 `./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
-arguments reports the version. `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
+arguments reports the version.
+
+`substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
+requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
+more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
+default, and the command will not guess one. Scan never writes, moves, or modifies
+anything under the scanned roots; it only writes the file named by `-out`. It inventories
+`.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.cursor/rules/`, and any `AGENTS.md` /
+`CLAUDE.md` found under those roots. Memorix is read by shelling out to
+`memorix transfer export --format json`; if that binary is absent the source is skipped
+with a logged reason and the rest of the scan still succeeds. Plan splits markdown into
+blocks, **dedupes by content hash**, then classifies each unique block as `instruction` or
+`preference`. Classification is heuristic and will misfile (R15); confidence is never
+certainty. Identical blocks from two machines appear once in `plan.json`; differing
+blocks at the same heading are a conflict pair tagged with hostname. Apply and cutover
+are separate commands and are not served here.
+
+`substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
 version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a
 `GET /v1/events` SSE wake-up; writes managed files atomically; and posts a `drift_proposal`
 (unified diff) *before* restoring a hand-edited file. Comparisons use `render.DriftHash`
