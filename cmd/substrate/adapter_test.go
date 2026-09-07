@@ -38,7 +38,8 @@ func TestAdapterUninstallOmittingRootUsesMountRootNotHome(t *testing.T) {
 	if err := adapterCmd([]string{"uninstall", "-restore"}, &bytes.Buffer{}, &bytes.Buffer{}, &cutover.FakeInstaller{}); err != nil {
 		t.Fatalf("uninstall with no -root: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(canary, "CLAUDE.md")); err != nil || string(got) != "from HOME\n" {
+	got, err := os.ReadFile(filepath.Join(canary, "CLAUDE.md")) //nolint:gosec // path is t.TempDir()
+	if err != nil || string(got) != "from HOME\n" {
 		t.Fatalf("$HOME canary body %q err %v, want untouched", got, err)
 	}
 }

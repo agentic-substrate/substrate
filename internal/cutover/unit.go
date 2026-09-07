@@ -252,8 +252,9 @@ func adapterArgs(spec UnitSpec) []string {
 	}
 }
 
-// SystemdUnit is the systemd --user unit body. It pins -roots /work (CONT-4)
-// and an explicit -home; it never expands $HOME.
+// SystemdUnit is the systemd --user unit body. -roots comes from spec.Roots
+// (the trees cutover displaced; CONT-4 /work when none were named) and an
+// explicit -home; it never expands $HOME.
 func SystemdUnit(spec UnitSpec) string {
 	args := adapterArgs(spec)
 	execStart := strings.Join(args, " ")
@@ -270,7 +271,7 @@ func SystemdUnit(spec UnitSpec) string {
 		"WantedBy=default.target\n"
 }
 
-// LaunchdPlist is the launchd agent body. ProgramArguments include /work.
+// LaunchdPlist is the launchd agent body. ProgramArguments include spec.Roots.
 func LaunchdPlist(spec UnitSpec) string {
 	args := adapterArgs(spec)
 	var b strings.Builder

@@ -144,10 +144,15 @@ func TestCutoverDryRunDoesNotWrite(t *testing.T) {
 	if !strings.Contains(out, live+BackupSuffix) {
 		t.Fatalf("dry-run omitted *.pre-substrate rename:\n%s", out)
 	}
-	// The plan must name the roots the unit will actually scan — the ones this
-	// request harnessed, not a wider default the operator never asked for.
-	if !strings.Contains(out, root) {
-		t.Fatalf("dry-run omitted unit install with %s:\n%s", root, out)
+	// Restoring unitRoots to an unconditional []string{DefaultMountRoot} is the
+	// one-line change that makes this red: the plan would advertise a wider
+	// scan set than this request harnessed.
+	if rep.Unit == nil || len(rep.Unit.Roots) != 1 || rep.Unit.Roots[0] != root {
+		var got []string
+		if rep.Unit != nil {
+			got = rep.Unit.Roots
+		}
+		t.Fatalf("unit roots %v, want [%s]", got, root)
 	}
 	if snapshotTree(t, root) != before {
 		t.Fatal("cutover --dry-run mutated the fixture tree")
