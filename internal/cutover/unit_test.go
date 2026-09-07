@@ -100,7 +100,7 @@ func TestOSInstallerEnableFailureRollsBackOrKeepsBackup(t *testing.T) {
 		t.Fatal("Install succeeded despite injected enable failure")
 	}
 	backup, berr := os.ReadFile(path + BackupSuffix) //nolint:gosec // under t.TempDir
-	live, lerr := os.ReadFile(path)                 //nolint:gosec // under t.TempDir
+	live, lerr := os.ReadFile(path)                  //nolint:gosec // under t.TempDir
 	hasBackup := berr == nil && string(backup) == original
 	rolledBack := lerr == nil && string(live) == original
 	if !hasBackup && !rolledBack {
