@@ -1,0 +1,29 @@
+# Not high availability — the opposite. One replica is the design (EDD §1.1),
+# and `maxUnavailable: 0` is precisely how you stop an accidental
+# `kubectl drain` from evicting the only substrate-server pod, or CNPG's only
+# Postgres instance, without a human noticing. A voluntary disruption now
+# blocks and says so instead of silently taking the service down.
+#
+# Consequence, stated on purpose: a node drain will hang until the operator
+# deletes these PDBs (or the pods). That is the intended prompt.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: substrate-server
+  namespace: substrate
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-server
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: substrate-pg
+  namespace: substrate
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      cnpg.io/cluster: substrate-pg

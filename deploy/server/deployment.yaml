@@ -15,10 +15,17 @@ spec:
       labels:
         app.kubernetes.io/name: substrate-server
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: substrate-server
           # ko build --local ./cmd/substrate-server (see .ko.yaml). Substitute.
-          image: ko.local/substrate-server:latest
+          image: "<substrate-server-image>"
           args:
             - -addr=:8080
           ports:
@@ -27,8 +34,30 @@ spec:
           envFrom:
             - configMapRef:
                 name: substrate-server
+            # substrate-server only, NOT the shared `substrate` secret. The
+            # MinIO backup keys live in substrate-backups-s3 and are consumed
+            # by CNPG, not by this process — an RCE here must not hand out the
+            # backup bucket. main.go reads SUBSTRATE_DSN, SUBSTRATE_OLLAMA_URL,
+            # SUBSTRATE_SKILLS_REPO, SUBSTRATE_OTLP_ENDPOINT and nothing else.
             - secretRef:
-                name: substrate
+                name: substrate-server
+          resources:
+            requests:
+              cpu: 100m
+              # Requests == limits for memory: memory is incompressible, and
+              # BestEffort/Burstable QoS makes this the kubelet's first
+              # eviction victim under node pressure on a single-node homelab.
+              memory: 256Mi
+            limits:
+              # No CPU limit on purpose: CFS throttling adds tail latency on a
+              # box that is not CPU-bound. The request is what the scheduler
+              # needs.
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           readinessProbe:
             httpGet:
               path: /readyz
