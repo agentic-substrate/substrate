@@ -68,11 +68,11 @@ type Segment struct {
 }
 
 // Path is a concrete scope location, ordered least specific first. A valid Path
-// starts at Global and uses strictly increasing chain depth, but may skip
-// levels: global → project is valid, project → org is not.
+// starts at Global and each segment's kind is the immediate predecessor of the
+// next (EDD §3.1): global → project is invalid, project → org is not.
 type Path []Segment
 
-// Parse reads the wire form "global:/org:acme/project:plotlens/repo:plotlens%2Fapi".
+// Parse reads the wire form "global:/org:acme/team:core/project:plotlens/repo:plotlens%2Fapi".
 // Names are percent-decoded for "/" only, since repo names contain slashes.
 func Parse(s string) (Path, error) {
 	if s == "" {
@@ -102,8 +102,9 @@ func (p Path) String() string {
 	return strings.Join(parts, "/")
 }
 
-// Validate reports whether p is a well-formed chain: rooted at global, strictly
-// increasing in depth, every Kind in the chain, and every non-global segment named.
+// Validate reports whether p is a well-formed chain: rooted at global, each
+// kind the immediate predecessor of the next, every Kind in the chain, and
+// every non-global segment named.
 func (p Path) Validate() error {
 	if len(p) == 0 {
 		return fmt.Errorf("scope: empty path")
@@ -117,8 +118,8 @@ func (p Path) Validate() error {
 		if d < 0 {
 			return fmt.Errorf("scope: %q is not part of the canonical chain", s.Kind)
 		}
-		if d <= last {
-			return fmt.Errorf("scope: segment %d (%q) does not increase specificity", i, s.Kind)
+		if d != last+1 {
+			return fmt.Errorf("scope: segment %d (%q) is not the immediate predecessor of the previous kind", i, s.Kind)
 		}
 		if s.Kind != Global && s.Name == "" {
 			return fmt.Errorf("scope: segment %d (%q) has an empty name", i, s.Kind)
