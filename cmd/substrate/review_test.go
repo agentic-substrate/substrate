@@ -167,3 +167,118 @@ func TestReviewListDefaultStatusOpen(t *testing.T) {
 		t.Fatalf("list query %q, want status=open", gotQuery)
 	}
 }
+
+const reviewDecideID = "0199a000-0000-7000-8000-000000000001"
+
+func TestReviewDecideRequiresID(t *testing.T) {
+	// Accepting decide with no positional id is the one-line change that makes this red.
+	err := reviewCmd([]string{
+		"decide", "-decision", "approved", "-reason", "ok", "-hostname", "wsl",
+		"-server", "http://127.0.0.1:9", "-token", "lead",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "want one review id") {
+		t.Fatalf("got %v, want one review id", err)
+	}
+}
+
+func TestReviewDecideRequiresReason(t *testing.T) {
+	// Allowing an empty -reason is the one-line change that makes this red.
+	err := reviewCmd([]string{
+		"decide", reviewDecideID, "-decision", "approved", "-hostname", "wsl",
+		"-server", "http://127.0.0.1:9", "-token", "lead", "-commit",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("got %v, want reason required", err)
+	}
+}
+
+func TestReviewDecideDefaultsToDryRun(t *testing.T) {
+	// Defaulting Commit to true when -commit is omitted is the one-line change that makes this red.
+	var sawCommit *bool
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/review/"+reviewDecideID+"/decide" || r.Method != http.MethodPost {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		body, _ = io.ReadAll(r.Body)
+		var in struct {
+			Commit *bool `json:"commit"`
+			DryRun bool  `json:"dry_run"`
+		}
+		_ = json.Unmarshal(body, &in)
+		sawCommit = in.Commit
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + reviewDecideID + `","status":"open","dry_run":true,"decision":"approved","hostname":"wsl","as_kind":"preference","activate":[{"kind":"preference","body":"Prefer tabs."}],"retire":[{"kind":"preference","body":"Prefer spaces."}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout := &bytes.Buffer{}
+	err := reviewCmd([]string{
+		"decide", reviewDecideID,
+		"-decision", "approved", "-reason", "keep wsl", "-hostname", "wsl",
+		"-server", srv.URL, "-token", "lead",
+	}, stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawCommit != nil && *sawCommit {
+		t.Fatal("decide without -commit posted commit=true")
+	}
+	if !strings.Contains(string(body), `"dry_run":true`) && (sawCommit == nil || *sawCommit) {
+		t.Fatalf("decide without -commit must be dry-run; body %s", body)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("dry-run printed nothing")
+	}
+}
+
+func TestReviewDecideCommitPostsDecision(t *testing.T) {
+	// Dropping hostname from the decide body is the one-line change that makes this red.
+	var body []byte
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + reviewDecideID + `","status":"approved","decision":"approved","hostname":"wsl","as_kind":"instruction"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout := &bytes.Buffer{}
+	err := reviewCmd([]string{
+		"decide", reviewDecideID,
+		"-decision", "approved", "-reason", "keep wsl as instruction",
+		"-hostname", "wsl", "-as-kind", "instruction", "-commit",
+		"-server", srv.URL, "-token", "lead",
+	}, stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/review/"+reviewDecideID+"/decide" {
+		t.Fatalf("posted %s", path)
+	}
+	if !strings.Contains(string(body), `"decision":"approved"`) {
+		t.Fatalf("body missing decision: %s", body)
+	}
+	if !strings.Contains(string(body), `"hostname":"wsl"`) {
+		t.Fatalf("body missing hostname: %s", body)
+	}
+	if !strings.Contains(string(body), `"as_kind":"instruction"`) {
+		t.Fatalf("body missing as_kind: %s", body)
+	}
+	if !strings.Contains(string(body), `"reason":"keep wsl as instruction"`) {
+		t.Fatalf("body missing reason: %s", body)
+	}
+}
+
+func TestReviewDecideDryRunAndCommitConflict(t *testing.T) {
+	// Allowing both -dry-run and -commit is the one-line change that makes this red.
+	err := reviewCmd([]string{
+		"decide", reviewDecideID, "-decision", "approved", "-reason", "ok",
+		"-hostname", "wsl", "-dry-run", "-commit",
+		"-server", "http://127.0.0.1:9", "-token", "lead",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "dry-run") {
+		t.Fatalf("got %v, want dry-run/commit conflict", err)
+	}
+}

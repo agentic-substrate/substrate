@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -28,6 +29,8 @@ func reviewCmd(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "list":
 		return reviewList(args[1:], stdout)
+	case "decide":
+		return reviewDecide(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown review command %q", args[0])
 	}
@@ -178,25 +181,158 @@ func relOfReviewSlot(slot string) string {
 	return rel
 }
 
+func reviewDecide(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("review decide", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	server := fs.String("server", os.Getenv("SUBSTRATE_URL"), "control plane base URL")
+	token := fs.String("token", os.Getenv("SUBSTRATE_TOKEN"), "bearer token")
+	decision := fs.String("decision", "", "approved or rejected")
+	reason := fs.String("reason", "", "why this side (or rejection) wins")
+	hostname := fs.String("hostname", "", "winning machine for an import_conflict")
+	asKind := fs.String("as-kind", "", "instruction or preference (R15 kind flip)")
+	dryRun := fs.Bool("dry-run", false, "plan the apply; write nothing (default unless -commit)")
+	commit := fs.Bool("commit", false, "perform the decide write")
+	id := ""
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id = args[0]
+		flagArgs = args[1:]
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+	switch {
+	case id != "" && fs.NArg() == 0:
+	case id == "" && fs.NArg() == 1:
+		id = fs.Arg(0)
+	default:
+		return fmt.Errorf("review decide: want one review id")
+	}
+	if *server == "" {
+		return fmt.Errorf("review decide: -server or SUBSTRATE_URL is required")
+	}
+	if *token == "" {
+		return fmt.Errorf("review decide: -token or SUBSTRATE_TOKEN is required")
+	}
+	if *decision == "" {
+		return fmt.Errorf("review decide: -decision is required")
+	}
+	if strings.TrimSpace(*reason) == "" {
+		return fmt.Errorf("review decide: -reason is required")
+	}
+	if *dryRun && *commit {
+		return fmt.Errorf("review decide: -dry-run and -commit cannot both be set")
+	}
+	doCommit := *commit && !*dryRun
+	body, err := json.Marshal(map[string]any{
+		"decision": *decision,
+		"reason":   *reason,
+		"hostname": *hostname,
+		"as_kind":  *asKind,
+		"dry_run":  !doCommit,
+		"commit":   doCommit,
+	})
+	if err != nil {
+		return err
+	}
+	path := "/v1/review/" + id + "/decide"
+	raw, err := reviewPOST(*server, *token, path, body)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(stdout, formatDecideResponse(raw, !doCommit))
+	return err
+}
+
+func formatDecideResponse(raw []byte, dryRun bool) string {
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return string(raw)
+	}
+	var b strings.Builder
+	if dryRun {
+		b.WriteString("dry-run\n")
+	}
+	writeDecideField(&b, parsed, "id")
+	writeDecideField(&b, parsed, "status")
+	writeDecideField(&b, parsed, "decision")
+	writeDecideField(&b, parsed, "hostname")
+	writeDecideField(&b, parsed, "as_kind")
+	writeDecideField(&b, parsed, "reason")
+	writeDecideRows(&b, parsed, "activate")
+	writeDecideRows(&b, parsed, "retire")
+	if b.Len() == 0 {
+		return string(raw)
+	}
+	return b.String()
+}
+
+func writeDecideField(b *strings.Builder, parsed map[string]any, key string) {
+	v, ok := parsed[key]
+	if !ok || v == nil {
+		return
+	}
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return
+	}
+	fmt.Fprintf(b, "%s: %s\n", key, s)
+}
+
+func writeDecideRows(b *strings.Builder, parsed map[string]any, key string) {
+	raw, ok := parsed[key]
+	if !ok {
+		return
+	}
+	rows, ok := raw.([]any)
+	if !ok {
+		return
+	}
+	for _, row := range rows {
+		m, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := m["kind"].(string)
+		body, _ := m["body"].(string)
+		fmt.Fprintf(b, "%s: %s %s\n", key, kind, strings.ReplaceAll(body, "\n", " "))
+	}
+}
+
 func reviewGET(server, token, path string) ([]byte, error) {
-	url := strings.TrimRight(server, "/") + path
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil) //nolint:gosec // G704: -server is the operator's control plane
+	return reviewRequest(http.MethodGet, server, token, path, nil, "review list")
+}
+
+func reviewPOST(server, token, path string, body []byte) ([]byte, error) {
+	return reviewRequest(http.MethodPost, server, token, path, body, "review decide")
+}
+
+func reviewRequest(method, server, token, path string, body []byte, op string) ([]byte, error) {
+	u := strings.TrimRight(server, "/") + path
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), method, u, rdr) //nolint:gosec // G704: -server is the operator's control plane
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	res, err := client.Do(req) //nolint:gosec // G704: -server is the operator's control plane
 	if err != nil {
-		return nil, fmt.Errorf("review list: %w", err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	body, err := io.ReadAll(res.Body)
+	resp, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, fmt.Errorf("review list: read: %w", err)
+		return nil, fmt.Errorf("%s: read: %w", op, err)
 	}
 	if res.StatusCode >= 400 {
-		return nil, fmt.Errorf("review list: %s: %s", res.Status, body)
+		return nil, fmt.Errorf("%s: %s: %s", op, res.Status, resp)
 	}
-	return body, nil
+	return resp, nil
 }
