@@ -126,12 +126,12 @@ func (o OSInstaller) Uninstall(spec UnitSpec) error {
 	switch o.goos() {
 	case "darwin":
 		plist := launchdPlistPath(spec.Home)
-		if err := o.exec("launchctl", "unload", plist); err != nil {
+		if err := o.exec("launchctl", "unload", plist); err != nil && !unitMissing(err) {
 			return err
 		}
 		return retirePath(plist)
 	default:
-		if err := o.exec("systemctl", "--user", "disable", "--now", systemdUnitName); err != nil {
+		if err := o.exec("systemctl", "--user", "disable", "--now", systemdUnitName); err != nil && !unitMissing(err) {
 			return err
 		}
 		return retirePath(systemdUnitPath(spec.Home))
@@ -161,6 +161,18 @@ func systemdUnitPath(home string) string {
 
 func launchdPlistPath(home string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
+}
+
+func unitMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "not loaded") ||
+		strings.Contains(s, "not been loaded") ||
+		strings.Contains(s, "could not find specified service") ||
+		(strings.Contains(s, "unit file") && strings.Contains(s, "does not exist")) ||
+		strings.Contains(s, "not found")
 }
 
 func retirePath(path string) error {

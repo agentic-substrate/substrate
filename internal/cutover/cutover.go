@@ -39,6 +39,9 @@ type Request struct {
 	Token   string
 	Machine string
 	Binary  string
+	// WriteFile writes one rendered replacement. Tests inject a failing
+	// writer; nil uses atomicWrite. Production never sets this.
+	WriteFile func(path string, body []byte, mode os.FileMode) error
 }
 
 // Replacement is one rendered file cutover would write.
@@ -189,9 +192,34 @@ func dash(s string) string {
 }
 
 func applyRenames(renames []Rename) error {
+	var done []Rename
 	for _, n := range renames {
+		if strings.HasSuffix(n.To, BackupSuffix) {
+			if _, err := os.Lstat(n.To); err == nil {
+				if rbErr := rollbackRenames(done); rbErr != nil {
+					return fmt.Errorf("cutover: refusing to overwrite existing %s (rollback: %w)", n.To, rbErr)
+				}
+				return fmt.Errorf("cutover: refusing to overwrite existing %s", n.To)
+			} else if err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("cutover: stat %s: %w", n.To, err)
+			}
+		}
 		if err := os.Rename(n.From, n.To); err != nil {
+			if rbErr := rollbackRenames(done); rbErr != nil {
+				return fmt.Errorf("cutover: rename %s -> %s: %w (rollback: %v)", n.From, n.To, err, rbErr)
+			}
 			return fmt.Errorf("cutover: rename %s -> %s: %w", n.From, n.To, err)
+		}
+		done = append(done, n)
+	}
+	return nil
+}
+
+func rollbackRenames(done []Rename) error {
+	for i := len(done) - 1; i >= 0; i-- {
+		n := done[i]
+		if err := os.Rename(n.To, n.From); err != nil {
+			return fmt.Errorf("cutover: rollback %s -> %s: %w", n.To, n.From, err)
 		}
 	}
 	return nil

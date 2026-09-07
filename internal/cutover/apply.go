@@ -153,11 +153,15 @@ func confineToRoots(roots []string, path string) error {
 }
 
 func applyCutover(rep *Report, req Request) error {
-	if err := writeJournal(req, rep.Created); err != nil {
-		return err
+	write := atomicWrite
+	if req.WriteFile != nil {
+		write = req.WriteFile
 	}
 	if err := applyRenames(rep.Renames); err != nil {
-		return err
+		return errWithPlan(rep, err)
+	}
+	if err := writeJournal(req, journal{Created: rep.Created, Renames: rep.Renames}); err != nil {
+		return errWithPlan(rep, err)
 	}
 	contents := map[string]string{}
 	for _, f := range req.Files {
@@ -166,28 +170,46 @@ func applyCutover(rep *Report, req Request) error {
 	for _, w := range rep.Writes {
 		body, ok := contents[w.Path]
 		if !ok {
-			return fmt.Errorf("cutover: missing content for %s", w.Path)
+			return errWithPlan(rep, fmt.Errorf("cutover: missing content for %s", w.Path))
 		}
-		if err := atomicWrite(w.Path, []byte(body), w.Mode); err != nil {
-			return err
+		if err := write(w.Path, []byte(body), w.Mode); err != nil {
+			return errWithPlan(rep, fmt.Errorf("cutover: write %s: %w (run adapter uninstall --restore to put files back)", w.Path, err))
 		}
 	}
 	spec := UnitSpec{}
 	if rep.Unit != nil {
 		spec = *rep.Unit
 	}
-	return req.Installer.Install(spec)
+	if err := req.Installer.Install(spec); err != nil {
+		return errWithPlan(rep, err)
+	}
+	return nil
+}
+
+func errWithPlan(rep *Report, err error) error {
+	if err == nil {
+		return nil
+	}
+	if rep == nil {
+		return err
+	}
+	plan := strings.TrimSpace(rep.Format())
+	if plan == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n\nplan:\n%s", err, plan)
 }
 
 type journal struct {
 	Created []string `json:"created"`
+	Renames []Rename `json:"renames,omitempty"`
 }
 
 func journalPath(home string) string {
 	return filepath.Join(home, filepath.FromSlash(journalRel))
 }
 
-func writeJournal(req Request, created []string) error {
+func writeJournal(req Request, j journal) error {
 	home := req.Home
 	if home == "" && len(req.Roots) > 0 {
 		home = req.Roots[0]
@@ -199,7 +221,7 @@ func writeJournal(req Request, created []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("cutover: mkdir journal: %w", err)
 	}
-	raw, err := json.Marshal(journal{Created: created})
+	raw, err := json.Marshal(j)
 	if err != nil {
 		return err
 	}
