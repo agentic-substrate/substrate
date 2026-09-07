@@ -2,10 +2,11 @@ package cutover
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/agentic-substrate/substrate/internal/adapter"
+	"github.com/agentic-substrate/substrate/internal/render"
 )
 
 // Restore puts *.pre-substrate paths back over the live paths they displaced
@@ -36,41 +37,131 @@ func planRestore(req Request) (*Report, error) {
 		Uninstall: true,
 	}
 	seenJournal := map[string]struct{}{}
+	var journaled []string
 	for _, root := range req.Roots {
-		backups, err := findBackups(root)
+		j, err := loadJournal(root, rep, seenJournal)
 		if err != nil {
 			return nil, err
 		}
-		for _, b := range backups {
-			if err := classifyRestore(b, rep); err != nil {
-				return nil, err
-			}
-		}
-		if err := loadJournal(root, rep, seenJournal); err != nil {
-			return nil, err
-		}
+		journaled = append(journaled, journalLivePaths(j)...)
 	}
 	if req.Home != "" {
-		if err := loadJournal(req.Home, rep, seenJournal); err != nil {
+		j, err := loadJournal(req.Home, rep, seenJournal)
+		if err != nil {
+			return nil, err
+		}
+		journaled = append(journaled, journalLivePaths(j)...)
+	}
+	lives, err := plannedLivePaths(req)
+	if err != nil {
+		return nil, err
+	}
+	lives = uniquePaths(append(journaled, lives...))
+	for _, live := range lives {
+		b, err := backupIfPresent(live)
+		if err != nil {
+			// An unreadable planned path must not abort the rest of restore
+			// the way import scan keeps walking past one permission error.
+			continue
+		}
+		if b == nil {
+			continue
+		}
+		if err := classifyRestore(*b, rep); err != nil {
 			return nil, err
 		}
 	}
 	return rep, nil
 }
 
-func loadJournal(home string, rep *Report, seen map[string]struct{}) error {
+func plannedLivePaths(req Request) ([]string, error) {
+	home := req.Home
+	if home == "" && len(req.Roots) > 0 {
+		home = req.Roots[0]
+	}
+	checkouts, err := adapter.Discover(req.Roots)
+	if err != nil {
+		return nil, err
+	}
+	var checkoutPaths []string
+	for _, c := range checkouts {
+		checkoutPaths = append(checkoutPaths, c.Path)
+	}
+	seen := map[string]struct{}{}
+	var lives []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		lives = append(lives, p)
+	}
+	for _, spec := range render.Specs() {
+		for _, p := range spec.Paths {
+			dests, destErr := Destinations(home, checkoutPaths, p)
+			if destErr != nil {
+				continue
+			}
+			for _, d := range dests {
+				add(d)
+			}
+		}
+	}
+	for _, root := range req.Roots {
+		add(filepath.Join(root, memorixStore))
+	}
+	if home != "" {
+		add(systemdUnitPath(home))
+		add(launchdPlistPath(home))
+	}
+	return lives, nil
+}
+
+func loadJournal(home string, rep *Report, seen map[string]struct{}) (*journal, error) {
 	if _, ok := seen[home]; ok {
-		return nil
+		return nil, nil
 	}
 	seen[home] = struct{}{}
 	j, err := readJournal(home)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if j != nil {
 		rep.Created = append(rep.Created, j.Created...)
 	}
-	return nil
+	return j, nil
+}
+
+func journalLivePaths(j *journal) []string {
+	if j == nil {
+		return nil
+	}
+	var out []string
+	for _, n := range j.Renames {
+		if n.From != "" {
+			out = append(out, n.From)
+		}
+	}
+	return out
+}
+
+func uniquePaths(in []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, p := range in {
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 type backup struct {
@@ -81,47 +172,33 @@ type backup struct {
 	SHA  string
 }
 
-func findBackups(root string) ([]backup, error) {
-	var out []backup
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), BackupSuffix) {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return fmt.Errorf("cutover: stat %s: %w", path, err)
-		}
-		b := backup{
-			Path: path,
-			Orig: strings.TrimSuffix(path, BackupSuffix),
-			Dir:  d.IsDir(),
-			Mode: info.Mode(),
-		}
-		if d.IsDir() {
-			out = append(out, b)
-			return filepath.SkipDir
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("cutover: backup %s is not a regular file", path)
-		}
-		body, err := os.ReadFile(path) //nolint:gosec // path is under an operator-supplied -root
-		if err != nil {
-			return fmt.Errorf("cutover: read %s: %w", path, err)
-		}
-		b.SHA = sha256Hex(body)
-		out = append(out, b)
-		return nil
-	})
+func backupIfPresent(live string) (*backup, error) {
+	path := live + BackupSuffix
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	b := backup{
+		Path: path,
+		Orig: live,
+		Dir:  info.IsDir(),
+		Mode: info.Mode(),
+	}
+	if info.IsDir() {
+		return &b, nil
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("cutover: backup %s is not a regular file", path)
+	}
+	body, err := os.ReadFile(path) //nolint:gosec // path is a planned harness/store/unit backup under -root
+	if err != nil {
+		return nil, err
+	}
+	b.SHA = sha256Hex(body)
+	return &b, nil
 }
 
 func classifyRestore(b backup, rep *Report) error {

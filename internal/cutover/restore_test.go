@@ -159,6 +159,51 @@ func TestRestoreDryRunSurfacesMissingBackupConflict(t *testing.T) {
 	}
 }
 
+func TestRestoreIgnoresUnrelatedBackupsAndUnreadableDirs(t *testing.T) {
+	// filepath.WalkDir of every *.pre-substrate, or return err on the first
+	// unreadable directory, is the change that makes this red. Restore is the
+	// inverse of cutover's plan: only harness, store, and unit paths. import
+	// scan was written not to fail closed on one unreadable directory.
+	root := t.TempDir()
+	cache := filepath.Join(root, ".cache", "blob")
+	mustWrite(t, filepath.Join(cache, "x"), "cannot-read\n")
+	if err := os.Chmod(filepath.Join(root, ".cache"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(filepath.Join(root, ".cache"), 0o755)
+	})
+
+	live := filepath.Join(root, ".claude", "CLAUDE.md")
+	mustWrite(t, live, "rendered\n")
+	mustWrite(t, live+BackupSuffix, "original\n")
+
+	unrelated := filepath.Join(root, "Projects", "app", "config")
+	mustWrite(t, unrelated, "live-config\n")
+	mustWrite(t, unrelated+BackupSuffix, "old-config\n")
+
+	if _, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: &FakeInstaller{}}); err != nil {
+		t.Fatalf("restore aborted: %v", err)
+	}
+	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original\n" {
+		t.Fatalf("harness body %q, want original (walk aborted before ~/.claude)", got)
+	}
+	cfg, err := os.ReadFile(unrelated) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cfg) != "live-config\n" {
+		t.Fatalf("glob-restored unrelated *.pre-substrate over config: %q", cfg)
+	}
+	if _, err := os.Lstat(unrelated + BackupSuffix); err != nil {
+		t.Fatal("unrelated backup was consumed; restore must not glob arbitrary *.pre-substrate")
+	}
+}
+
 func TestRestoreDoesNotDeleteWithoutRename(t *testing.T) {
 	// os.Remove(backup) after copying, or truncating the backup, is the
 	// change that makes this red. Restore must rename the backup onto the
