@@ -17,18 +17,6 @@ import (
 	"github.com/agentic-substrate/substrate/internal/render"
 )
 
-func TestImportCutoverRequiresRoot(t *testing.T) {
-	// Defaulting empty -root to os.Getenv("HOME") is the one-line change that makes this red.
-	canary := t.TempDir()
-	t.Setenv("HOME", canary)
-	err := importCutover([]string{
-		"-server", "http://127.0.0.1:1", "-token", "t", "-machine", "wsl",
-	}, &bytes.Buffer{}, &bytes.Buffer{}, &cutover.FakeInstaller{})
-	if err == nil || !strings.Contains(err.Error(), "-root") {
-		t.Fatalf("got %v, want -root required", err)
-	}
-}
-
 func TestImportCutoverDryRunDoesNotWriteOrInstall(t *testing.T) {
 	// Writing the fixture or calling Installer.Install without -commit is the
 	// change that makes this red.
@@ -133,10 +121,10 @@ func TestImportCutoverCommitThenRestoreRoundTrip(t *testing.T) {
 }
 
 func TestImportCutoverDisplacesMountRootAgents(t *testing.T) {
-	// Discovering only the first -root, or omitting /work from Request.Roots
-	// so confineToRoots rejects checkout dests, is the change that makes this
-	// red. A fake /work/<project>/<repo>/AGENTS.md must be renamed, not left
-	// for the adapter to clobber.
+	// Discovering only the first -root, or omitting the mount-root checkout
+	// from Request.Roots so confineToRoots rejects checkout dests, is the
+	// change that makes this red. A fake <mount>/<project>/<repo>/AGENTS.md
+	// must be renamed, not left for the adapter to clobber.
 	home := t.TempDir()
 	work := t.TempDir()
 	repo := filepath.Join(work, "acme", "api")
@@ -178,17 +166,74 @@ func TestImportCutoverDisplacesMountRootAgents(t *testing.T) {
 	}
 }
 
-func TestScanRootsIncludesDefaultMountRoot(t *testing.T) {
-	// Returning operator -root without appending DefaultMountRoot is the
-	// one-line change that makes this red. confineToRoots must permit /work
-	// destinations and Discover must see CONT-4 checkouts.
-	got := scanRoots([]string{"/tmp/fake-home"})
-	if len(got) != 2 || got[0] != "/tmp/fake-home" || got[1] != cutover.DefaultMountRoot {
-		t.Fatalf("scanRoots = %v, want [home %s]", got, cutover.DefaultMountRoot)
+func TestImportCutoverOmittingRootDisplacesMountRoot(t *testing.T) {
+	// Returning "import cutover: -root is required" when the operator passes
+	// none is the one-line change that makes this red. DefaultMountRoot is
+	// injected as a TempDir so this never walks the real mount root; $HOME is a
+	// canary that must stay untouched.
+	homeCanary := t.TempDir()
+	t.Setenv("HOME", homeCanary)
+	mustWriteCLI(t, filepath.Join(homeCanary, ".claude", "CLAUDE.md"), "# from HOME\n")
+	homeBefore := snapshotDir(t, homeCanary)
+
+	work := t.TempDir()
+	orig := cutover.DefaultMountRoot
+	cutover.DefaultMountRoot = work
+	t.Cleanup(func() { cutover.DefaultMountRoot = orig })
+
+	repo := filepath.Join(work, "acme", "api")
+	initGitRepo(t, repo)
+	live := filepath.Join(repo, "AGENTS.md")
+	original := "# repo agents\n"
+	mustWriteCLI(t, live, original)
+	rendered := "# generated\ndo not edit\n\n<!-- sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa generated-at:2026-09-07T00:00:00Z -->\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"targets": []map[string]string{{
+				"path":    "AGENTS.md",
+				"content": rendered,
+				"sha256":  render.DriftHash(rendered),
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	fake := &cutover.FakeInstaller{}
+	if err := importCutover([]string{
+		"-server", srv.URL, "-token", "t", "-machine", "wsl", "-commit",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, fake); err != nil {
+		t.Fatal(err)
 	}
-	dup := scanRoots([]string{"/tmp/fake-home", cutover.DefaultMountRoot})
-	if len(dup) != 2 {
-		t.Fatalf("scanRoots duplicated mount root: %v", dup)
+	backup, err := os.ReadFile(live + cutover.BackupSuffix) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatalf("omitting -root did not displace DefaultMountRoot AGENTS.md: %v", err)
+	}
+	if string(backup) != original {
+		t.Fatalf("backup %q, want original", backup)
+	}
+	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != rendered {
+		t.Fatalf("live body %q, want rendered", got)
+	}
+	if snapshotDir(t, homeCanary) != homeBefore {
+		t.Fatal("omitting -root used $HOME instead of DefaultMountRoot")
+	}
+}
+
+func TestScanRootsDoesNotAppendMountRoot(t *testing.T) {
+	// cutover.WithMountRoot(roots) in scanRoots is the one-line change that
+	// makes this red. An explicit -root list is the Discover set; the mount
+	// root is only the default when that list is empty.
+	got := scanRoots([]string{"/tmp/fake-home"})
+	if len(got) != 1 || got[0] != "/tmp/fake-home" {
+		t.Fatalf("scanRoots = %v, want [/tmp/fake-home] with no implicit mount root", got)
+	}
+	empty := scanRoots(nil)
+	if len(empty) != 1 || empty[0] != cutover.DefaultMountRoot {
+		t.Fatalf("scanRoots(nil) = %v, want [%s]", empty, cutover.DefaultMountRoot)
 	}
 }
 

@@ -21,12 +21,14 @@ import (
 const BackupSuffix = ".pre-substrate"
 
 // DefaultMountRoot is the CONT-4 checkout root written into the adapter unit
-// so Phase 3 cwd slugs match later. Tests assert the unit contains this
-// string; they must not exec against a real /work.
-const DefaultMountRoot = "/work"
+// so Phase 3 cwd slugs match later, and the default -root value at the CLI
+// flag layer when the operator passes none. Tests replace this so they never
+// walk a real /work.
+var DefaultMountRoot = "/work"
 
 // Request is restore or cutover input. Roots must be absolute; there is no
-// $HOME default. Tests pass t.TempDir(); the operator must pass -root.
+// $HOME default. Library callers pass the exact trees to walk. The CLI
+// defaults omitted -root to DefaultMountRoot at the flag layer.
 type Request struct {
 	Roots     []string
 	Home      string
@@ -87,18 +89,6 @@ type Write struct {
 	WouldSHA   string
 	CurrentDr  string
 	WouldDr    string
-}
-
-// WithMountRoot appends DefaultMountRoot so Discover and confineToRoots
-// see /work/<project>/<repo> even when the operator only passed -root $HOME.
-func WithMountRoot(roots []string) []string {
-	out := append([]string(nil), roots...)
-	for _, r := range roots {
-		if r == DefaultMountRoot {
-			return out
-		}
-	}
-	return append(out, DefaultMountRoot)
 }
 
 func validateRoots(roots []string) error {

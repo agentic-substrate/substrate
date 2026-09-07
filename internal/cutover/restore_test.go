@@ -399,7 +399,7 @@ func TestRestoreDoesNotDeleteWithoutRename(t *testing.T) {
 }
 
 func TestSystemdUnitPinsMountRoot(t *testing.T) {
-	// Emitting -roots $HOME or omitting /work is the one-line change that makes this red.
+	// Emitting -roots $HOME or omitting DefaultMountRoot is the one-line change that makes this red.
 	unit := SystemdUnit(UnitSpec{
 		Binary:  "/usr/local/bin/substrate-adapter",
 		Home:    "/tmp/fake-home",
@@ -408,7 +408,7 @@ func TestSystemdUnitPinsMountRoot(t *testing.T) {
 		Machine: "wsl",
 		Roots:   []string{DefaultMountRoot},
 	})
-	if !strings.Contains(unit, "-roots /work") {
+	if !strings.Contains(unit, "-roots "+DefaultMountRoot) {
 		t.Fatalf("unit missing CONT-4 mount root:\n%s", unit)
 	}
 	if strings.Contains(unit, "-roots $HOME") || strings.Contains(unit, "-home $HOME") {
@@ -420,7 +420,7 @@ func TestSystemdUnitPinsMountRoot(t *testing.T) {
 }
 
 func TestLaunchdPlistPinsMountRoot(t *testing.T) {
-	// Omitting /work from the ProgramArguments array is the change that makes this red.
+	// Omitting DefaultMountRoot from the ProgramArguments array is the change that makes this red.
 	plist := LaunchdPlist(UnitSpec{
 		Binary:  "/usr/local/bin/substrate-adapter",
 		Home:    "/tmp/fake-home",
@@ -429,7 +429,7 @@ func TestLaunchdPlistPinsMountRoot(t *testing.T) {
 		Machine: "mac",
 		Roots:   []string{DefaultMountRoot},
 	})
-	if !strings.Contains(plist, "/work") {
+	if !strings.Contains(plist, DefaultMountRoot) {
 		t.Fatalf("plist missing CONT-4 mount root:\n%s", plist)
 	}
 }

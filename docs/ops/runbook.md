@@ -107,10 +107,12 @@ accumulated configuration. There is no backup beyond the `*.pre-substrate`
 renames this command makes. If a `*.pre-substrate` path already exists, stop
 and resolve it by hand — overwriting it destroys an earlier cutover's state.
 
-Always dry-run first. `-root` is required and has no `$HOME` default; passing
-the real home is a deliberate operator choice. Pass both `$HOME` and `/work`
-so harness files under the CONT-4 mount root are displaced to `*.pre-substrate`
-instead of being left for the adapter to treat as drift and overwrite.
+Always dry-run first. `-root` is repeatable and has no `$HOME` default; passing
+the real home is a deliberate operator choice. When `-root` is omitted, cutover
+defaults to `/work` so CONT-4 checkouts are displaced to `*.pre-substrate`
+instead of being left for the adapter to treat as drift and overwrite. Passing
+`-root "$HOME"` does **not** add `/work`; include both if harness files live
+under home and checkouts live under the mount root.
 
 ```sh
 # Preview. Writes nothing. The printed list must match what --restore would invert.
@@ -125,8 +127,9 @@ instead of being left for the adapter to treat as drift and overwrite.
 Nothing in this flow deletes. Live files and the `.memorix` store are renamed
 to `*.pre-substrate`, then rendered files are written. The adapter unit's
 `-home` is the first `-root`; `-roots` is always `/work` so Phase 3 cwd slugs
-match later (CONT-4). Cutover also scans `/work` even if it was omitted, so a
-forgotten second `-root` does not leave checkout `AGENTS.md` unmanaged.
+match later (CONT-4). Cutover walks exactly the `-root` list it was given
+(or `/work` when none was given). Restore is the inverse of that list and
+does not discover extra trees.
 
 **Rollback** — run this before anything else if cutover went wrong. Server rows
 are additive and can stay.

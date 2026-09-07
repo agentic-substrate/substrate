@@ -56,7 +56,7 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 		inst = cutover.NewOSInstaller()
 	}
 	rep, err := cutover.Restore(cutover.Request{
-		Roots:     cutover.WithMountRoot(roots),
+		Roots:     roots,
 		Home:      roots[0],
 		Commit:    *commit && !*dryRun,
 		Force:     *force,

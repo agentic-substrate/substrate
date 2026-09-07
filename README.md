@@ -227,12 +227,12 @@ real run share one code path.
 `substrate import cutover` replaces local harness files with `GET /v1/render`
 output, renames displaced files and the `.memorix` store to `*.pre-substrate`,
 and installs the adapter unit (systemd `--user` on Linux/WSL, launchd on macOS)
-with `-roots /work` (CONT-4). It requires `-root` (repeatable; absolute; no
-`$HOME` default), `-server` (or `SUBSTRATE_URL`), `-token` (or
-`SUBSTRATE_TOKEN`), and `-machine`. Pass `-root "$HOME" -root /work` so
-checkout files under the mount root are displaced rather than left for the
-adapter to overwrite. Cutover also scans `/work` when it is omitted. Without
-`-commit` it is a dry-run: every
+with `-roots /work` (CONT-4). `-root` is repeatable and absolute, with no
+`$HOME` default; omit it to default to `/work`. It also requires `-server`
+(or `SUBSTRATE_URL`), `-token` (or `SUBSTRATE_TOKEN`), and `-machine`. Pass
+`-root "$HOME" -root /work` so home harness files and checkout files under
+the mount root are both displaced. Passing only `-root "$HOME"` does not
+add `/work`. Without `-commit` it is a dry-run: every
 read, classification, and conflict check runs, the plan prints each target's
 current sha256 and the sha256 it would be replaced by, every `*.pre-substrate`
 rename, and the unit that would be installed, and it writes nothing. `-dry-run`
@@ -244,7 +244,8 @@ The dry-run and the real run share one code path.
 
 `substrate adapter uninstall -restore` is the rollback. It requires `-restore`
 and `-root` (absolute; no `$HOME` default). Pass the same roots cutover used
-(`-root "$HOME" -root /work`). It renames `*.pre-substrate` back
+(`-root "$HOME" -root /work`); restore does not discover extra trees. It
+renames `*.pre-substrate` back
 over the live paths, removes generated files that still match the written
 `DriftHash`, and uninstalls the unit. Live edits since cutover are refused
 unless `-force` is set (printed as `DISCARD live edits`).
