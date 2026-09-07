@@ -24,7 +24,7 @@ func destsFor(cfg Config, serverPath string, checkouts []Workspace) ([]string, e
 	}
 	if strings.HasPrefix(serverPath, "~/") {
 		dest := filepath.Join(cfg.Home, filepath.FromSlash(serverPath[2:]))
-		if err := confine(cfg.Home, dest); err != nil {
+		if err := Confine(cfg.Home, dest); err != nil {
 			return nil, fmt.Errorf("adapter: path %s escapes home", serverPath)
 		}
 		return []string{dest}, nil
@@ -32,7 +32,7 @@ func destsFor(cfg Config, serverPath string, checkouts []Workspace) ([]string, e
 	var dests []string
 	for _, c := range checkouts {
 		dest := filepath.Join(c.Path, filepath.FromSlash(serverPath))
-		if err := confine(c.Path, dest); err != nil {
+		if err := Confine(c.Path, dest); err != nil {
 			return nil, fmt.Errorf("adapter: path %s escapes checkout %s", serverPath, c.Path)
 		}
 		dests = append(dests, dest)
@@ -56,7 +56,10 @@ func allowedRenderPath(serverPath string) bool {
 	return false
 }
 
-func confine(root, dest string) error {
+// Confine reports whether dest stays inside root after resolving symlinks.
+// A dest-dir symlink that points outside root is an error — lexical
+// filepath.Rel would miss it.
+func Confine(root, dest string) error {
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return err

@@ -123,6 +123,13 @@ curl localhost:8080/readyz
 ./bin/substrate review decide <id> -decision approved -reason 'keep wsl' \
     -hostname wsl -as-kind instruction -commit \
     -server "$SUBSTRATE_URL" -token "$TOKEN"
+
+./bin/substrate import cutover -root /abs/home -root /work \
+    -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl
+./bin/substrate import cutover -root /abs/home -root /work \
+    -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl -commit
+./bin/substrate adapter uninstall -restore -root /abs/home -root /work
+./bin/substrate adapter uninstall -restore -root /abs/home -root /work -commit
 ```
 
 Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
@@ -215,8 +222,34 @@ one `plan.json`. Without `-commit` the command is a dry-run: it performs every
 read and decision, prints counts and identities of rows that would become
 active, proposed, conflict, and memory grouped by hostname, and writes nothing.
 `-dry-run` is the same path. `-commit` performs the writes. The dry-run and the
-real run share one code path. Cutover is a separate command and is not served
-here.
+real run share one code path.
+
+`substrate import cutover` replaces local harness files with `GET /v1/render`
+output, renames displaced files and the `.memorix` store to `*.pre-substrate`,
+and installs the adapter unit (systemd `--user` on Linux/WSL, launchd on macOS)
+with `-roots /work` (CONT-4). It requires `-root` (repeatable; absolute; no
+`$HOME` default), `-server` (or `SUBSTRATE_URL`), `-token` (or
+`SUBSTRATE_TOKEN`), and `-machine`. Pass `-root "$HOME" -root /work` so
+checkout files under the mount root are displaced rather than left for the
+adapter to overwrite. Cutover also scans `/work` when it is omitted. Without
+`-commit` it is a dry-run: every
+read, classification, and conflict check runs, the plan prints each target's
+current sha256 and the sha256 it would be replaced by, every `*.pre-substrate`
+rename, and the unit that would be installed, and it writes nothing. `-dry-run`
+is the same path. `-commit` performs the writes. An existing `*.pre-substrate`
+path is an error — that file is the one copy of an earlier cutover and is never
+overwritten. Nothing in this flow deletes (Gotcha 6); originals are renamed.
+Rendered replacements are compared with `render.DriftHash` (footer excluded).
+The dry-run and the real run share one code path.
+
+`substrate adapter uninstall -restore` is the rollback. It requires `-restore`
+and `-root` (absolute; no `$HOME` default). Pass the same roots cutover used
+(`-root "$HOME" -root /work`). It renames `*.pre-substrate` back
+over the live paths, removes generated files that still match the written
+`DriftHash`, and uninstalls the unit. Live edits since cutover are refused
+unless `-force` is set (printed as `DISCARD live edits`).
+Without `-commit` it is a dry-run. `-commit` performs the restores. Run it
+before blaming the server: server data is additive and can be left in place.
 
 `substrate review list` and `substrate review decide` are the CLI path through the
 import queue (SYNC-5, R15). List calls `GET /v1/review` (default `status=open`) and

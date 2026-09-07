@@ -1,4 +1,4 @@
-// Command substrate is the operator CLI: import, review, token, offload, doctor.
+// Command substrate is the operator CLI: import, adapter, review, token, offload, doctor.
 package main
 
 import (
@@ -26,6 +26,11 @@ func main() {
 			return
 		case "review":
 			if err := reviewCmd(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		case "adapter":
+			if err := adapterCmd(os.Args[2:], os.Stdout, os.Stderr, nil); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
