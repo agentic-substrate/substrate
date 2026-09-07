@@ -19,6 +19,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
+	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
@@ -66,6 +67,35 @@ func TestReadyzIgnoresGitOutage(t *testing.T) {
 	}
 	if !strings.Contains(body.Reason, "skills repo unreachable") && body.Status == "ok" {
 		t.Fatalf("git health body %+v, want a named failure", body)
+	}
+}
+
+func TestReadyzIgnoresUnreachableSkillsRepo(t *testing.T) {
+	dsn := startMigrated(t)
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
+	git := rest.SkillsRepo{URL: "file:///no/such/skills-repo.git"}
+	h := newHandlerLookup(func() *store.Store { return st }, nil, git, func(context.Context, string) (*identity.Principal, error) {
+		return p, nil
+	})
+
+	readyz := get(t, h, "/readyz")
+	defer func() { _ = readyz.Body.Close() }()
+	if readyz.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(readyz.Body)
+		t.Fatalf("/readyz = %d with skills repo unreachable, want 200 (EDD R27): %s", readyz.StatusCode, b)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health/git", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("/v1/health/git reported ok while the skills repo is unreachable")
 	}
 }
 

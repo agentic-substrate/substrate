@@ -216,6 +216,50 @@ func (a *api) getMemoryCache(ctx context.Context, repos []string, since time.Tim
 	return out.Memories, nil
 }
 
+type manifestSkill struct {
+	Name    string `json:"name"`
+	GitPath string `json:"git_path"`
+	GitSHA  string `json:"git_sha"`
+}
+
+func (a *api) getSkillsManifest(ctx context.Context, repos []string) ([]manifestSkill, error) {
+	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
+	defer cancel()
+	u, err := url.Parse(a.base + "/v1/skills/manifest")
+	if err != nil {
+		return nil, fmt.Errorf("adapter: manifest url: %w", err)
+	}
+	q := u.Query()
+	if len(repos) > 0 {
+		q.Set("repos", strings.Join(repos, ","))
+	}
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	a.auth(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: GET /v1/skills/manifest: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("adapter: GET /v1/skills/manifest: %s", strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Skills []manifestSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("adapter: decode manifest: %w", err)
+	}
+	return out.Skills, nil
+}
+
 func (a *api) postReview(ctx context.Context, scope, path, diff string) error {
 	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
 	defer cancel()

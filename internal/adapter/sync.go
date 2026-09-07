@@ -71,6 +71,9 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 			}
 		}
 	}
+	if err := linkSkills(ctx, db, a, cfg, known); err != nil {
+		return SyncResult{UnknownRemotes: unknown}, err
+	}
 	return SyncResult{UnknownRemotes: unknown}, nil
 }
 

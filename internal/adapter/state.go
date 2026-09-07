@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS kv (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skill_link (
+	name TEXT PRIMARY KEY,
+	git_sha TEXT NOT NULL,
+	linked_paths TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Open opens the adapter SQLite file, creating it and the schema as needed.
@@ -237,4 +242,63 @@ func (db *DB) Workspaces() ([]Workspace, error) {
 		return nil, fmt.Errorf("adapter: workspace rows: %w", err)
 	}
 	return out, nil
+}
+
+type skillLinkRow struct {
+	Name        string
+	GitSHA      string
+	LinkedPaths string
+}
+
+func (db *DB) getSkillLink(name string) (skillLinkRow, bool, error) {
+	var row skillLinkRow
+	err := db.sql.QueryRow(`SELECT name, git_sha, linked_paths FROM skill_link WHERE name = ?`, name).Scan(&row.Name, &row.GitSHA, &row.LinkedPaths)
+	if err == sql.ErrNoRows {
+		return skillLinkRow{}, false, nil
+	}
+	if err != nil {
+		return skillLinkRow{}, false, fmt.Errorf("adapter: skill_link lookup: %w", err)
+	}
+	return row, true, nil
+}
+
+func (db *DB) upsertSkillLink(name, sha, paths string) error {
+	_, err := db.sql.Exec(`
+		INSERT INTO skill_link (name, git_sha, linked_paths)
+		VALUES (?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET
+			git_sha = excluded.git_sha,
+			linked_paths = excluded.linked_paths
+	`, name, sha, paths)
+	if err != nil {
+		return fmt.Errorf("adapter: skill_link upsert: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) listSkillLinks() ([]skillLinkRow, error) {
+	rows, err := db.sql.Query(`SELECT name, git_sha, linked_paths FROM skill_link ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: skill_link list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []skillLinkRow
+	for rows.Next() {
+		var row skillLinkRow
+		if err := rows.Scan(&row.Name, &row.GitSHA, &row.LinkedPaths); err != nil {
+			return nil, fmt.Errorf("adapter: skill_link scan: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adapter: skill_link rows: %w", err)
+	}
+	return out, nil
+}
+
+func (db *DB) deleteSkillLink(name string) error {
+	if _, err := db.sql.Exec(`DELETE FROM skill_link WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("adapter: skill_link delete: %w", err)
+	}
+	return nil
 }

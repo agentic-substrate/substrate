@@ -411,6 +411,7 @@ SELECT s.name, v.git_path, v.git_sha
 FROM skill s
 JOIN skill_version v ON v.id = s.active_version_id
 WHERE s.active_version_id IS NOT NULL
+  AND s.scope_id = ANY($1::uuid[])
 ORDER BY s.name
 `
 
@@ -420,8 +421,8 @@ type ListApprovedSkillsRow struct {
 	GitSha  string
 }
 
-func (q *Queries) ListApprovedSkills(ctx context.Context) ([]ListApprovedSkillsRow, error) {
-	rows, err := q.db.Query(ctx, listApprovedSkills)
+func (q *Queries) ListApprovedSkills(ctx context.Context, scopeIds []pgtype.UUID) ([]ListApprovedSkillsRow, error) {
+	rows, err := q.db.Query(ctx, listApprovedSkills, scopeIds)
 	if err != nil {
 		return nil, err
 	}

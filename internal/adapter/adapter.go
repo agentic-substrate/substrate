@@ -61,6 +61,9 @@ type Config struct {
 	// Now, if set, is the clock for outbox timestamps and backoff. Tests
 	// inject a fake clock so an hour-long outage does not take an hour.
 	Now func() time.Time
+	// SkillsRepo is the git remote cloned into <home>/.substrate/skills.git.
+	// Empty skips the skills loop so a machine without a mirror still renders.
+	SkillsRepo string
 }
 
 func (cfg Config) interval() time.Duration {

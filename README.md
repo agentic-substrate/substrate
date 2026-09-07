@@ -79,7 +79,7 @@ Reasoning, and what we're deliberately *not* building: [`docs/product/positionin
 | Cursor | `~/.cursor/rules/substrate.mdc` | read-only | checkpoint *(Phase 2)* |
 | Headless workers | context pack over MCP (`context.get`) | `memory.*` MCP tools | lease + checkpoint *(Phase 6)* |
 
-Rendering ships today; skill materialization, hooks, and continuity are designed and phased, not shipped. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state.
+Rendering and skill linking ship today; hooks and continuity are designed and phased, not shipped. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state (`skill_version.git_sha` is the only link). The adapter materializes the active approved `git_sha` into `~/.agents/skills/<name>` and refreshes harness symlinks; a skill whose scope or visibility does not match this machine is omitted from `GET /v1/skills/manifest` and is not linked. `active_version_id` can only point at an approved version (Postgres trigger, R6).
 
 ## Quickstart
 
@@ -157,18 +157,23 @@ UUIDv7 `client_id` assigned at enqueue and never regenerated on retry; a replaye
 success (`duplicate: true`). The offline cache is an FTS5 delta of confirmed/probable
 memory for remotes present on the machine, pulled from `GET /v1/memory/cache`. Hook-path
 calls use a 1.5s server timeout and fall back to the outbox (writes) or the cache (reads)
-so they return in under 2s. The skills loop is not implemented yet.
+so they return in under 2s. The skills loop runs on the same tick as render: `GET
+/v1/skills/manifest`, `git fetch` of `-skills-repo` into `<home>/.substrate/skills.git`,
+export of each approved `git_sha` into `<home>/.agents/skills/<name>`, and symlinks into
+`.claude/skills`, `.codex/skills`, and `.cursor/skills`. A skills-repo outage keeps the last
+linked versions and does not affect `/readyz`.
 
 ```sh
 ./bin/substrate-adapter -server https://cp.example -token "$TOKEN" \
-  -home "$HOME" -roots /work -machine wsl
+  -home "$HOME" -roots /work -machine wsl -skills-repo git@github.com:org/skills.git
 ```
 
 **Configuration:** `-addr` (listen address), `-dsn` / `SUBSTRATE_DSN`, `-ollama` /
 `SUBSTRATE_OLLAMA_URL` (empty means keyword-only), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
 (skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). Adapter flags:
 `-server`, `-token` / `SUBSTRATE_TOKEN`, `-machine`, `-home`, `-state`, `-roots`, `-interval`
-(default 5m), `-scope` (review items). The rest of the
+(default 5m), `-scope` (review items), `-skills-repo` / `SUBSTRATE_SKILLS_REPO` (bare mirror
+under `<home>/.substrate/skills.git`; empty skips linking). The rest of the
 intended surface is specified in [`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and gets
 documented here as it lands.
 

@@ -366,6 +366,38 @@ func TestPathCannotBeOverwritten(t *testing.T) {
 	}
 }
 
+func TestActiveVersionIDRejectedByDatabase(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	skillID := newID(t, conn)
+	verID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+		VALUES ($1, 'team/plotlens/r6-unapproved', $2, 'team', $3, 'd')`, skillID, c.project, c.actor)
+	mustExec(t, conn, `INSERT INTO skill_version (id, skill_id, semver, git_sha, git_path, author_id, approval)
+		VALUES ($1, $2, '1.0.0', 'abc', 'skills/team/plotlens/r6-unapproved', $3, 'proposed')`, verID, skillID, c.actor)
+	_, err := conn.Exec(t.Context(), `UPDATE skill SET active_version_id = $1 WHERE id = $2`, verID, skillID)
+	if err == nil {
+		t.Fatal("UPDATE succeeded; the database must reject an unapproved active_version_id (R6)")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("want a Postgres error, got %T %v (a Go-side guard is not R6)", err, err)
+	}
+	if pgErr.Code != "P0001" {
+		t.Fatalf("SQLSTATE %s, want P0001 (RAISE EXCEPTION from the trigger)", pgErr.Code)
+	}
+	if !strings.Contains(strings.ToLower(pgErr.Message), "approved") {
+		t.Fatalf("postgres %q does not mention approval", pgErr.Message)
+	}
+	var active *string
+	if err := conn.QueryRow(t.Context(), `SELECT active_version_id::text FROM skill WHERE id = $1`, skillID).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != nil {
+		t.Fatalf("active_version_id = %v after rejected UPDATE; the trigger must not write", *active)
+	}
+}
+
 func TestCannotUnapproveActiveSkillVersion(t *testing.T) {
 	_, conn := startMigrated(t)
 	c := seedChain(t, conn)
