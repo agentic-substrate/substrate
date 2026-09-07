@@ -16,6 +16,11 @@ spec:
       services:
         - name: substrate-server
           port: 8080
+    # /v1 has NO rate limit, deliberately. It is the adapter's sync surface:
+    # outbox drains and render fetches are bursty by design, and 429-ing them
+    # converts a backlog into a retry storm against the same endpoint. The
+    # bound on /v1 is the tailnet plus per-token auth, not a Traefik bucket.
+    # /mcp is limited because it fans out to Ollama and Postgres per call.
     - kind: Rule
       match: Host(`substrate.<tailnet>`) && PathPrefix(`/v1`)
       services:

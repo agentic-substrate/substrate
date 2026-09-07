@@ -5,16 +5,27 @@ metadata:
 namespace: substrate
 resources:
   - namespace.yaml
+  - networkpolicy.yaml
   - cnpg/cluster.yaml
   - cnpg/scheduled-backup.yaml
-  - cnpg/superuser-secret.yaml
+  - cnpg/backups-secret.yaml
   - server/deployment.yaml
   - server/service.yaml
   - server/configmap.yaml
   - server/secret.yaml
+  - server/pdb.yaml
+  - otel/collector.yaml
   - ingress/middleware.yaml
-  - ingress/certificate.yaml
   - ingress/ingressroute.yaml
+  # Deliberately NOT in resources:
+  #   cnpg/scratch-cluster.yaml   — a default apply must not create a second
+  #                                 20Gi Longhorn volume; the restore job and
+  #                                 runbook step 10 apply it explicitly.
+  #   ingress/certificate.yaml    — cert-manager cannot issue for a tailnet
+  #                                 name. See that file's header; the operator
+  #                                 loads substrate-tls with `tailscale cert`,
+  #                                 or adds this back with an internal CA
+  #                                 issuer.
   - restore/cronjob.yaml
   - restore/rbac.yaml
 configMapGenerator:
