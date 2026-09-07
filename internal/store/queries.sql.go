@@ -122,6 +122,45 @@ func (q *Queries) GetMemory(ctx context.Context, id pgtype.UUID) (GetMemoryRow, 
 	return i, err
 }
 
+const getReviewItem = `-- name: GetReviewItem :one
+SELECT id, kind, scope_id, team_id, payload, status, proposed_by, decided_by, decided_at, reason, created_at
+FROM review_item
+WHERE id = $1
+`
+
+type GetReviewItemRow struct {
+	ID         pgtype.UUID
+	Kind       ReviewKind
+	ScopeID    pgtype.UUID
+	TeamID     pgtype.UUID
+	Payload    []byte
+	Status     ReviewStatus
+	ProposedBy pgtype.UUID
+	DecidedBy  pgtype.UUID
+	DecidedAt  pgtype.Timestamptz
+	Reason     *string
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) GetReviewItem(ctx context.Context, id pgtype.UUID) (GetReviewItemRow, error) {
+	row := q.db.QueryRow(ctx, getReviewItem, id)
+	var i GetReviewItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ScopeID,
+		&i.TeamID,
+		&i.Payload,
+		&i.Status,
+		&i.ProposedBy,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.Reason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getScope = `-- name: GetScope :one
 SELECT id, kind, parent_id, key, team_id, depth, path::text AS path
 FROM scope
@@ -519,6 +558,46 @@ func (q *Queries) ListApprovedSkills(ctx context.Context, scopeIds []pgtype.UUID
 	return items, nil
 }
 
+const listInstructionsByBodies = `-- name: ListInstructionsByBodies :many
+SELECT id, scope_id, key, body, status
+FROM instruction
+WHERE body = ANY($1::text[])
+`
+
+type ListInstructionsByBodiesRow struct {
+	ID      pgtype.UUID
+	ScopeID pgtype.UUID
+	Key     string
+	Body    string
+	Status  InstructionStatus
+}
+
+func (q *Queries) ListInstructionsByBodies(ctx context.Context, bodies []string) ([]ListInstructionsByBodiesRow, error) {
+	rows, err := q.db.Query(ctx, listInstructionsByBodies, bodies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInstructionsByBodiesRow
+	for rows.Next() {
+		var i ListInstructionsByBodiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Key,
+			&i.Body,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMemoryCache = `-- name: ListMemoryCache :many
 SELECT id, scope_id, title, body, identifiers, status, updated_at
 FROM memory
@@ -585,6 +664,46 @@ func (q *Queries) ListOpenImportConflicts(ctx context.Context) ([]ListOpenImport
 	for rows.Next() {
 		var i ListOpenImportConflictsRow
 		if err := rows.Scan(&i.ID, &i.Payload); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPreferencesByBodies = `-- name: ListPreferencesByBodies :many
+SELECT id, scope_id, key, body, status
+FROM preference
+WHERE body = ANY($1::text[])
+`
+
+type ListPreferencesByBodiesRow struct {
+	ID      pgtype.UUID
+	ScopeID pgtype.UUID
+	Key     string
+	Body    string
+	Status  InstructionStatus
+}
+
+func (q *Queries) ListPreferencesByBodies(ctx context.Context, bodies []string) ([]ListPreferencesByBodiesRow, error) {
+	rows, err := q.db.Query(ctx, listPreferencesByBodies, bodies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPreferencesByBodiesRow
+	for rows.Next() {
+		var i ListPreferencesByBodiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScopeID,
+			&i.Key,
+			&i.Body,
+			&i.Status,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -704,6 +823,25 @@ func (q *Queries) Ping(ctx context.Context) (int32, error) {
 	return ok, err
 }
 
+const setInstructionStatus = `-- name: SetInstructionStatus :execrows
+UPDATE instruction
+SET status = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetInstructionStatusParams struct {
+	ID     pgtype.UUID
+	Status InstructionStatus
+}
+
+func (q *Queries) SetInstructionStatus(ctx context.Context, arg SetInstructionStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setInstructionStatus, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setMemorySupersededBy = `-- name: SetMemorySupersededBy :execrows
 UPDATE memory
 SET superseded_by = $2, status = 'superseded', updated_at = now()
@@ -717,6 +855,25 @@ type SetMemorySupersededByParams struct {
 
 func (q *Queries) SetMemorySupersededBy(ctx context.Context, arg SetMemorySupersededByParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setMemorySupersededBy, arg.ID, arg.SupersededBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setPreferenceStatus = `-- name: SetPreferenceStatus :execrows
+UPDATE preference
+SET status = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetPreferenceStatusParams struct {
+	ID     pgtype.UUID
+	Status InstructionStatus
+}
+
+func (q *Queries) SetPreferenceStatus(ctx context.Context, arg SetPreferenceStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPreferenceStatus, arg.ID, arg.Status)
 	if err != nil {
 		return 0, err
 	}

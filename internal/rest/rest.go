@@ -588,10 +588,7 @@ func (h *Handler) reviewDecide(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("id: %w", err))
 		return
 	}
-	var in struct {
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
-	}
+	var in decideInput
 	if err := decodeJSONBody(w, r, &in); err != nil {
 		writeDecodeErr(w, err)
 		return
@@ -610,30 +607,39 @@ func (h *Handler) reviewDecide(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("reason is required"))
 		return
 	}
-	var row store.DecideReviewItemRow
-	err = st.Tx(r.Context(), func(tx pgx.Tx) error {
-		var err error
-		row, err = store.New(tx).DecideReviewItem(r.Context(), store.DecideReviewItemParams{
-			ID:        pgUUID(id),
-			Status:    status,
-			DecidedBy: pgUUID(p.ID),
-			Reason:    &in.Reason,
-		})
-		return err
-	})
+	commit := in.committing()
+	var out decideResult
+	run := func(tx pgx.Tx) error {
+		planned, err := planReviewDecision(r.Context(), tx, id, in, status)
+		if err != nil {
+			return err
+		}
+		out = planned
+		if !commit {
+			out.DryRun = true
+			return nil
+		}
+		return commitReviewDecision(r.Context(), tx, p, id, status, in.Reason, &out)
+	}
+	if commit {
+		err = st.Tx(r.Context(), run)
+	} else {
+		err = st.TxReadOnly(r.Context(), run)
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeErr(w, http.StatusForbidden, fmt.Errorf("review not decidable by this principal"))
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), errors.Is(err, errReviewNotDecidable):
+			writeErr(w, http.StatusForbidden, errReviewNotDecidable)
+			return
+		case isDecideBadRequest(err):
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		default:
+			writePolicy(w, err)
 			return
 		}
-		writePolicy(w, err)
-		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":     uuid.UUID(row.ID.Bytes).String(),
-		"status": string(row.Status),
-		"reason": in.Reason,
-	})
+	writeJSON(w, http.StatusOK, out)
 	h.recordReviewOpen(r.Context())
 }
 

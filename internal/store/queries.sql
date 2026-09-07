@@ -108,3 +108,28 @@ UPDATE review_item
 SET status = $2, decided_by = $3, decided_at = now(), reason = $4
 WHERE id = $1 AND status = 'open'
 RETURNING id, status, decided_by, decided_at, reason;
+
+-- name: GetReviewItem :one
+SELECT id, kind, scope_id, team_id, payload, status, proposed_by, decided_by, decided_at, reason, created_at
+FROM review_item
+WHERE id = $1;
+
+-- name: ListInstructionsByBodies :many
+SELECT id, scope_id, key, body, status
+FROM instruction
+WHERE body = ANY(@bodies::text[]);
+
+-- name: ListPreferencesByBodies :many
+SELECT id, scope_id, key, body, status
+FROM preference
+WHERE body = ANY(@bodies::text[]);
+
+-- name: SetInstructionStatus :execrows
+UPDATE instruction
+SET status = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: SetPreferenceStatus :execrows
+UPDATE preference
+SET status = $2, updated_at = now()
+WHERE id = $1;
