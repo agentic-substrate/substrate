@@ -23,7 +23,10 @@ make test      # tests alone (`-p 1`); coverage is printed, never gated
 sqlc generate  # or `make sqlc` — regenerate internal/store after changing migrations/ or queries.sql
 
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
+scripts/check-deploy-secrets.sh     # grep-based: no credential, token, or tailnet name under deploy/
+scripts/restore-assert.sh N N N     # weekly restore job: zero rows on memory/instruction/audit is a failure
 ```
+
 
 Go 1.26.6+ — the floor in `go.mod`, set by `govulncheck`: earlier 1.26 patches carry reachable
 stdlib CVEs and CI fails on them. On this project's dev machine Go lives at `/usr/local/go/bin` and the helper tools at
