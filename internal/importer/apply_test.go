@@ -331,8 +331,9 @@ func TestApplySecondMachineCreatesZeroNewActive(t *testing.T) {
 }
 
 func TestApplyConflictCarriesHostname(t *testing.T) {
-	// Omitting hostname from the import_conflict payload is the one-line
-	// change that makes this red.
+	// Omitting pair[].hostnames from the import_conflict payload, or accepting
+	// a payload that names only the applying machine, is the one-line change
+	// that makes this red.
 	dsn, conn := startMigrated(t)
 	w := seedImportWorld(t, conn)
 	st := openStore(t, dsn)
@@ -357,19 +358,29 @@ func TestApplyConflictCarriesHostname(t *testing.T) {
 			t.Fatal(err)
 		}
 		n++
-		if !strings.Contains(string(raw), `"hostname"`) {
-			t.Fatalf("import_conflict payload missing hostname: %s", raw)
+		var payload struct {
+			Hostname  string         `json:"hostname"`
+			Hostnames []string       `json:"hostnames"`
+			Slot      string         `json:"slot"`
+			Pair      []ConflictSide `json:"pair"`
 		}
-		var payload map[string]any
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatal(err)
 		}
-		host, _ := payload["hostname"].(string)
-		if host == "" {
-			t.Fatalf("import_conflict hostname empty: %s", raw)
+		hosts := map[string]bool{}
+		for _, side := range payload.Pair {
+			if len(side.Hostnames) == 0 {
+				t.Fatalf("import_conflict pair side has empty hostnames: %s", raw)
+			}
+			for _, h := range side.Hostnames {
+				hosts[h] = true
+			}
 		}
-		if !strings.Contains(string(raw), "wsl") && !strings.Contains(string(raw), "mac") {
-			t.Fatalf("import_conflict payload has no machine name: %s", raw)
+		for _, h := range payload.Hostnames {
+			hosts[h] = true
+		}
+		if !hosts["mac"] || !hosts["wsl"] {
+			t.Fatalf("import_conflict pair[].hostnames missing mac or wsl: %s", raw)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -702,6 +713,27 @@ func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
 	after := tableCounts(t, conn)
 	if after != before {
 		t.Fatalf("fresh client_id duplicated rows\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+func TestApplyRejectsConflictSideWithEmptyHostname(t *testing.T) {
+	// Passing conflict sides through with empty Hostnames is the one-line
+	// change that makes this red.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	plan := twoMachinePlan()
+	plan.Conflicts[0].Pair[0].Hostnames = nil
+	_, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	})
+	if err == nil {
+		t.Fatal("accepted a conflict side with empty hostnames")
+	}
+	if !strings.Contains(err.Error(), "hostname") {
+		t.Fatalf("error %v, want it to name hostname", err)
 	}
 }
 

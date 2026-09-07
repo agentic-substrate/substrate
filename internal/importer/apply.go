@@ -240,6 +240,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Hash:     side.Hash,
 					Body:     side.Body,
 					Slot:     c.Slot,
+					Pair:     c.Pair,
 				})
 				reviewSlots[c.Slot] = true
 			}
@@ -476,10 +477,28 @@ func conflictPayload(req ApplyRequest, row PlannedRow) ([]byte, error) {
 			}
 		}
 	}
+	hosts := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, side := range pair {
+		if len(side.Hostnames) == 0 {
+			return nil, fmt.Errorf("import apply: conflict slot %q has a side with empty hostname", row.Slot)
+		}
+		for _, h := range side.Hostnames {
+			if strings.TrimSpace(h) == "" {
+				return nil, fmt.Errorf("import apply: conflict slot %q has a side with empty hostname", row.Slot)
+			}
+			if !seen[h] {
+				seen[h] = true
+				hosts = append(hosts, h)
+			}
+		}
+	}
+	sort.Strings(hosts)
 	return json.Marshal(map[string]any{
-		"hostname": req.Machine,
-		"slot":     row.Slot,
-		"pair":     pair,
+		"hostname":  req.Machine,
+		"hostnames": hosts,
+		"slot":      row.Slot,
+		"pair":      pair,
 	})
 }
 
@@ -487,6 +506,14 @@ func validatePlanSlots(plan Plan) error {
 	inConflict := map[string]bool{}
 	for _, c := range plan.Conflicts {
 		for _, side := range c.Pair {
+			if len(side.Hostnames) == 0 {
+				return fmt.Errorf("import apply: conflict slot %q has a side with empty hostname", c.Slot)
+			}
+			for _, h := range side.Hostnames {
+				if strings.TrimSpace(h) == "" {
+					return fmt.Errorf("import apply: conflict slot %q has a side with empty hostname", c.Slot)
+				}
+			}
 			inConflict[side.Hash] = true
 		}
 	}
