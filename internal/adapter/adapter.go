@@ -27,6 +27,13 @@ const (
 	MaxOutboxBackoff = 10 * time.Minute
 	// MaxObservationBytes is the PostToolUse body cap (EDD §7.3).
 	MaxObservationBytes = 500
+	// MaxConsecutive4xx is how many isolated 4xx responses on the same
+	// client_id dead-letter the row so a poison payload cannot pin the queue.
+	MaxConsecutive4xx = 3
+	// HookBusyTimeout is the SQLite busy_timeout on the hook path (Gotcha 8).
+	HookBusyTimeout = 200 * time.Millisecond
+	// DefaultBusyTimeout is the daemon SQLite busy_timeout.
+	DefaultBusyTimeout = 5 * time.Second
 )
 
 // DefaultHTTPTimeout bounds GET /v1/render and POST /v1/review. It is not

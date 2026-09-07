@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -255,6 +256,190 @@ func TestHookWriteReturnsUnderTwoSecondsWhenServerHangs(t *testing.T) {
 	}
 }
 
+// TestDrainIsolatesPoisonRowWithoutStallingTheBatch is SYNC-2 for a mixed
+// batch: 30 valid observations, one AWS-key body (400), then 19 more. Goes red
+// if a single 4xx backs off the whole 50-item batch so items 32–50 never POST.
+func TestDrainIsolatesPoisonRowWithoutStallingTheBatch(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	clk := &fakeClock{t: time.Unix(1000, 0).UTC()}
+	srv := newBatchFake(t)
+	srv.commitBeforePoison = true
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Now = clk.now
+
+	var poisonCID string
+	for i := 0; i < 50; i++ {
+		payload := observationJSON(i)
+		if i == 30 {
+			payload = poisonObservationJSON(i)
+		}
+		cid, err := db.Enqueue(payload, clk.now())
+		if err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+		if i == 30 {
+			poisonCID = cid
+		}
+	}
+
+	if err := Drain(t.Context(), db, cfg); err != nil {
+		if n := srv.receivedCount(); n != 49 {
+			t.Fatalf("Drain: %v; server received %d memories, want 49 (30 before the poison + 19 after); a batch-wide 4xx backoff strands the tail", err, n)
+		}
+		t.Fatalf("Drain: %v (a poison 4xx must isolate, not fail the whole batch)", err)
+	}
+
+	got := srv.uniqueClientIDs()
+	if _, ok := got[poisonCID]; ok {
+		t.Fatalf("server stored the poison client_id %s", poisonCID)
+	}
+	if n := srv.receivedCount(); n != 49 {
+		t.Fatalf("server received %d memories, want 49 (30 before the poison + 19 after); a batch-wide 4xx backoff would leave 19 stranded", n)
+	}
+	if n := outboxCount(t, db); n != 1 {
+		t.Fatalf("outbox depth = %d, want 1 poison row still at the head (or dead-lettered only after consecutive 4xx)", n)
+	}
+	if cid := outboxClientID(t, db); cid != poisonCID {
+		t.Fatalf("remaining outbox client_id = %s, want the poison row %s", cid, poisonCID)
+	}
+}
+
+func TestDrainDeadLettersAfterConsecutive4xx(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	clk := &fakeClock{t: time.Unix(2000, 0).UTC()}
+	srv := newBatchFake(t)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Now = clk.now
+
+	good, err := db.Enqueue(observationJSON(0), clk.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	poison, err := db.Enqueue(poisonObservationJSON(1), clk.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < MaxConsecutive4xx; i++ {
+		if err := Drain(t.Context(), db, cfg); err != nil {
+			t.Fatalf("Drain %d: %v", i, err)
+		}
+		clk.advance(backoff(i + 1))
+	}
+
+	if n := srv.receivedCount(); n != 1 {
+		t.Fatalf("server received %d, want the one valid row", n)
+	}
+	if _, ok := srv.uniqueClientIDs()[good]; !ok {
+		t.Fatalf("valid client_id %s never landed", good)
+	}
+	if n := outboxCount(t, db); n != 0 {
+		t.Fatalf("outbox still has %d rows; poison %s should have been dead-lettered after %d consecutive 4xx", n, poison, MaxConsecutive4xx)
+	}
+	errText := deadLetterError(t, db, poison)
+	if errText == "" {
+		t.Fatalf("dead-letter row for %s missing last_error", poison)
+	}
+}
+
+// TestDrain200SubsetKeepsUnconfirmedAndReplays them: a 200 whose body lists
+// only the first 30 of 50 client_ids must not delete the other 20 (SYNC-2).
+// Goes red if Drain calls deleteOutbox(ids) on any 200 instead of the receipted set.
+func TestDrain200SubsetKeepsUnconfirmedAndReplays(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	clk := &fakeClock{t: time.Unix(3000, 0).UTC()}
+	srv := newBatchFake(t)
+	srv.setConfirmLimit(30)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Now = clk.now
+
+	ids := make([]string, 50)
+	for i := 0; i < 50; i++ {
+		cid, err := db.Enqueue(observationJSON(i), clk.now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = cid
+	}
+
+	if err := Drain(t.Context(), db, cfg); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n := srv.receivedCount(); n != 30 {
+		t.Fatalf("server received %d, want exactly the 30 listed in the 200 body", n)
+	}
+	if n := outboxCount(t, db); n != 20 {
+		t.Fatalf("outbox depth = %d, want 20 unconfirmed rows; deleting all ids on any 200 drops them here", n)
+	}
+	remaining := outboxClientIDs(t, db)
+	for _, cid := range ids[:30] {
+		if remaining[cid] {
+			t.Fatalf("receipted %s still in the outbox", cid)
+		}
+	}
+	for _, cid := range ids[30:] {
+		if !remaining[cid] {
+			t.Fatalf("unconfirmed %s missing from the outbox", cid)
+		}
+	}
+
+	srv.setConfirmLimit(0)
+	if err := Drain(t.Context(), db, cfg); err != nil {
+		t.Fatalf("replay Drain: %v", err)
+	}
+	if n := srv.receivedCount(); n != 50 {
+		t.Fatalf("after replay server received %d, want 50", n)
+	}
+	if n := outboxCount(t, db); n != 0 {
+		t.Fatalf("outbox still has %d rows after the remaining 20 landed", n)
+	}
+}
+
+func TestDrainTreats201AsSuccess(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newBatchFake(t)
+	srv.successStatus = http.StatusCreated
+	cfg := testConfig(home, state, srv.URL)
+
+	if _, err := db.Enqueue(observationJSON(0), time.Unix(1, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := Drain(t.Context(), db, cfg); err != nil {
+		t.Fatalf("Drain: %v (2xx must confirm; treating only 200 as success leaves the row queued)", err)
+	}
+	if n := outboxCount(t, db); n != 0 {
+		t.Fatalf("outbox depth = %d after a 201, want 0", n)
+	}
+	if n := srv.receivedCount(); n != 1 {
+		t.Fatalf("server received %d, want 1", n)
+	}
+}
+
+func TestHookAPITimeoutMatchesHookBudget(t *testing.T) {
+	cfg := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "x.sqlite"), "http://127.0.0.1:1")
+	cfg.HTTPTimeout = 15 * time.Second
+	cfg.HookTimeout = DefaultHookTimeout
+	a := newHookAPI(cfg)
+	if a.timeout != DefaultHookTimeout {
+		t.Fatalf("hook API timeout = %s, want %s (HTTPTimeout leaked onto the hook path)", a.timeout, DefaultHookTimeout)
+	}
+	if a.client == nil || a.client.Timeout != DefaultHookTimeout {
+		got := time.Duration(0)
+		if a.client != nil {
+			got = a.client.Timeout
+		}
+		t.Fatalf("hook HTTP client Timeout = %s, want %s so the client itself bounds Gotcha 8", got, DefaultHookTimeout)
+	}
+}
+
 func TestEnqueueObservationTruncatesBodyTo500(t *testing.T) {
 	home := t.TempDir()
 	state := filepath.Join(home, "adapter.sqlite")
@@ -286,8 +471,45 @@ func TestEnqueueObservationTruncatesBodyTo500(t *testing.T) {
 	}
 }
 
+func TestEnqueueObservationDoesNotSplitUTF8Rune(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	cfg := testConfig(home, state, "http://127.0.0.1:1")
+	prefix := strings.Repeat("x", 497)
+	body := prefix + "🎉" // 497 + 4-byte rune = 501 bytes
+	cid, err := EnqueueObservation(db, cfg, Observation{
+		Tool: "bash", Body: body,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload string
+	if err := db.sql.QueryRow(`SELECT payload FROM outbox WHERE client_id = ?`, cid).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(got.Body) {
+		t.Fatalf("truncated body is invalid UTF-8 (%q); body[:500] split a rune", got.Body)
+	}
+	if got.Body != prefix {
+		t.Fatalf("body = %q (len %d), want the 497-byte ASCII prefix without a split rune", got.Body, len(got.Body))
+	}
+}
+
 func observationJSON(i int) []byte {
 	return []byte(fmt.Sprintf(`{"kind":"observation","title":"obs-%d","body":"body-%d","scope":"global:/org:acme/team:core","visibility":"team","verification":{"type":"agent_inference"},"source":{"machine":"test"}}`, i, i))
+}
+
+// AWS example access key: triggers the server's 400 secret scanner (and the
+// fake's poison path) without being a live credential.
+func poisonObservationJSON(i int) []byte {
+	return []byte(fmt.Sprintf(`{"kind":"observation","title":"obs-%d","body":"AKIAIOSFODNN7EXAMPLE leaked-%d","scope":"global:/org:acme/team:core","visibility":"team","verification":{"type":"agent_inference"},"source":{"machine":"test"}}`, i, i))
 }
 
 func mustInjectClientID(t *testing.T, payload []byte, cid string) []byte {
@@ -322,6 +544,37 @@ func outboxClientID(t *testing.T, db *DB) string {
 	return cid
 }
 
+func outboxClientIDs(t *testing.T, db *DB) map[string]bool {
+	t.Helper()
+	rows, err := db.sql.Query(`SELECT client_id FROM outbox`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var cid string
+		if err := rows.Scan(&cid); err != nil {
+			t.Fatal(err)
+		}
+		out[cid] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func deadLetterError(t *testing.T, db *DB, cid string) string {
+	t.Helper()
+	var lastErr string
+	err := db.sql.QueryRow(`SELECT last_error FROM outbox_dead WHERE client_id = ?`, cid).Scan(&lastErr)
+	if err != nil {
+		return ""
+	}
+	return lastErr
+}
+
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time
@@ -340,17 +593,20 @@ func (c *fakeClock) advance(d time.Duration) {
 }
 
 type batchFake struct {
-	mu         sync.Mutex
-	fail       bool
-	hang       <-chan struct{}
-	received   []map[string]any
-	seen       map[string]int
-	posts      int
-	dups       int
-	lastSize   int
-	cache      []map[string]any
-	cacheCalls []string
-	URL        string
+	mu                 sync.Mutex
+	fail               bool
+	hang               <-chan struct{}
+	received           []map[string]any
+	seen               map[string]int
+	posts              int
+	dups               int
+	lastSize           int
+	cache              []map[string]any
+	cacheCalls         []string
+	confirmLimit       int
+	successStatus      int
+	commitBeforePoison bool
+	URL                string
 }
 
 func newBatchFake(t *testing.T) *batchFake {
@@ -383,6 +639,12 @@ func (f *batchFake) setCache(items []map[string]any) {
 	f.cache = items
 }
 
+func (f *batchFake) setConfirmLimit(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.confirmLimit = n
+}
+
 func (f *batchFake) handleBatch(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	hang := f.hang
@@ -411,24 +673,56 @@ func (f *batchFake) handleBatch(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lastSize = len(items)
-	results := make([]map[string]any, 0, len(items))
-	for _, it := range items {
-		cid, _ := it["client_id"].(string)
-		dup := f.seen[cid] > 0
-		f.seen[cid]++
-		if dup {
-			f.dups++
-		} else {
-			f.received = append(f.received, it)
+
+	poisonAt := -1
+	for i, it := range items {
+		body, _ := it["body"].(string)
+		if strings.Contains(body, "AKIAIOSFODNN7EXAMPLE") {
+			poisonAt = i
+			break
 		}
+	}
+	if poisonAt >= 0 {
+		if f.commitBeforePoison {
+			for _, it := range items[:poisonAt] {
+				f.receiveLocked(it)
+			}
+		}
+		http.Error(w, `{"error":"SUBSTRATE_SECRET_DETECTED"}`, http.StatusBadRequest)
+		return
+	}
+
+	results := make([]map[string]any, 0, len(items))
+	for i, it := range items {
+		if f.confirmLimit > 0 && i >= f.confirmLimit {
+			break
+		}
+		cid := f.receiveLocked(it)
 		results = append(results, map[string]any{
 			"client_id":  cid,
 			"subject_id": "mem-" + cid,
-			"duplicate":  dup,
+			"duplicate":  f.seen[cid] > 1,
 		})
 	}
+	status := http.StatusOK
+	if f.successStatus != 0 {
+		status = f.successStatus
+	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+func (f *batchFake) receiveLocked(it map[string]any) string {
+	cid, _ := it["client_id"].(string)
+	dup := f.seen[cid] > 0
+	f.seen[cid]++
+	if dup {
+		f.dups++
+	} else {
+		f.received = append(f.received, it)
+	}
+	return cid
 }
 
 func (f *batchFake) handleCache(w http.ResponseWriter, r *http.Request) {
@@ -490,4 +784,10 @@ func (f *batchFake) lastCacheQuery() string {
 		return ""
 	}
 	return f.cacheCalls[len(f.cacheCalls)-1]
+}
+
+func (f *batchFake) cacheCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.cacheCalls)
 }

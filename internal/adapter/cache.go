@@ -25,6 +25,10 @@ const cacheSinceKey = "cache_since"
 // RefreshCache pulls GET /v1/memory/cache for remotes present on this machine
 // and upserts the FTS5 delta (EDD §7.2).
 func RefreshCache(ctx context.Context, db *DB, cfg Config) error {
+	return refreshCache(ctx, db, newAPI(cfg))
+}
+
+func refreshCache(ctx context.Context, db *DB, api *api) error {
 	if db == nil {
 		return fmt.Errorf("adapter: nil db")
 	}
@@ -32,36 +36,51 @@ func RefreshCache(ctx context.Context, db *DB, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	since, err := db.kvTime(cacheSinceKey)
-	if err != nil {
-		return err
+	if len(repos) == 0 {
+		return db.pruneCache(ctx, repos)
 	}
-	items, err := newAPI(cfg).getMemoryCache(ctx, repos, since)
+	since, err := db.kvTime(ctx, cacheSinceKey)
 	if err != nil {
 		return err
 	}
 	var maxUpdated time.Time
-	for _, it := range items {
-		row := CachedMemory{
-			ID:          it.ID,
-			ScopePath:   it.ScopePath,
-			Title:       it.Title,
-			Body:        it.Body,
-			Identifiers: it.Identifiers,
-			Status:      it.Status,
-			UpdatedAt:   it.UpdatedAt,
-		}
-		if err := db.upsertCache(row); err != nil {
+	for _, repo := range repos {
+		items, err := api.getMemoryCache(ctx, []string{repo}, since)
+		if err != nil {
 			return err
 		}
-		if it.UpdatedAt.After(maxUpdated) {
-			maxUpdated = it.UpdatedAt
+		for _, it := range items {
+			if it.Status != "confirmed" && it.Status != "probable" {
+				continue
+			}
+			scopePath := it.ScopePath
+			if scopePath == "" {
+				scopePath = repo
+			}
+			row := CachedMemory{
+				ID:          it.ID,
+				ScopePath:   scopePath,
+				Title:       it.Title,
+				Body:        it.Body,
+				Identifiers: it.Identifiers,
+				Status:      it.Status,
+				UpdatedAt:   it.UpdatedAt,
+			}
+			if err := db.upsertCacheContext(ctx, row); err != nil {
+				return err
+			}
+			if it.UpdatedAt.After(maxUpdated) {
+				maxUpdated = it.UpdatedAt
+			}
 		}
+	}
+	if err := db.pruneCache(ctx, repos); err != nil {
+		return err
 	}
 	if maxUpdated.IsZero() {
 		return nil
 	}
-	return db.setKV(cacheSinceKey, maxUpdated.UTC().Format(time.RFC3339))
+	return db.setKV(ctx, cacheSinceKey, maxUpdated.UTC().Format(time.RFC3339))
 }
 
 func (db *DB) presentRepos() ([]string, error) {
@@ -85,8 +104,12 @@ func (db *DB) presentRepos() ([]string, error) {
 }
 
 func (db *DB) upsertCache(m CachedMemory) error {
+	return db.upsertCacheContext(context.Background(), m)
+}
+
+func (db *DB) upsertCacheContext(ctx context.Context, m CachedMemory) error {
 	ids := strings.Join(m.Identifiers, " ")
-	_, err := db.sql.Exec(`
+	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO memory_cache (id, scope_path, title, body, identifiers, status, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -103,13 +126,56 @@ func (db *DB) upsertCache(m CachedMemory) error {
 	return nil
 }
 
+func (db *DB) pruneCache(ctx context.Context, repos []string) error {
+	rows, err := db.sql.QueryContext(ctx, `SELECT id, scope_path FROM memory_cache`)
+	if err != nil {
+		return fmt.Errorf("adapter: cache prune: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var drop []string
+	for rows.Next() {
+		var id, scopePath string
+		if err := rows.Scan(&id, &scopePath); err != nil {
+			return fmt.Errorf("adapter: cache prune: %w", err)
+		}
+		if scopePath == "" {
+			continue
+		}
+		if !cacheInPresentChain(scopePath, repos) {
+			drop = append(drop, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("adapter: cache prune: %w", err)
+	}
+	for _, id := range drop {
+		if _, err := db.sql.ExecContext(ctx, `DELETE FROM memory_cache WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("adapter: cache prune: %w", err)
+		}
+	}
+	return nil
+}
+
+func cacheInPresentChain(scopePath string, repos []string) bool {
+	for _, repo := range repos {
+		if repo != "" && strings.Contains(scopePath, repo) {
+			return true
+		}
+	}
+	return false
+}
+
 // SearchCache runs an FTS5 query over the offline memory cache.
 func (db *DB) SearchCache(query string) ([]CachedMemory, error) {
+	return db.searchCache(context.Background(), query)
+}
+
+func (db *DB) searchCache(ctx context.Context, query string) ([]CachedMemory, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}
-	rows, err := db.sql.Query(`
+	rows, err := db.sql.QueryContext(ctx, `
 		SELECT id, scope_path, title, body, identifiers, status, updated_at
 		FROM memory_cache
 		WHERE rowid IN (
@@ -149,12 +215,16 @@ func HookSearch(ctx context.Context, db *DB, cfg Config, query string) ([]Cached
 	defer cancel()
 	dctx, cancelRefresh := context.WithTimeout(ctx, cfg.hookTimeout())
 	defer cancelRefresh()
-	_ = RefreshCache(dctx, db, cfg)
-	return db.SearchCache(query)
+	_ = refreshCache(dctx, db, newHookAPI(cfg))
+	hits, err := db.searchCache(ctx, query)
+	if err != nil && failOpen(err) {
+		return nil, nil
+	}
+	return hits, err
 }
 
-func (db *DB) setKV(key, value string) error {
-	_, err := db.sql.Exec(`
+func (db *DB) setKV(ctx context.Context, key, value string) error {
+	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO kv (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`, key, value)
@@ -164,9 +234,9 @@ func (db *DB) setKV(key, value string) error {
 	return nil
 }
 
-func (db *DB) kvTime(key string) (time.Time, error) {
+func (db *DB) kvTime(ctx context.Context, key string) (time.Time, error) {
 	var raw string
-	err := db.sql.QueryRow(`SELECT value FROM kv WHERE key = ?`, key).Scan(&raw)
+	err := db.sql.QueryRowContext(ctx, `SELECT value FROM kv WHERE key = ?`, key).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, nil
 	}

@@ -29,12 +29,14 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 		return SyncResult{}, err
 	}
 	now := time.Now().Unix()
+	keep := map[string]struct{}{}
 	var remotes []string
 	seen := map[string]struct{}{}
 	for _, ws := range checkouts {
 		if err := db.upsertWorkspace(ws, now); err != nil {
 			return SyncResult{}, err
 		}
+		keep[ws.Path] = struct{}{}
 		if ws.Remote == "" {
 			continue
 		}
@@ -43,6 +45,9 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 		}
 		seen[ws.Remote] = struct{}{}
 		remotes = append(remotes, ws.Remote)
+	}
+	if err := db.pruneWorkspaces(keep); err != nil {
+		return SyncResult{}, err
 	}
 
 	a := newAPI(cfg)

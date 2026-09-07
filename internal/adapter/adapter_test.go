@@ -571,6 +571,43 @@ func TestDiscoverTwoLevelsUpsertsWorkspaceAndSurfacesUnknownRemote(t *testing.T)
 	}
 }
 
+func TestSyncPrunesWorkspaceForRemovedCheckout(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(root, "proj", "keep")
+	gone := filepath.Join(root, "proj", "gone")
+	initRepo(t, keep, "https://github.com/acme/keep.git")
+	initRepo(t, gone, "https://github.com/acme/gone.git")
+
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newFake(t)
+	srv.bound["github.com/acme/keep"] = true
+	srv.bound["github.com/acme/gone"] = true
+	srv.setTargets(homeTarget(claudeAt(t, "2026-05-02T00:00:00Z")))
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Roots = []string{root}
+
+	if _, err := Sync(t.Context(), db, cfg); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Sync(t.Context(), db, cfg); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	spaces, err := db.Workspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ws := range spaces {
+		if ws.Path == gone || ws.Remote == "github.com/acme/gone" {
+			t.Fatalf("removed checkout still in workspace: %+v", ws)
+		}
+	}
+}
+
 func TestSSEWakeRerendersWithoutWaitingForTick(t *testing.T) {
 	home := t.TempDir()
 	state := filepath.Join(home, "adapter.sqlite")

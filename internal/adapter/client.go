@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,38 @@ func newAPI(cfg Config) *api {
 		client:  cfg.httpClient(),
 		timeout: cfg.httpTimeout(),
 	}
+}
+
+func newHookAPI(cfg Config) *api {
+	timeout := cfg.hookTimeout()
+	inner := cfg.httpClient()
+	client := &http.Client{
+		Transport:     inner.Transport,
+		CheckRedirect: inner.CheckRedirect,
+		Jar:           inner.Jar,
+		Timeout:       timeout,
+	}
+	return &api{
+		base:    strings.TrimRight(cfg.Server, "/"),
+		token:   cfg.Token,
+		client:  client,
+		timeout: timeout,
+	}
+}
+
+type httpStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+func isClientError(err error) bool {
+	var hs *httpStatusError
+	if !errors.As(err, &hs) {
+		return false
+	}
+	return hs.status >= 400 && hs.status < 500
 }
 
 func (a *api) callTimeout() time.Duration {
@@ -111,8 +144,18 @@ func (a *api) postMemoryBatch(ctx context.Context, items []json.RawMessage) ([]b
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("adapter: POST /v1/memory/batch: status %d", res.StatusCode)
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		var out []batchResult
+		if json.Unmarshal(body, &out) == nil && len(out) > 0 {
+			return out, &httpStatusError{
+				status: res.StatusCode,
+				msg:    fmt.Sprintf("adapter: POST /v1/memory/batch: status %d", res.StatusCode),
+			}
+		}
+		return nil, &httpStatusError{
+			status: res.StatusCode,
+			msg:    fmt.Sprintf("adapter: POST /v1/memory/batch: status %d", res.StatusCode),
+		}
 	}
 	var out []batchResult
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -139,9 +182,10 @@ func (a *api) getMemoryCache(ctx context.Context, repos []string, since time.Tim
 		return nil, fmt.Errorf("adapter: cache url: %w", err)
 	}
 	q := u.Query()
-	if len(repos) > 0 {
-		q.Set("repos", strings.Join(repos, ","))
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("adapter: GET /v1/memory/cache: repos is required")
 	}
+	q.Set("repos", strings.Join(repos, ","))
 	if !since.IsZero() {
 		q.Set("since", since.UTC().Format(time.RFC3339))
 	}
