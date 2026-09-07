@@ -13,6 +13,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/policy"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
@@ -68,6 +69,7 @@ func (s *Service) Get(ctx context.Context, in GetIn) (GetOut, error) {
 	if err != nil {
 		return GetOut{}, err
 	}
+	observe.SetScopePath(ctx, path.String())
 	var taskID *uuid.UUID
 	if in.TaskID != "" {
 		id, err := uuid.Parse(in.TaskID)

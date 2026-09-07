@@ -14,6 +14,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/instruction"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/policy"
 	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/scope"
@@ -40,13 +41,20 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 		return Pack{}, err
 	}
 
+	ctx, span := observe.Start(ctx, observe.SpanCompile)
+	defer span.End()
+
 	var d draft
 	var chain []uuid.UUID
-	err = st.TxChecked(ctx, "context.get", req.Scope, func(tx pgx.Tx) error {
-		var err error
-		d, chain, err = loadDraft(ctx, tx, req.Scope, p)
-		return err
-	})
+	err = func() error {
+		dbCtx, dbSpan := observe.Start(ctx, observe.SpanDatabase)
+		defer dbSpan.End()
+		return st.TxChecked(dbCtx, "context.get", req.Scope, func(tx pgx.Tx) error {
+			var err error
+			d, chain, err = loadDraft(dbCtx, tx, req.Scope, p)
+			return err
+		})
+	}()
 	if err != nil {
 		return Pack{}, err
 	}
@@ -82,6 +90,11 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 	}
 	if Estimate(pack.Markdown) > budget {
 		return Pack{}, fmt.Errorf("%w: packed markdown exceeds budget", policy.ErrBudgetTooSmall)
+	}
+	if r := observe.FromContext(ctx); r != nil {
+		for _, s := range pack.Sections {
+			r.RecordPackTokens(ctx, s.Name, s.Tokens)
+		}
 	}
 	return pack, nil
 }

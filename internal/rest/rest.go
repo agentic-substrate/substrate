@@ -19,6 +19,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/instruction"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/policy"
 	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/render"
@@ -42,10 +43,11 @@ type GitChecker interface {
 
 // Options wires the /v1 surface.
 type Options struct {
-	Store  func() *store.Store
-	Memory *memory.Service
-	Git    GitChecker
-	Now    func() time.Time
+	Store   func() *store.Store
+	Memory  *memory.Service
+	Git     GitChecker
+	Now     func() time.Time
+	Observe *observe.Runtime
 }
 
 // Handler serves /v1 for the adapter and CLI.
@@ -55,6 +57,7 @@ type Handler struct {
 	git      GitChecker
 	now      func() time.Time
 	hub      *hub
+	obs      *observe.Runtime
 }
 
 func (h *Handler) store() *store.Store {
@@ -80,6 +83,7 @@ func New(opts Options) *Handler {
 		git:      opts.Git,
 		now:      now,
 		hub:      newHub(eventBuffer),
+		obs:      opts.Observe,
 	}
 }
 
@@ -497,6 +501,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		writePolicy(w, err)
 		return
 	}
+	h.recordReviewOpen(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":     uuid.UUID(row.ID.Bytes).String(),
 		"kind":   string(row.Kind),
@@ -628,6 +633,44 @@ func (h *Handler) reviewDecide(w http.ResponseWriter, r *http.Request) {
 		"id":     uuid.UUID(row.ID.Bytes).String(),
 		"status": string(row.Status),
 		"reason": in.Reason,
+	})
+	h.recordReviewOpen(r.Context())
+}
+
+func (h *Handler) recordReviewOpen(ctx context.Context) {
+	if h == nil || h.obs == nil {
+		return
+	}
+	st := h.store()
+	if st == nil {
+		return
+	}
+	_ = st.Tx(ctx, func(tx pgx.Tx) error {
+		// LEFT JOIN against the enum so a kind with zero open rows is
+		// recorded as 0. GROUP BY over open rows alone drops that kind
+		// and the last gauge value sticks (empty queue, alert still lit).
+		rows, err := tx.Query(ctx, `
+			SELECT k.kind::text, COALESCE(c.n, 0)
+			FROM unnest(enum_range(NULL::review_kind)) AS k(kind)
+			LEFT JOIN (
+				SELECT kind, count(*) AS n
+				FROM review_item
+				WHERE status = 'open'
+				GROUP BY kind
+			) c ON c.kind = k.kind`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var kind string
+			var n int64
+			if err := rows.Scan(&kind, &n); err != nil {
+				return err
+			}
+			h.obs.SetReviewOpen(ctx, kind, n)
+		}
+		return rows.Err()
 	})
 }
 

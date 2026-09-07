@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pgvector/pgvector-go"
 
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
@@ -83,6 +84,9 @@ func (s *Service) storeEmbedding(ctx context.Context, st *store.Store, id, title
 	vecs, err := s.embedder.Embed(ctx, []string{embedText(title, body)})
 	if err != nil || len(vecs) != 1 || len(vecs[0]) != embedDim {
 		slog.Warn("embedding deferred to backfill", "memory_id", id, "reason", errText(err))
+		if r := observe.FromContext(ctx); r != nil {
+			r.RecordEmbedFailure(ctx)
+		}
 		return false
 	}
 	v := pgvector.NewVector(vecs[0])

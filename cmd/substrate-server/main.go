@@ -26,6 +26,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/store"
 	"github.com/agentic-substrate/substrate/internal/version"
@@ -43,6 +44,7 @@ func run() error {
 	dsn := flag.String("dsn", os.Getenv("SUBSTRATE_DSN"), "postgres DSN; migrations run under an advisory lock")
 	ollama := flag.String("ollama", os.Getenv("SUBSTRATE_OLLAMA_URL"), "Ollama base URL for embeddings; empty means keyword-only retrieval")
 	skills := flag.String("skills-repo", os.Getenv("SUBSTRATE_SKILLS_REPO"), "skills git remote; reachability is /v1/health/git, never /readyz")
+	otlp := flag.String("otlp", os.Getenv("SUBSTRATE_OTLP_ENDPOINT"), "OTLP HTTP collector endpoint; empty disables export")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -65,17 +67,35 @@ func run() error {
 	} else {
 		slog.Info("embeddings disabled; retrieval is keyword-only")
 	}
-	return serve(ctx, ln, *dsn, embedder, rest.SkillsRepo{URL: *skills})
+	obs, err := observe.Setup(ctx, observe.Config{
+		Endpoint: *otlp,
+		Service:  "substrate-server",
+		Logger:   slog.Default(),
+	})
+	if err != nil {
+		return fmt.Errorf("otlp: %w", err)
+	}
+	defer func() {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = obs.Shutdown(shutCtx)
+	}()
+	if *otlp == "" {
+		slog.Info("otlp export disabled")
+	} else {
+		slog.Info("otlp export enabled")
+	}
+	return serve(ctx, ln, *dsn, embedder, rest.SkillsRepo{URL: *skills}, obs)
 }
 
 type runtime struct {
 	store atomic.Pointer[store.Store]
 }
 
-func serve(ctx context.Context, ln net.Listener, dsn string, embedder memory.Embedder, git rest.GitChecker) error {
+func serve(ctx context.Context, ln net.Listener, dsn string, embedder memory.Embedder, git rest.GitChecker, obs *observe.Runtime) error {
 	rt := &runtime{}
 	srv := &http.Server{
-		Handler:           newHandler(rt.getStore, embedder, git),
+		Handler:           newHandler(rt.getStore, embedder, git, obs),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -137,7 +157,7 @@ func connectLoop(ctx context.Context, dsn string, rt *runtime) {
 	}
 }
 
-func newHandler(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker) http.Handler {
+func newHandler(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker, obs *observe.Runtime) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
@@ -147,10 +167,10 @@ func newHandler(getStore func() *store.Store, embedder memory.Embedder, git rest
 			return nil, identity.ErrUnauthorized
 		}
 		return identity.Lookup(ctx, st.Pool(), tok)
-	})
+	}, obs)
 }
 
-func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker, lookup identity.LookupFunc) http.Handler {
+func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, git rest.GitChecker, lookup identity.LookupFunc, obs *observe.Runtime) http.Handler {
 	if getStore == nil {
 		getStore = func() *store.Store { return nil }
 	}
@@ -163,7 +183,11 @@ func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, gi
 		})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := getStore().Ping(r.Context()); err != nil {
+		err := getStore().Ping(r.Context())
+		if obs != nil {
+			obs.SetReady(r.Context(), err == nil)
+		}
+		if err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"status": "not_ready",
 				"reason": err.Error(),
@@ -176,8 +200,8 @@ func newHandlerLookup(getStore func() *store.Store, embedder memory.Embedder, gi
 	memSvc := memory.Register(mcpSrv, getStore, embedder)
 	compiler.Register(mcpSrv, getStore, memSvc)
 	mux.Handle("/mcp", mcpSrv.Handler())
-	rest.New(rest.Options{Store: getStore, Memory: memSvc, Git: git}).Mount(mux)
-	return identity.Middleware(lookup)(mux)
+	rest.New(rest.Options{Store: getStore, Memory: memSvc, Git: git, Observe: obs}).Mount(mux)
+	return observe.Middleware(obs)(identity.Middleware(lookup)(mux))
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
