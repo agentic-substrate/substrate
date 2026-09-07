@@ -21,12 +21,14 @@ import (
 const BackupSuffix = ".pre-substrate"
 
 // DefaultMountRoot is the CONT-4 checkout root written into the adapter unit
-// so Phase 3 cwd slugs match later. Tests assert the unit contains this
-// string; they must not exec against a real /work.
-const DefaultMountRoot = "/work"
+// so Phase 3 cwd slugs match later, and the default -root value at the CLI
+// flag layer when the operator passes none. Tests replace this so they never
+// walk a real /work.
+var DefaultMountRoot = "/work"
 
 // Request is restore or cutover input. Roots must be absolute; there is no
-// $HOME default. Tests pass t.TempDir(); the operator must pass -root.
+// $HOME default. Library callers pass the exact trees to walk. The CLI
+// defaults omitted -root to DefaultMountRoot at the flag layer.
 type Request struct {
 	Roots     []string
 	Home      string
@@ -89,18 +91,6 @@ type Write struct {
 	WouldDr    string
 }
 
-// WithMountRoot appends DefaultMountRoot so Discover and confineToRoots
-// see /work/<project>/<repo> even when the operator only passed -root $HOME.
-func WithMountRoot(roots []string) []string {
-	out := append([]string(nil), roots...)
-	for _, r := range roots {
-		if r == DefaultMountRoot {
-			return out
-		}
-	}
-	return append(out, DefaultMountRoot)
-}
-
 func validateRoots(roots []string) error {
 	if len(roots) == 0 {
 		return fmt.Errorf("cutover: -root is required (refuses to guess $HOME)")
@@ -124,8 +114,20 @@ func unitSpec(req Request) UnitSpec {
 		Server:  req.Server,
 		Token:   req.Token,
 		Machine: req.Machine,
-		Roots:   []string{DefaultMountRoot},
+		Roots:   unitRoots(req.Roots),
 	}
+}
+
+// unitRoots is what the installed daemon will scan. It must be the set cutover
+// actually displaced, never a wider one: a root the daemon scans but cutover
+// did not harness has no .pre-substrate backup, so the first render overwrites
+// live files with no way back. An empty request keeps the CONT-4 default, which
+// is also what the CLI defaults an omitted -root to.
+func unitRoots(roots []string) []string {
+	if len(roots) == 0 {
+		return []string{DefaultMountRoot}
+	}
+	return append([]string(nil), roots...)
 }
 
 func sha256Hex(b []byte) string {

@@ -144,8 +144,15 @@ func TestCutoverDryRunDoesNotWrite(t *testing.T) {
 	if !strings.Contains(out, live+BackupSuffix) {
 		t.Fatalf("dry-run omitted *.pre-substrate rename:\n%s", out)
 	}
-	if !strings.Contains(out, DefaultMountRoot) {
-		t.Fatalf("dry-run omitted unit install with %s:\n%s", DefaultMountRoot, out)
+	// Restoring unitRoots to an unconditional []string{DefaultMountRoot} is the
+	// one-line change that makes this red: the plan would advertise a wider
+	// scan set than this request harnessed.
+	if rep.Unit == nil || len(rep.Unit.Roots) != 1 || rep.Unit.Roots[0] != root {
+		var got []string
+		if rep.Unit != nil {
+			got = rep.Unit.Roots
+		}
+		t.Fatalf("unit roots %v, want [%s]", got, root)
 	}
 	if snapshotTree(t, root) != before {
 		t.Fatal("cutover --dry-run mutated the fixture tree")
@@ -267,8 +274,11 @@ func TestCutoverRestoreRoundTripByHash(t *testing.T) {
 	if len(fake.Installs) != 1 {
 		t.Fatalf("Installs = %d, want 1", len(fake.Installs))
 	}
-	if got := fake.Installs[0].Roots; len(got) != 1 || got[0] != DefaultMountRoot {
-		t.Fatalf("unit roots %v, want [%s]", fake.Installs[0].Roots, DefaultMountRoot)
+	// Restoring unitRoots to an unconditional []string{DefaultMountRoot} is the
+	// one-line change that makes this red: the daemon would then render over
+	// DefaultMountRoot, which this cutover never backed up.
+	if got := fake.Installs[0].Roots; len(got) != 1 || got[0] != root {
+		t.Fatalf("unit roots %v, want [%s]", fake.Installs[0].Roots, root)
 	}
 
 	if _, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: fake}); err != nil {

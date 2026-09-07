@@ -21,8 +21,10 @@ type UnitInstaller interface {
 	Uninstall(spec UnitSpec) error
 }
 
-// UnitSpec is what the unit file / plist would contain. Roots is always
-// DefaultMountRoot (/work) so CONT-4 holds even when tests use TempDir.
+// UnitSpec is what the unit file / plist would contain. Roots is the set the
+// installed daemon will scan, which unitRoots ties to the roots cutover
+// displaced; it falls back to DefaultMountRoot (/work) for CONT-4 only when the
+// request named none.
 type UnitSpec struct {
 	Binary  string
 	Home    string
@@ -250,8 +252,9 @@ func adapterArgs(spec UnitSpec) []string {
 	}
 }
 
-// SystemdUnit is the systemd --user unit body. It pins -roots /work (CONT-4)
-// and an explicit -home; it never expands $HOME.
+// SystemdUnit is the systemd --user unit body. -roots comes from spec.Roots
+// (the trees cutover displaced; CONT-4 /work when none were named) and an
+// explicit -home; it never expands $HOME.
 func SystemdUnit(spec UnitSpec) string {
 	args := adapterArgs(spec)
 	execStart := strings.Join(args, " ")
@@ -268,7 +271,7 @@ func SystemdUnit(spec UnitSpec) string {
 		"WantedBy=default.target\n"
 }
 
-// LaunchdPlist is the launchd agent body. ProgramArguments include /work.
+// LaunchdPlist is the launchd agent body. ProgramArguments include spec.Roots.
 func LaunchdPlist(spec UnitSpec) string {
 	args := adapterArgs(spec)
 	var b strings.Builder

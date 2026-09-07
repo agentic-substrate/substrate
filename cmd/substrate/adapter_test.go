@@ -20,16 +20,27 @@ func TestAdapterUninstallRequiresRestore(t *testing.T) {
 	}
 }
 
-func TestAdapterUninstallRequiresRoot(t *testing.T) {
-	// Defaulting empty -root to os.Getenv("HOME") is the one-line change that makes this red.
+func TestAdapterUninstallOmittingRootUsesMountRootNotHome(t *testing.T) {
+	// An omitted -root must default exactly as `import cutover` does, or the
+	// rollback walks a different tree than the cutover harnessed and every
+	// .pre-substrate is orphaned. Defaulting to os.Getenv("HOME") instead of
+	// DefaultMountRoot is the one-line change that makes this red.
 	canary := t.TempDir()
 	if err := os.WriteFile(filepath.Join(canary, "CLAUDE.md"), []byte("from HOME\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", canary)
-	err := adapterCmd([]string{"uninstall", "-restore"}, &bytes.Buffer{}, &bytes.Buffer{}, &cutover.FakeInstaller{})
-	if err == nil || !strings.Contains(err.Error(), "-root") {
-		t.Fatalf("got %v, want -root required", err)
+	mount := t.TempDir()
+	orig := cutover.DefaultMountRoot
+	cutover.DefaultMountRoot = mount
+	t.Cleanup(func() { cutover.DefaultMountRoot = orig })
+
+	if err := adapterCmd([]string{"uninstall", "-restore"}, &bytes.Buffer{}, &bytes.Buffer{}, &cutover.FakeInstaller{}); err != nil {
+		t.Fatalf("uninstall with no -root: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(canary, "CLAUDE.md")) //nolint:gosec // path is t.TempDir()
+	if err != nil || string(got) != "from HOME\n" {
+		t.Fatalf("$HOME canary body %q err %v, want untouched", got, err)
 	}
 }
 

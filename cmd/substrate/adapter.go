@@ -28,7 +28,7 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 	fs.SetOutput(io.Discard)
 	restore := fs.Bool("restore", false, "rename *.pre-substrate files back over the live paths they displaced")
 	var roots []string
-	fs.Func("root", "absolute tree to restore (repeatable; required; no $HOME default)", func(s string) error {
+	fs.Func("root", "absolute tree to restore (repeatable; defaults to /work; no $HOME default)", func(s string) error {
 		roots = append(roots, s)
 		return nil
 	})
@@ -41,9 +41,10 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 	if !*restore {
 		return fmt.Errorf("adapter uninstall: -restore is required (refuses to drop files without putting them back)")
 	}
-	if len(roots) == 0 {
-		return fmt.Errorf("adapter uninstall: -root is required (refuses to guess $HOME)")
-	}
+	// Mirror importCutover's default exactly. If cutover displaced the mount
+	// root because -root was omitted, an uninstall that errored here would
+	// leave every .pre-substrate orphaned and the rendered files live.
+	roots = scanRoots(roots)
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("adapter uninstall: -root must be an absolute path, got %q (refuses to guess $HOME)", root)
@@ -56,7 +57,7 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 		inst = cutover.NewOSInstaller()
 	}
 	rep, err := cutover.Restore(cutover.Request{
-		Roots:     cutover.WithMountRoot(roots),
+		Roots:     roots,
 		Home:      roots[0],
 		Commit:    *commit && !*dryRun,
 		Force:     *force,

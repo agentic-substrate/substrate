@@ -22,7 +22,7 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 	fs := flag.NewFlagSet("import cutover", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var roots []string
-	fs.Func("root", "absolute tree whose harness files are displaced (repeatable; required; no $HOME default)", func(s string) error {
+	fs.Func("root", "absolute tree whose harness files are displaced (repeatable; defaults to /work; no $HOME default)", func(s string) error {
 		roots = append(roots, s)
 		return nil
 	})
@@ -35,9 +35,7 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if len(roots) == 0 {
-		return fmt.Errorf("import cutover: -root is required (refuses to guess $HOME)")
-	}
+	roots = scanRoots(roots)
 	for _, root := range roots {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("import cutover: -root must be an absolute path, got %q (refuses to guess $HOME)", root)
@@ -64,8 +62,7 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 		return err
 	}
 	home := roots[0]
-	scan := scanRoots(roots)
-	checkouts, err := adapter.Discover(scan)
+	checkouts, err := adapter.Discover(roots)
 	if err != nil {
 		return err
 	}
@@ -88,7 +85,7 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 	}
 
 	rep, err := cutover.Cutover(cutover.Request{
-		Roots:     scan,
+		Roots:     roots,
 		Home:      home,
 		Commit:    *commit && !*dryRun,
 		Installer: inst,
@@ -152,9 +149,12 @@ func fetchRenderTargets(ctx context.Context, server, token, machine string) ([]c
 	return parsed.Targets, nil
 }
 
-// scanRoots is the Discover and confine set: every operator -root, plus
-// DefaultMountRoot so /work/<project>/<repo> files are displaced even when
-// the operator only passed -root $HOME.
+// scanRoots is the Discover and confine set. An explicit -root list is used
+// as given. When the operator passes none, DefaultMountRoot is the default
+// value — not an extra root appended onto whatever they did pass.
 func scanRoots(roots []string) []string {
-	return cutover.WithMountRoot(roots)
+	if len(roots) == 0 {
+		return []string{cutover.DefaultMountRoot}
+	}
+	return append([]string(nil), roots...)
 }
