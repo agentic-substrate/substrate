@@ -9,9 +9,11 @@ import (
 )
 
 func TestScanRequiresRoot(t *testing.T) {
+	// Defaulting empty Roots to os.Getenv("HOME") is the one-line change that makes this red.
 	canary := t.TempDir()
 	mustWrite(t, filepath.Join(canary, ".claude", "CLAUDE.md"), "# Canary\nfrom HOME\n")
 	t.Setenv("HOME", canary)
+	t.Setenv("PATH", t.TempDir())
 
 	_, err := Scan(Request{Hostname: "wsl"})
 	if err == nil || !strings.Contains(err.Error(), "-root") {
@@ -20,6 +22,8 @@ func TestScanRequiresRoot(t *testing.T) {
 }
 
 func TestScanRefusesRelativeRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	_, err := Scan(Request{Roots: []string{"."}, Hostname: "wsl"})
 	if err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("got %v, want absolute-path error", err)
@@ -30,6 +34,7 @@ func TestScanDoesNotReadHOMEWhenRootGiven(t *testing.T) {
 	home := t.TempDir()
 	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), "# HomeCanary\nsecret-from-home\n")
 	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
 
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
@@ -53,6 +58,7 @@ func TestScanDoesNotReadHOMEWhenRootGiven(t *testing.T) {
 func TestScanDoesNotFollowSymlinkOutsideRoot(t *testing.T) {
 	// Replacing Lstat with os.ReadFile (which follows links) is the one-line change that makes this red.
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "id_rsa")
 	mustWrite(t, secret, "SECRET-KEY-MATERIAL\n")
@@ -85,6 +91,8 @@ func TestScanDoesNotFollowSymlinkOutsideRoot(t *testing.T) {
 }
 
 func TestScanDoesNotWriteUnderRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	path := filepath.Join(root, ".claude", "CLAUDE.md")
 	mustWrite(t, path, "# Shared\nAlways run gofmt.\n")
@@ -105,6 +113,8 @@ func TestScanDoesNotWriteUnderRoot(t *testing.T) {
 }
 
 func TestScanInventoriesHarnessFiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	claude := "# Shared\nAlways run gofmt.\n"
 	agents := "# Codex\nPrefer terse diffs.\n"
@@ -205,6 +215,8 @@ func TestScanDoesNotExecMemorix(t *testing.T) {
 }
 
 func TestScanSkipsMissingMemorix(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
 
@@ -232,6 +244,8 @@ func TestScanSkipsMissingMemorix(t *testing.T) {
 }
 
 func TestScanRecordsMemorixExportWithoutParsing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
 	payload := []byte(`{"memories":[{"id":"raw-export"}]}`)
@@ -261,6 +275,8 @@ func TestScanRecordsMemorixExportWithoutParsing(t *testing.T) {
 
 func TestPlanSameFileTwoParagraphsAreBlocksNotConflicts(t *testing.T) {
 	// Treating any slot with two hashes as a conflict is the one-line change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "machine")
 	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), ""+
@@ -290,6 +306,8 @@ func TestPlanSameFileTwoParagraphsAreBlocksNotConflicts(t *testing.T) {
 }
 
 func TestPlanTwoMachinesDifferingClaude(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	tmp := t.TempDir()
 	aHome := filepath.Join(tmp, "machine-a")
 	bHome := filepath.Join(tmp, "machine-b")
@@ -368,6 +386,8 @@ func TestPlanTwoMachinesDifferingClaude(t *testing.T) {
 }
 
 func TestPlanDedupesBeforeClassify(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	tmp := t.TempDir()
 	aHome := filepath.Join(tmp, "machine-a")
 	bHome := filepath.Join(tmp, "machine-b")

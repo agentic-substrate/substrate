@@ -26,6 +26,7 @@ func TestImportUnknownCommand(t *testing.T) {
 }
 
 func TestImportScanRequiresRoot(t *testing.T) {
+	// Defaulting empty -root to os.Getenv("HOME") is the one-line change that makes this red.
 	canary := t.TempDir()
 	mustWriteCLI(t, filepath.Join(canary, ".claude", "CLAUDE.md"), "# Canary\nfrom HOME\n")
 	t.Setenv("HOME", canary)
@@ -87,6 +88,8 @@ func TestImportPlanRejectsOutEqualToInventoryPath(t *testing.T) {
 }
 
 func TestImportScanRequiresHostname(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	out := filepath.Join(t.TempDir(), "inventory.json")
 	err := importCmd([]string{"scan", "-root", root, "-out", out}, &bytes.Buffer{}, &bytes.Buffer{})
@@ -96,6 +99,8 @@ func TestImportScanRequiresHostname(t *testing.T) {
 }
 
 func TestImportScanRequiresOut(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
 	root := t.TempDir()
 	err := importCmd([]string{"scan", "-root", root, "-hostname", "wsl"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "-out") {
@@ -138,6 +143,7 @@ func TestImportPlanRequiresOut(t *testing.T) {
 }
 
 func TestImportPlanTwoMachinesWritesPlanJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
 	tmp := t.TempDir()
 	aHome := filepath.Join(tmp, "machine-a")
