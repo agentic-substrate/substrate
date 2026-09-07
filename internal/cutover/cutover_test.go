@@ -276,7 +276,7 @@ func TestCutoverRestoreRoundTripByHash(t *testing.T) {
 	}
 	// Restoring unitRoots to an unconditional []string{DefaultMountRoot} is the
 	// one-line change that makes this red: the daemon would then render over
-	// /work, which this cutover never backed up.
+	// DefaultMountRoot, which this cutover never backed up.
 	if got := fake.Installs[0].Roots; len(got) != 1 || got[0] != root {
 		t.Fatalf("unit roots %v, want [%s]", fake.Installs[0].Roots, root)
 	}
