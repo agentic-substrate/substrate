@@ -21,8 +21,8 @@ type Workspace struct {
 	Branch string
 }
 
-// schema creates only what the render loop needs and leaves room for the
-// outbox / cache / skill_link tables that land with later issues (EDD §7.1).
+// schema is EDD §7.1 plus workspace (R26) and a kv cursor for cache since=.
+// next_attempt_at is the drain backoff cursor so Drain never sleeps (Gotcha 8).
 const schema = `
 CREATE TABLE IF NOT EXISTS managed_file (
 	path TEXT PRIMARY KEY,
@@ -35,6 +35,49 @@ CREATE TABLE IF NOT EXISTS workspace (
 	remote TEXT NOT NULL DEFAULT '',
 	branch TEXT NOT NULL DEFAULT '',
 	last_seen INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outbox (
+	id INTEGER PRIMARY KEY,
+	client_id TEXT UNIQUE NOT NULL,
+	payload TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	last_error TEXT NOT NULL DEFAULT '',
+	next_attempt_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS memory_cache (
+	id TEXT PRIMARY KEY,
+	scope_path TEXT NOT NULL DEFAULT '',
+	title TEXT NOT NULL DEFAULT '',
+	body TEXT NOT NULL DEFAULT '',
+	identifiers TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT '',
+	updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_cache_fts USING fts5(
+	title,
+	body,
+	identifiers,
+	content='memory_cache',
+	content_rowid='rowid'
+);
+CREATE TRIGGER IF NOT EXISTS memory_cache_ai AFTER INSERT ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(rowid, title, body, identifiers)
+	VALUES (new.rowid, new.title, new.body, new.identifiers);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_cache_ad AFTER DELETE ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(memory_cache_fts, rowid, title, body, identifiers)
+	VALUES ('delete', old.rowid, old.title, old.body, old.identifiers);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_cache_au AFTER UPDATE ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(memory_cache_fts, rowid, title, body, identifiers)
+	VALUES ('delete', old.rowid, old.title, old.body, old.identifiers);
+	INSERT INTO memory_cache_fts(rowid, title, body, identifiers)
+	VALUES (new.rowid, new.title, new.body, new.identifiers);
+END;
+CREATE TABLE IF NOT EXISTS kv (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
 );
 `
 

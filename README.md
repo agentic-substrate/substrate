@@ -151,8 +151,13 @@ remotes are logged, never auto-created as scopes, and their checkouts are left u
 Render targets are confined to the paths `render.Specs()` declares, under `-home` or a
 discovered checkout, with symlinks resolved. `-home` is required with `-server` so the binary
 cannot guess `$HOME` and overwrite pre-cutover harness files. State lives in
-`<home>/.substrate/adapter.sqlite` (override with `-state`). Skills, outbox, and cache loops
-are not implemented yet.
+`<home>/.substrate/adapter.sqlite` (override with `-state`). The outbox drains
+hook-captured observations to `POST /v1/memory/batch` in batches of at most 50, with a
+UUIDv7 `client_id` assigned at enqueue and never regenerated on retry; a replayed id is
+success (`duplicate: true`). The offline cache is an FTS5 delta of confirmed/probable
+memory for remotes present on the machine, pulled from `GET /v1/memory/cache`. Hook-path
+calls use a 1.5s server timeout and fall back to the outbox (writes) or the cache (reads)
+so they return in under 2s. The skills loop is not implemented yet.
 
 ```sh
 ./bin/substrate-adapter -server https://cp.example -token "$TOKEN" \
@@ -184,7 +189,7 @@ because embeddings are unavailable. Topology, backup/restore, and failure modes:
 
 ## How it fits together
 
-Harnesses are clients. Substrate is the plane underneath. Writes hit the store; the compiler reads the store and emits a **context pack** (`context.get`, shipped); the per-machine adapter — a version-reporting stub today, the render/skills/outbox/drift daemon by the end of Phase 1 — writes that pack into the files your harness already reads. The full engineering diagram is in [`docs/design/edd.md`](docs/design/edd.md).
+Harnesses are clients. Substrate is the plane underneath. Writes hit the store; the compiler reads the store and emits a **context pack** (`context.get`, shipped); the per-machine adapter renders that pack into the files your harness already reads, drains the hook outbox, and serves an offline FTS cache when the server is unreachable. The full engineering diagram is in [`docs/design/edd.md`](docs/design/edd.md).
 
 ## What's here, what isn't
 
