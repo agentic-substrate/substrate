@@ -1,8 +1,10 @@
 package observe_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +21,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
 	"github.com/agentic-substrate/substrate/internal/observe"
+	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
@@ -305,5 +308,174 @@ func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 	n := strings.Count(logs, "otlp export failed")
 	if n != 1 {
 		t.Fatalf("otlp export failed appeared %d times, want 1 (once, not per request):\n%s", n, logs)
+	}
+}
+
+// Goes red if recordReviewOpen only writes kinds that still have open rows:
+// deciding the last drift_proposal leaves substrate_review_open{kind} stuck
+// at the last GROUP BY count, so the alert stays lit on an empty queue.
+func TestReviewOpenGaugeZerosWhenLastItemDecided(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	leadID := uuid.MustParse(insertLead(t, conn, w))
+	leadP := &identity.Principal{
+		ID: leadID, Kind: identity.KindUser, Trust: identity.TrustHuman,
+		OrgID: w.aliceP.OrgID, TeamIDs: w.aliceP.TeamIDs, Capabilities: []string{"memory:write"},
+	}
+
+	rec := newOTLPReceiver(t)
+	rt, err := observe.Setup(t.Context(), observe.Config{
+		Endpoint:       rec.URL,
+		Service:        "substrate-test",
+		ExportInterval: time.Hour,
+		ExportTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+
+	srv := instrumentedREST(t, dsn, map[string]*identity.Principal{"alice": w.aliceP, "lead": leadP}, rt)
+
+	var ids []string
+	for i := 0; i < 3; i++ {
+		res := doJSON(t, srv, http.MethodPost, "/v1/review", "alice", map[string]any{
+			"kind":    "drift_proposal",
+			"scope":   w.pathStr,
+			"team_id": w.teamAID,
+			"payload": map[string]string{"title": "drift", "diff": "--- a\n+++ b\n"},
+		})
+		if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("create review %d = %d: %s", i, res.StatusCode, b)
+		}
+		var item struct {
+			ID string `json:"id"`
+		}
+		decodeBody(t, res, &item)
+		if item.ID == "" {
+			t.Fatalf("create review %d: empty id", i)
+		}
+		ids = append(ids, item.ID)
+	}
+
+	flushOTLP(t, rt)
+	got, ok := rec.latestInt(observe.MetricReviewOpen, "kind", "drift_proposal")
+	if !ok {
+		t.Fatalf("no %s{kind=drift_proposal} after 3 creates; metrics=%v", observe.MetricReviewOpen, rec.metricNames())
+	}
+	if got != 3 {
+		t.Fatalf("%s{kind=drift_proposal} after 3 creates = %d, want 3", observe.MetricReviewOpen, got)
+	}
+
+	for _, id := range ids {
+		res := doJSON(t, srv, http.MethodPost, "/v1/review/"+id+"/decide", "lead", map[string]any{
+			"decision": "approved",
+			"reason":   "looks good",
+		})
+		if res.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("decide %s = %d: %s", id, res.StatusCode, b)
+		}
+		_, _ = io.Copy(io.Discard, res.Body)
+	}
+
+	flushOTLP(t, rt)
+	got, ok = rec.latestInt(observe.MetricReviewOpen, "kind", "drift_proposal")
+	if !ok {
+		t.Fatalf("no %s{kind=drift_proposal} after deciding the last item; a missing series is not a zeroed gauge", observe.MetricReviewOpen)
+	}
+	if got != 0 {
+		t.Fatalf("%s{kind=drift_proposal} after emptying the queue = %d, want 0 (GROUP BY over open rows dropped the kind)", observe.MetricReviewOpen, got)
+	}
+}
+
+func insertLead(t *testing.T, conn *pgx.Conn, w world) string {
+	t.Helper()
+	var id string
+	if err := conn.QueryRow(t.Context(), "SELECT gen_random_uuid()::text").Scan(&id); err != nil {
+		t.Fatalf("gen_random_uuid: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO principal (id, kind, display_name, trust) VALUES ($1, 'user', 'lead', 'human')`, id); err != nil {
+		t.Fatalf("insert lead principal: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(), `INSERT INTO membership (principal_id, team_id, role) VALUES ($1, $2, 'lead')`, id, w.teamAID); err != nil {
+		t.Fatalf("insert lead membership: %v", err)
+	}
+	return id
+}
+
+func instrumentedREST(t *testing.T, dsn string, principals map[string]*identity.Principal, rt *observe.Runtime) *httptest.Server {
+	t.Helper()
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	mem := memory.New(func() *store.Store { return st })
+	h := rest.New(rest.Options{
+		Store:   func() *store.Store { return st },
+		Memory:  mem,
+		Observe: rt,
+	})
+	t.Cleanup(h.Close)
+	mux := http.NewServeMux()
+	h.Mount(mux)
+	wrapped := observe.Middleware(rt)(identity.Middleware(func(_ context.Context, tok string) (*identity.Principal, error) {
+		if p, ok := principals[tok]; ok {
+			return p, nil
+		}
+		return nil, identity.ErrUnauthorized
+	})(mux))
+	srv := httptest.NewServer(wrapped)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func doJSON(t *testing.T, srv *httptest.Server, method, path, token string, body any) *http.Response {
+	t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, srv.URL+path, rdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
+func decodeBody(t *testing.T, res *http.Response, dest any) {
+	t.Helper()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, dest); err != nil {
+		t.Fatalf("decode %s: %v", b, err)
+	}
+}
+
+func flushOTLP(t *testing.T, rt *observe.Runtime) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := rt.ForceFlush(ctx); err != nil {
+		t.Fatalf("ForceFlush: %v", err)
 	}
 }

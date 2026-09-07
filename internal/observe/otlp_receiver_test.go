@@ -41,6 +41,8 @@ type spanRec struct {
 type metricRec struct {
 	Name       string
 	Attributes []kv
+	IntValue   int64
+	HasInt     bool
 }
 
 type kv struct{ Key, Value string }
@@ -131,30 +133,50 @@ func (r *otlpReceiver) ingestMetrics(msg *colmetricpb.ExportMetricsServiceReques
 	for _, rm := range msg.GetResourceMetrics() {
 		for _, sm := range rm.GetScopeMetrics() {
 			for _, m := range sm.GetMetrics() {
-				rec := metricRec{Name: m.GetName(), Attributes: metricAttrs(m)}
-				r.metrics = append(r.metrics, rec)
+				r.metrics = append(r.metrics, metricPoints(m)...)
 			}
 		}
 	}
 }
 
-func metricAttrs(m *metricpb.Metric) []kv {
-	var out []kv
+func metricPoints(m *metricpb.Metric) []metricRec {
 	switch d := m.GetData().(type) {
 	case *metricpb.Metric_Histogram:
+		if len(d.Histogram.GetDataPoints()) == 0 {
+			return []metricRec{{Name: m.GetName()}}
+		}
+		out := make([]metricRec, 0, len(d.Histogram.GetDataPoints()))
 		for _, dp := range d.Histogram.GetDataPoints() {
-			out = append(out, kvsOf(dp.GetAttributes())...)
+			out = append(out, metricRec{Name: m.GetName(), Attributes: kvsOf(dp.GetAttributes())})
 		}
+		return out
 	case *metricpb.Metric_Sum:
+		if len(d.Sum.GetDataPoints()) == 0 {
+			return []metricRec{{Name: m.GetName()}}
+		}
+		out := make([]metricRec, 0, len(d.Sum.GetDataPoints()))
 		for _, dp := range d.Sum.GetDataPoints() {
-			out = append(out, kvsOf(dp.GetAttributes())...)
+			out = append(out, metricRec{
+				Name: m.GetName(), Attributes: kvsOf(dp.GetAttributes()),
+				IntValue: dp.GetAsInt(), HasInt: true,
+			})
 		}
+		return out
 	case *metricpb.Metric_Gauge:
-		for _, dp := range d.Gauge.GetDataPoints() {
-			out = append(out, kvsOf(dp.GetAttributes())...)
+		if len(d.Gauge.GetDataPoints()) == 0 {
+			return []metricRec{{Name: m.GetName()}}
 		}
+		out := make([]metricRec, 0, len(d.Gauge.GetDataPoints()))
+		for _, dp := range d.Gauge.GetDataPoints() {
+			out = append(out, metricRec{
+				Name: m.GetName(), Attributes: kvsOf(dp.GetAttributes()),
+				IntValue: dp.GetAsInt(), HasInt: true,
+			})
+		}
+		return out
+	default:
+		return []metricRec{{Name: m.GetName()}}
 	}
-	return out
 }
 
 func kvsOf(attrs []*commonpb.KeyValue) []kv {
@@ -195,6 +217,26 @@ func (r *otlpReceiver) hasMetric(name, attrKey, attrVal string) bool {
 		}
 	}
 	return false
+}
+
+// latestInt is the last exported integer value for name{attrKey=attrVal}.
+func (r *otlpReceiver) latestInt(name, attrKey, attrVal string) (int64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var v int64
+	found := false
+	for _, m := range r.metrics {
+		if m.Name != name || !m.HasInt {
+			continue
+		}
+		for _, a := range m.Attributes {
+			if a.Key == attrKey && a.Value == attrVal {
+				v = m.IntValue
+				found = true
+			}
+		}
+	}
+	return v, found
 }
 
 func (r *otlpReceiver) spansNamed(name string) []spanRec {

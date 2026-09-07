@@ -645,7 +645,18 @@ func (h *Handler) recordReviewOpen(ctx context.Context) {
 		return
 	}
 	_ = st.Tx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT kind::text, count(*) FROM review_item WHERE status = 'open' GROUP BY kind`)
+		// LEFT JOIN against the enum so a kind with zero open rows is
+		// recorded as 0. GROUP BY over open rows alone drops that kind
+		// and the last gauge value sticks (empty queue, alert still lit).
+		rows, err := tx.Query(ctx, `
+			SELECT k.kind::text, COALESCE(c.n, 0)
+			FROM unnest(enum_range(NULL::review_kind)) AS k(kind)
+			LEFT JOIN (
+				SELECT kind, count(*) AS n
+				FROM review_item
+				WHERE status = 'open'
+				GROUP BY kind
+			) c ON c.kind = k.kind`)
 		if err != nil {
 			return err
 		}
