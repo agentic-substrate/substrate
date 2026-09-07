@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,38 @@ func newAPI(cfg Config) *api {
 		client:  cfg.httpClient(),
 		timeout: cfg.httpTimeout(),
 	}
+}
+
+func newHookAPI(cfg Config) *api {
+	timeout := cfg.hookTimeout()
+	inner := cfg.httpClient()
+	client := &http.Client{
+		Transport:     inner.Transport,
+		CheckRedirect: inner.CheckRedirect,
+		Jar:           inner.Jar,
+		Timeout:       timeout,
+	}
+	return &api{
+		base:    strings.TrimRight(cfg.Server, "/"),
+		token:   cfg.Token,
+		client:  client,
+		timeout: timeout,
+	}
+}
+
+type httpStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+func isClientError(err error) bool {
+	var hs *httpStatusError
+	if !errors.As(err, &hs) {
+		return false
+	}
+	return hs.status >= 400 && hs.status < 500
 }
 
 func (a *api) callTimeout() time.Duration {
@@ -81,6 +114,106 @@ func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]
 		return nil, res.StatusCode, fmt.Errorf("adapter: decode render: %w", err)
 	}
 	return out.Targets, res.StatusCode, nil
+}
+
+type batchResult struct {
+	ClientID  string `json:"client_id"`
+	SubjectID string `json:"subject_id"`
+	Duplicate bool   `json:"duplicate"`
+}
+
+func (a *api) postMemoryBatch(ctx context.Context, items []json.RawMessage) ([]batchResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
+	defer cancel()
+	payload, err := json.Marshal(items)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: encode batch: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+"/v1/memory/batch", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	a.auth(req)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: POST /v1/memory/batch: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		var out []batchResult
+		if json.Unmarshal(body, &out) == nil && len(out) > 0 {
+			return out, &httpStatusError{
+				status: res.StatusCode,
+				msg:    fmt.Sprintf("adapter: POST /v1/memory/batch: status %d", res.StatusCode),
+			}
+		}
+		return nil, &httpStatusError{
+			status: res.StatusCode,
+			msg:    fmt.Sprintf("adapter: POST /v1/memory/batch: status %d", res.StatusCode),
+		}
+	}
+	var out []batchResult
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("adapter: decode batch: %w", err)
+	}
+	return out, nil
+}
+
+type cacheItem struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	Identifiers []string  `json:"identifiers"`
+	Status      string    `json:"status"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ScopePath   string    `json:"scope_path"`
+}
+
+func (a *api) getMemoryCache(ctx context.Context, repos []string, since time.Time) ([]cacheItem, error) {
+	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
+	defer cancel()
+	u, err := url.Parse(a.base + "/v1/memory/cache")
+	if err != nil {
+		return nil, fmt.Errorf("adapter: cache url: %w", err)
+	}
+	q := u.Query()
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("adapter: GET /v1/memory/cache: repos is required")
+	}
+	q.Set("repos", strings.Join(repos, ","))
+	if !since.IsZero() {
+		q.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	a.auth(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: GET /v1/memory/cache: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("adapter: GET /v1/memory/cache: %s", strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Memories []cacheItem `json:"memories"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("adapter: decode cache: %w", err)
+	}
+	return out.Memories, nil
 }
 
 func (a *api) postReview(ctx context.Context, scope, path, diff string) error {

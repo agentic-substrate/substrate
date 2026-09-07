@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite" // pure Go SQLite driver (EDD R11); no CGO
 )
@@ -21,8 +22,8 @@ type Workspace struct {
 	Branch string
 }
 
-// schema creates only what the render loop needs and leaves room for the
-// outbox / cache / skill_link tables that land with later issues (EDD §7.1).
+// schema is EDD §7.1 plus workspace (R26) and a kv cursor for cache since=.
+// next_attempt_at is the drain backoff cursor so Drain never sleeps (Gotcha 8).
 const schema = `
 CREATE TABLE IF NOT EXISTS managed_file (
 	path TEXT PRIMARY KEY,
@@ -36,10 +37,72 @@ CREATE TABLE IF NOT EXISTS workspace (
 	branch TEXT NOT NULL DEFAULT '',
 	last_seen INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS outbox (
+	id INTEGER PRIMARY KEY,
+	client_id TEXT UNIQUE NOT NULL,
+	payload TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	last_error TEXT NOT NULL DEFAULT '',
+	next_attempt_at INTEGER NOT NULL DEFAULT 0,
+	consecutive_4xx INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS outbox_dead (
+	client_id TEXT PRIMARY KEY,
+	payload TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	last_error TEXT NOT NULL DEFAULT '',
+	dead_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_cache (
+	id TEXT PRIMARY KEY,
+	scope_path TEXT NOT NULL DEFAULT '',
+	title TEXT NOT NULL DEFAULT '',
+	body TEXT NOT NULL DEFAULT '',
+	identifiers TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT '',
+	updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_cache_fts USING fts5(
+	title,
+	body,
+	identifiers,
+	content='memory_cache',
+	content_rowid='rowid'
+);
+CREATE TRIGGER IF NOT EXISTS memory_cache_ai AFTER INSERT ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(rowid, title, body, identifiers)
+	VALUES (new.rowid, new.title, new.body, new.identifiers);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_cache_ad AFTER DELETE ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(memory_cache_fts, rowid, title, body, identifiers)
+	VALUES ('delete', old.rowid, old.title, old.body, old.identifiers);
+END;
+CREATE TRIGGER IF NOT EXISTS memory_cache_au AFTER UPDATE ON memory_cache BEGIN
+	INSERT INTO memory_cache_fts(memory_cache_fts, rowid, title, body, identifiers)
+	VALUES ('delete', old.rowid, old.title, old.body, old.identifiers);
+	INSERT INTO memory_cache_fts(rowid, title, body, identifiers)
+	VALUES (new.rowid, new.title, new.body, new.identifiers);
+END;
+CREATE TABLE IF NOT EXISTS kv (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `
 
 // Open opens the adapter SQLite file, creating it and the schema as needed.
 func Open(path string) (*DB, error) {
+	return openSQLite(path, DefaultBusyTimeout)
+}
+
+// OpenHook opens adapter.sqlite with the short busy_timeout used by hooks
+// (Gotcha 8). The daemon uses Open.
+func OpenHook(path string) (*DB, error) {
+	return openSQLite(path, HookBusyTimeout)
+}
+
+func openSQLite(path string, busy time.Duration) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("adapter: state dir: %w", err)
 	}
@@ -48,7 +111,19 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("adapter: sqlite open: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if _, err := sqlDB.Exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;`); err != nil {
+	ms := int(busy / time.Millisecond)
+	if ms < 1 {
+		ms = 1
+	}
+	if _, err := sqlDB.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("adapter: pragma wal: %w", err)
+	}
+	if _, err := sqlDB.Exec(fmt.Sprintf(`PRAGMA busy_timeout=%d`, ms)); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("adapter: pragma busy_timeout: %w", err)
+	}
+	if _, err := sqlDB.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("adapter: pragma: %w", err)
 	}
@@ -56,6 +131,8 @@ func Open(path string) (*DB, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("adapter: schema: %w", err)
 	}
+	// Existing adapter.sqlite files created before consecutive_4xx.
+	_, _ = sqlDB.Exec(`ALTER TABLE outbox ADD COLUMN consecutive_4xx INTEGER NOT NULL DEFAULT 0`)
 	return &DB{sql: sqlDB}, nil
 }
 
@@ -110,6 +187,33 @@ func (db *DB) upsertWorkspace(ws Workspace, seen int64) error {
 	`, ws.Path, ws.Remote, ws.Branch, seen)
 	if err != nil {
 		return fmt.Errorf("adapter: workspace upsert: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) pruneWorkspaces(keep map[string]struct{}) error {
+	rows, err := db.sql.Query(`SELECT worktree_path FROM workspace`)
+	if err != nil {
+		return fmt.Errorf("adapter: workspace prune: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var drop []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return fmt.Errorf("adapter: workspace prune: %w", err)
+		}
+		if _, ok := keep[path]; !ok {
+			drop = append(drop, path)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("adapter: workspace prune: %w", err)
+	}
+	for _, path := range drop {
+		if _, err := db.sql.Exec(`DELETE FROM workspace WHERE worktree_path = ?`, path); err != nil {
+			return fmt.Errorf("adapter: workspace prune: %w", err)
+		}
 	}
 	return nil
 }
