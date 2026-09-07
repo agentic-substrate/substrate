@@ -1,6 +1,9 @@
 package cutover
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,5 +43,76 @@ func TestOSInstallerUninstallUsesInjectedExec(t *testing.T) {
 		if strings.Contains(c, "systemctl") && !strings.Contains(strings.Join(ran, "\n"), "--user") {
 			t.Fatalf("systemctl without --user: %v", ran)
 		}
+	}
+}
+
+func TestOSInstallerInstallBacksUpExistingUnit(t *testing.T) {
+	// os.WriteFile(O_TRUNC) over the live unit without renaming it to
+	// *.pre-substrate is the one-line change that makes this red.
+	home := t.TempDir()
+	path := systemdUnitPath(home)
+	original := "[Unit]\nDescription=pre-existing\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inst := OSInstaller{
+		GOOS: "linux",
+		Exec: func(string, ...string) error { return nil },
+	}
+	if err := inst.Install(UnitSpec{Home: home, Server: "https://cp.example", Roots: []string{DefaultMountRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path + BackupSuffix) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatalf("existing unit was truncated with no *.pre-substrate backup: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("backup %q, want original", got)
+	}
+}
+
+func TestOSInstallerEnableFailureRollsBackOrKeepsBackup(t *testing.T) {
+	// Leaving a truncated unit after enable --now fails, with no backup, is
+	// the change that makes this red. Uninstall must then be able to clean up.
+	home := t.TempDir()
+	path := systemdUnitPath(home)
+	original := "[Unit]\nDescription=pre-existing\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inst := OSInstaller{
+		GOOS: "linux",
+		Exec: func(_ string, args ...string) error {
+			if strings.Contains(strings.Join(args, " "), "enable") {
+				return errors.New("injected: enable failed")
+			}
+			return nil
+		},
+	}
+	err := inst.Install(UnitSpec{Home: home, Server: "https://cp.example", Roots: []string{DefaultMountRoot}})
+	if err == nil {
+		t.Fatal("Install succeeded despite injected enable failure")
+	}
+	backup, berr := os.ReadFile(path + BackupSuffix) //nolint:gosec // under t.TempDir
+	live, lerr := os.ReadFile(path)                 //nolint:gosec // under t.TempDir
+	hasBackup := berr == nil && string(backup) == original
+	rolledBack := lerr == nil && string(live) == original
+	if !hasBackup && !rolledBack {
+		t.Fatalf("existing unit lost after enable failure; live=%v backup=%v", lerr, berr)
+	}
+	uninst := OSInstaller{
+		GOOS: "linux",
+		Exec: func(string, ...string) error {
+			return errors.New("Failed to disable unit: Unit substrate-adapter.service not loaded.")
+		},
+	}
+	if err := uninst.Uninstall(UnitSpec{Home: home, Roots: []string{DefaultMountRoot}}); err != nil {
+		t.Fatalf("Uninstall after failed enable: %v", err)
 	}
 }

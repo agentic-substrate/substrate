@@ -98,14 +98,41 @@ func (o OSInstaller) exec(name string, args ...string) error {
 	return o.Exec(name, args...)
 }
 
-// Install writes the unit file under spec.Home and execs the supervisor.
+// Install retires any existing unit to *.pre-substrate, atomically writes
+// the new unit, then execs the supervisor. Enable is second so a failed
+// enable can restore the backup.
 func (o OSInstaller) Install(spec UnitSpec) error {
 	if spec.Home == "" {
 		return fmt.Errorf("cutover: unit install requires Home")
 	}
-	if err := o.writeUnit(spec); err != nil {
+	path := o.unitFile(spec)
+	backedUp, err := retireIfPresent(path)
+	if err != nil {
 		return err
 	}
+	if err := o.writeUnit(spec); err != nil {
+		if backedUp {
+			_ = os.Rename(path+BackupSuffix, path)
+		}
+		return err
+	}
+	if err := o.enableUnit(spec); err != nil {
+		if backedUp {
+			_ = os.Rename(path+BackupSuffix, path)
+		}
+		return err
+	}
+	return nil
+}
+
+func (o OSInstaller) unitFile(spec UnitSpec) string {
+	if o.goos() == "darwin" {
+		return launchdPlistPath(spec.Home)
+	}
+	return systemdUnitPath(spec.Home)
+}
+
+func (o OSInstaller) enableUnit(spec UnitSpec) error {
 	switch o.goos() {
 	case "darwin":
 		return o.exec("launchctl", "load", launchdPlistPath(spec.Home))
@@ -116,6 +143,20 @@ func (o OSInstaller) Install(spec UnitSpec) error {
 		}
 		return o.exec("systemctl", "--user", "enable", "--now", filepath.Base(unit))
 	}
+}
+
+func retireIfPresent(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := retirePath(path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Uninstall stops the unit and renames its file to *.pre-substrate.
@@ -145,13 +186,13 @@ func (o OSInstaller) writeUnit(spec UnitSpec) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte(LaunchdPlist(spec)), 0o600)
+		return atomicWrite(path, []byte(LaunchdPlist(spec)), 0o600)
 	default:
 		path := systemdUnitPath(spec.Home)
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte(SystemdUnit(spec)), 0o600)
+		return atomicWrite(path, []byte(SystemdUnit(spec)), 0o600)
 	}
 }
 
