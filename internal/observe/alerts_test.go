@@ -3,6 +3,7 @@ package observe
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -129,6 +130,33 @@ func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 			t.Fatalf("drift alert does not say someone is bypassing the adapter or an instruction key is missing:\n%s", msg)
 		}
 	})
+}
+
+// Goes red if docs/ops/runbook.md's markdown link to alerts.yaml does not
+// resolve on disk. Lychee walks relative links from the linking file, so
+// ../deploy/alerts.yaml from docs/ops/ is docs/deploy/alerts.yaml — missing.
+func TestRunbookAlertsYamlLinkResolves(t *testing.T) {
+	runbook := filepath.Join(alertsRepoRoot(), "docs", "ops", "runbook.md")
+	raw, err := os.ReadFile(runbook) //nolint:gosec // test reads the repo runbook
+	if err != nil {
+		t.Fatalf("read %s: %v", runbook, err)
+	}
+	re := regexp.MustCompile(`\]\(([^)]*alerts\.yaml)\)`)
+	matches := re.FindAllStringSubmatch(string(raw), -1)
+	if len(matches) == 0 {
+		t.Fatal("docs/ops/runbook.md has no markdown link to alerts.yaml")
+	}
+	dir := filepath.Dir(runbook)
+	for _, m := range matches {
+		target := filepath.Clean(filepath.Join(dir, m[1]))
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("runbook link %q resolves to %s: %v", m[1], target, err)
+		}
+		want := filepath.Join(alertsRepoRoot(), "deploy", "alerts.yaml")
+		if target != want {
+			t.Fatalf("runbook link %q resolves to %s, want %s", m[1], target, want)
+		}
+	}
 }
 
 func mustAlert(t *testing.T, groups []AlertGroup, name string) AlertRule {

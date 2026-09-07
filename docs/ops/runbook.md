@@ -70,7 +70,7 @@ restored is not a backup.
 
 ## Alerts (Phase 1 minimum)
 
-Rules live in [`deploy/alerts.yaml`](../deploy/alerts.yaml). Metric names are `substrate_*`.
+Rules live in [`deploy/alerts.yaml`](../../deploy/alerts.yaml). Metric names are `substrate_*`.
 `substrate_outbox_depth` is reported **by the adapter**, per `machine` label, including zero.
 A machine that stopped reporting drops the series; do not default missing to 0.
 
