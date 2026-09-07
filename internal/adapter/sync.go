@@ -46,7 +46,7 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	}
 
 	a := newAPI(cfg)
-	targets, unknown, err := fetchTargets(ctx, a, cfg, remotes)
+	targets, known, unknown, err := fetchTargets(ctx, a, cfg, remotes)
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -54,8 +54,9 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 		slog.Warn("unknown git remote; bind it with substrate repo bind", "remote", u)
 	}
 
+	applyTo := checkoutsWithRemotes(checkouts, known)
 	for _, tgt := range targets {
-		dests, err := destsFor(cfg, tgt.Path, checkouts)
+		dests, err := destsFor(cfg, tgt.Path, applyTo)
 		if err != nil {
 			return SyncResult{UnknownRemotes: unknown}, err
 		}
@@ -68,7 +69,7 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	return SyncResult{UnknownRemotes: unknown}, nil
 }
 
-func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]renderTarget, []string, error) {
+func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]renderTarget, []string, []string, error) {
 	var known, unknown []string
 	for _, r := range remotes {
 		_, code, err := a.getRender(ctx, cfg.Machine, []string{r})
@@ -77,15 +78,29 @@ func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]
 			continue
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		known = append(known, r)
 	}
 	targets, _, err := a.getRender(ctx, cfg.Machine, known)
 	if err != nil {
-		return nil, unknown, err
+		return nil, known, unknown, err
 	}
-	return targets, unknown, nil
+	return targets, known, unknown, nil
+}
+
+func checkoutsWithRemotes(checkouts []Workspace, remotes []string) []Workspace {
+	allow := map[string]struct{}{}
+	for _, r := range remotes {
+		allow[r] = struct{}{}
+	}
+	var out []Workspace
+	for _, c := range checkouts {
+		if _, ok := allow[c.Remote]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest string, tgt renderTarget, now int64) error {
@@ -100,7 +115,11 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest string, t
 	}
 
 	// Compare with DriftHash, never a plain hash of the file (Gotcha 9).
-	if exists && hasStored && render.DriftHash(string(disk)) != stored.SHA256 {
+	// A missing managed_file row is drift, not a blank disk: first run over a
+	// preexisting file, or after adapter.sqlite was deleted, must not clobber.
+	diskHash := render.DriftHash(string(disk))
+	tgtHash := render.DriftHash(tgt.Content)
+	if exists && (!hasStored || diskHash != stored.SHA256) && diskHash != tgtHash {
 		diff := unifiedDiff(tgt.Path, string(disk), tgt.Content)
 		if err := a.postReview(ctx, cfg.scope(), dest, diff); err != nil {
 			return err

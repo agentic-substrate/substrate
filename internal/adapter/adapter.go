@@ -12,6 +12,10 @@ import (
 // DefaultInterval is the render tick from EDD §7.2.
 const DefaultInterval = 5 * time.Minute
 
+// DefaultHTTPTimeout bounds GET /v1/render and POST /v1/review. It is not
+// applied to the shared http.Client so SSE can stay open.
+const DefaultHTTPTimeout = 15 * time.Second
+
 // Config is the daemon's local wiring. Home and StatePath must be set; tests
 // point both at t.TempDir() so the loop never touches the operator's files.
 type Config struct {
@@ -24,6 +28,9 @@ type Config struct {
 	Interval  time.Duration
 	Scope     string
 	Client    *http.Client
+	// HTTPTimeout bounds GET /v1/render and POST /v1/review. SSE is not
+	// covered; that connection is long-lived.
+	HTTPTimeout time.Duration
 }
 
 func (cfg Config) interval() time.Duration {
@@ -45,6 +52,13 @@ func (cfg Config) httpClient() *http.Client {
 		return cfg.Client
 	}
 	return &http.Client{}
+}
+
+func (cfg Config) httpTimeout() time.Duration {
+	if cfg.HTTPTimeout > 0 {
+		return cfg.HTTPTimeout
+	}
+	return DefaultHTTPTimeout
 }
 
 func (cfg Config) validate() error {

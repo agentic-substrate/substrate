@@ -20,20 +20,31 @@ type renderTarget struct {
 }
 
 type api struct {
-	base   string
-	token  string
-	client *http.Client
+	base    string
+	token   string
+	client  *http.Client
+	timeout time.Duration
 }
 
 func newAPI(cfg Config) *api {
 	return &api{
-		base:   strings.TrimRight(cfg.Server, "/"),
-		token:  cfg.Token,
-		client: cfg.httpClient(),
+		base:    strings.TrimRight(cfg.Server, "/"),
+		token:   cfg.Token,
+		client:  cfg.httpClient(),
+		timeout: cfg.httpTimeout(),
 	}
 }
 
+func (a *api) callTimeout() time.Duration {
+	if a != nil && a.timeout > 0 {
+		return a.timeout
+	}
+	return DefaultHTTPTimeout
+}
+
 func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]renderTarget, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
+	defer cancel()
 	u, err := url.Parse(a.base + "/v1/render")
 	if err != nil {
 		return nil, 0, fmt.Errorf("adapter: render url: %w", err)
@@ -73,6 +84,8 @@ func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]
 }
 
 func (a *api) postReview(ctx context.Context, scope, path, diff string) error {
+	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
+	defer cancel()
 	payload, err := json.Marshal(map[string]any{
 		"kind":  "drift_proposal",
 		"scope": scope,
