@@ -142,12 +142,28 @@ original id with `duplicate: true`. Render `sha256` values are `render.DriftHash
 Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
 (EDD R3). `--for agent` is the only accepted kind today. Revoke with
 `./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
-arguments reports the version. `substrate-adapter` is the per-machine daemon — render, skills,
-outbox, and cache loops (EDD §5); today the binary only reports its version.
+arguments reports the version. `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
+version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a
+`GET /v1/events` SSE wake-up; writes managed files atomically; and posts a `drift_proposal`
+(unified diff) *before* restoring a hand-edited file. Comparisons use `render.DriftHash`
+(footer excluded). Repo discovery scans `-roots` two levels deep (`<root>/*/*`); unknown
+remotes are logged, never auto-created as scopes, and their checkouts are left untouched.
+Render targets are confined to the paths `render.Specs()` declares, under `-home` or a
+discovered checkout, with symlinks resolved. `-home` is required with `-server` so the binary
+cannot guess `$HOME` and overwrite pre-cutover harness files. State lives in
+`<home>/.substrate/adapter.sqlite` (override with `-state`). Skills, outbox, and cache loops
+are not implemented yet.
+
+```sh
+./bin/substrate-adapter -server https://cp.example -token "$TOKEN" \
+  -home "$HOME" -roots /work -machine wsl
+```
 
 **Configuration:** `-addr` (listen address), `-dsn` / `SUBSTRATE_DSN`, `-ollama` /
 `SUBSTRATE_OLLAMA_URL` (empty means keyword-only), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
-(skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). The rest of the
+(skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). Adapter flags:
+`-server`, `-token` / `SUBSTRATE_TOKEN`, `-machine`, `-home`, `-state`, `-roots`, `-interval`
+(default 5m), `-scope` (review items). The rest of the
 intended surface is specified in [`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and gets
 documented here as it lands.
 
