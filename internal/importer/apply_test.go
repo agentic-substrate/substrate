@@ -2,6 +2,7 @@ package importer
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 
@@ -446,8 +447,9 @@ func TestApplyDryRunWritesNothingAndPrints(t *testing.T) {
 }
 
 func TestApplyDryRunMatchesCommit(t *testing.T) {
-	// A second Decide/Apply implementation for commit that ignores Preview is
-	// the change that makes this red.
+	// Writing a different status in commitWrites than planWrites returned is
+	// the one-line change that makes this red. Comparing two ApplyResult
+	// values would stay green.
 	dsn, conn := startMigrated(t)
 	w := seedImportWorld(t, conn)
 	st := openStore(t, dsn)
@@ -457,12 +459,83 @@ func TestApplyDryRunMatchesCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Apply(ctx, st, applyReq(w, "mac", true))
-	if err != nil {
+	if _, err := Apply(ctx, st, applyReq(w, "mac", true)); err != nil {
 		t.Fatal(err)
 	}
-	if drySet(dry) != drySet(got) {
-		t.Fatalf("dry-run planned set %q != commit applied set %q", drySet(dry), drySet(got))
+	want := plannedWriteSet(dry)
+	got := dbWriteSet(t, conn, w)
+	if want != got {
+		t.Fatalf("dry-run planned set %q != committed rows %q", want, got)
+	}
+}
+
+func plannedWriteSet(r *ApplyResult) string {
+	var lines []string
+	add := func(table, body, status string) {
+		if table == "review_item" {
+			status = "open"
+		}
+		lines = append(lines, table+"\t"+body+"\t"+status)
+	}
+	for _, row := range r.Active {
+		add(rowTable(row.Kind), row.Body, row.Status)
+	}
+	for _, row := range r.Proposed {
+		add(rowTable(row.Kind), row.Body, row.Status)
+	}
+	for _, row := range r.Memory {
+		add("memory", row.Body, row.Status)
+	}
+	for _, row := range r.Conflict {
+		body := row.Slot
+		if body == "" {
+			body = row.Body
+		}
+		add("review_item", body, row.Status)
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+func dbWriteSet(t *testing.T, conn *pgx.Conn, w importWorld) string {
+	t.Helper()
+	var lines []string
+	q := func(sql string, args ...any) {
+		t.Helper()
+		rows, err := conn.Query(t.Context(), sql, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var body, status string
+			if err := rows.Scan(&body, &status); err != nil {
+				t.Fatal(err)
+			}
+			lines = append(lines, body+"\t"+status)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q(`SELECT 'instruction' || E'\t' || body, status::text FROM instruction WHERE scope_id = $1 AND key <> 'ci.required'`, w.project)
+	q(`SELECT 'preference' || E'\t' || body, status::text FROM preference WHERE scope_id = $1`, w.team)
+	q(`SELECT 'memory' || E'\t' || body, status::text FROM memory WHERE scope_id = $1`, w.project)
+	q(`SELECT 'review_item' || E'\t' || COALESCE(payload->>'slot', ''), status::text FROM review_item WHERE kind = 'import_conflict'`, )
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+func rowTable(kind string) string {
+	switch kind {
+	case "preference":
+		return "preference"
+	case "import_conflict":
+		return "review_item"
+	case "fact", "decision", "incident", "lesson", "observation":
+		return "memory"
+	default:
+		return "instruction"
 	}
 }
 
@@ -735,20 +808,4 @@ func TestApplyRejectsConflictSideWithEmptyHostname(t *testing.T) {
 	if !strings.Contains(err.Error(), "hostname") {
 		t.Fatalf("error %v, want it to name hostname", err)
 	}
-}
-
-func drySet(r *ApplyResult) string {
-	type item struct{ H, K, S, Hash string }
-	var items []item
-	add := func(rows []PlannedRow) {
-		for _, row := range rows {
-			items = append(items, item{H: row.Hostname, K: row.Kind, S: row.Status, Hash: row.Hash})
-		}
-	}
-	add(r.Active)
-	add(r.Proposed)
-	add(r.Conflict)
-	add(r.Memory)
-	raw, _ := json.Marshal(items)
-	return string(raw)
 }
