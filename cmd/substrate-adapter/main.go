@@ -35,6 +35,7 @@ func run() error {
 	roots := flag.String("roots", "", "comma-separated roots scanned two levels deep (<root>/*/*)")
 	interval := flag.Duration("interval", adapter.DefaultInterval, "render tick (EDD §7.2)")
 	scope := flag.String("scope", "global:", "scope path posted on drift_proposal review items")
+	skills := flag.String("skills-repo", os.Getenv("SUBSTRATE_SKILLS_REPO"), "skills git remote; cloned under <home>/.substrate/skills.git")
 	flag.Parse()
 
 	if *server == "" {
@@ -55,14 +56,15 @@ func run() error {
 	defer stop()
 
 	return adapter.Run(ctx, adapter.Config{
-		Server:    *server,
-		Token:     *token,
-		Machine:   *machine,
-		Home:      *home,
-		StatePath: statePath,
-		Roots:     splitCSV(*roots),
-		Interval:  *interval,
-		Scope:     *scope,
+		Server:     *server,
+		Token:      *token,
+		Machine:    *machine,
+		Home:       *home,
+		StatePath:  statePath,
+		Roots:      splitCSV(*roots),
+		Interval:   *interval,
+		Scope:      *scope,
+		SkillsRepo: *skills,
 	})
 }
 

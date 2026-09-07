@@ -255,8 +255,10 @@ func (h *Handler) skillsManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []skill
 	err = st.Tx(r.Context(), func(tx pgx.Tx) error {
+		var paths []scope.Path
 		if len(repos) > 0 {
-			paths, err := resolveRepoPaths(r.Context(), tx, repos)
+			var err error
+			paths, err = resolveRepoPaths(r.Context(), tx, repos)
 			if err != nil {
 				return err
 			}
@@ -266,7 +268,30 @@ func (h *Handler) skillsManifest(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		rows, err := store.New(tx).ListApprovedSkills(r.Context())
+		if len(paths) == 0 {
+			g, err := globalPath(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			paths = []scope.Path{g}
+		}
+		q := store.New(tx)
+		ids := make([]pgtype.UUID, 0)
+		seen := map[uuid.UUID]struct{}{}
+		for _, path := range paths {
+			chain, err := chainIDs(r.Context(), q, path)
+			if err != nil {
+				return err
+			}
+			for _, id := range chain {
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				ids = append(ids, pgtype.UUID{Bytes: id, Valid: true})
+			}
+		}
+		rows, err := q.ListApprovedSkills(r.Context(), ids)
 		if err != nil {
 			return err
 		}

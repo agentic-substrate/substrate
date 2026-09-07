@@ -988,6 +988,7 @@ func newFake(t *testing.T) *fake {
 	f := &fake{bound: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/render", f.handleRender)
+	mux.HandleFunc("GET /v1/skills/manifest", f.handleSkills)
 	mux.HandleFunc("POST /v1/review", f.handleReview)
 	mux.HandleFunc("GET /v1/events", f.handleEvents)
 	mux.HandleFunc("/", f.handleOther)
@@ -1029,6 +1030,11 @@ func (f *fake) note(r *http.Request) {
 	f.mu.Lock()
 	f.httpReqs = append(f.httpReqs, r.Method+" "+r.URL.Path)
 	f.mu.Unlock()
+}
+
+func (f *fake) handleSkills(w http.ResponseWriter, r *http.Request) {
+	f.note(r)
+	_ = json.NewEncoder(w).Encode(map[string]any{"skills": []any{}})
 }
 
 func (f *fake) handleRender(w http.ResponseWriter, r *http.Request) {

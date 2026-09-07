@@ -74,6 +74,7 @@ SELECT s.name, v.git_path, v.git_sha
 FROM skill s
 JOIN skill_version v ON v.id = s.active_version_id
 WHERE s.active_version_id IS NOT NULL
+  AND s.scope_id = ANY(@scope_ids::uuid[])
 ORDER BY s.name;
 
 -- name: InsertReviewItem :one
