@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agentic-substrate/substrate/internal/adapter"
 	"github.com/agentic-substrate/substrate/internal/render"
 )
 
@@ -28,8 +29,7 @@ func Destinations(home string, checkouts []string, serverPath string) ([]string,
 			return nil, fmt.Errorf("cutover: home is required for %s", serverPath)
 		}
 		dest := filepath.Join(home, filepath.FromSlash(serverPath[2:]))
-		rel, err := filepath.Rel(home, dest)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err := adapter.Confine(home, dest); err != nil {
 			return nil, fmt.Errorf("cutover: path %s escapes home", serverPath)
 		}
 		return []string{dest}, nil
@@ -37,8 +37,7 @@ func Destinations(home string, checkouts []string, serverPath string) ([]string,
 	var dests []string
 	for _, c := range checkouts {
 		dest := filepath.Join(c, filepath.FromSlash(serverPath))
-		rel, err := filepath.Rel(c, dest)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err := adapter.Confine(c, dest); err != nil {
 			return nil, fmt.Errorf("cutover: path %s escapes checkout %s", serverPath, c)
 		}
 		dests = append(dests, dest)

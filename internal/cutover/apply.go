@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agentic-substrate/substrate/internal/adapter"
 	"github.com/agentic-substrate/substrate/internal/render"
 )
 
@@ -140,14 +141,18 @@ func classifyStore(root, name string, rep *Report) error {
 }
 
 func confineToRoots(roots []string, path string) error {
+	var escaped bool
 	for _, root := range roots {
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			continue
-		}
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		err := adapter.Confine(root, path)
+		if err == nil {
 			return nil
 		}
+		if strings.Contains(err.Error(), "escapes") {
+			escaped = true
+		}
+	}
+	if escaped {
+		return fmt.Errorf("cutover: path %s escapes -root", path)
 	}
 	return fmt.Errorf("cutover: path %s is not under any -root", path)
 }

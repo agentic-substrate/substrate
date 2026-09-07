@@ -49,7 +49,7 @@ func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []strin
 
 func ensureSkillsMirror(ctx context.Context, cfg Config) (string, error) {
 	mirror := filepath.Join(cfg.Home, ".substrate", "skills.git")
-	if err := confine(cfg.Home, mirror); err != nil {
+	if err := Confine(cfg.Home, mirror); err != nil {
 		return "", fmt.Errorf("adapter: skills mirror escapes home")
 	}
 	if _, err := os.Stat(filepath.Join(mirror, "HEAD")); err == nil {
@@ -74,7 +74,7 @@ func materializeSkill(ctx context.Context, db *DB, cfg Config, mirror string, s 
 		return err
 	}
 	dest := filepath.Join(cfg.Home, ".agents", "skills", filepath.FromSlash(s.Name))
-	if err := confine(cfg.Home, dest); err != nil {
+	if err := Confine(cfg.Home, dest); err != nil {
 		return fmt.Errorf("adapter: skill %s escapes home", s.Name)
 	}
 	prev, has, err := db.getSkillLink(s.Name)
@@ -163,7 +163,7 @@ func exportSkillTree(ctx context.Context, gitDir, sha, gitPath, dest string) err
 			return fmt.Errorf("adapter: refusing archive path %s", hdr.Name)
 		}
 		path := filepath.Join(tmp, name)
-		if err := confine(tmp, path); err != nil {
+		if err := Confine(tmp, path); err != nil {
 			return fmt.Errorf("adapter: archive path %s escapes dest", hdr.Name)
 		}
 		switch hdr.Typeflag {
@@ -211,7 +211,7 @@ func refreshSkillSymlinks(cfg Config, name, dest string) ([]string, error) {
 	var links []string
 	for _, harness := range harnessSkillDirs {
 		link := filepath.Join(cfg.Home, harness, filepath.FromSlash(name))
-		if err := confine(cfg.Home, link); err != nil {
+		if err := Confine(cfg.Home, link); err != nil {
 			return nil, fmt.Errorf("adapter: skill symlink %s escapes home", link)
 		}
 		if err := os.MkdirAll(filepath.Dir(link), 0o750); err != nil {
@@ -236,7 +236,7 @@ func pruneSkills(db *DB, cfg Config, keep map[string]struct{}) error {
 			continue
 		}
 		dest := filepath.Join(cfg.Home, ".agents", "skills", filepath.FromSlash(row.Name))
-		if err := confine(cfg.Home, dest); err == nil {
+		if err := Confine(cfg.Home, dest); err == nil {
 			_ = os.RemoveAll(dest)
 		}
 		for _, p := range strings.Split(row.LinkedPaths, "\n") {
@@ -244,7 +244,7 @@ func pruneSkills(db *DB, cfg Config, keep map[string]struct{}) error {
 			if p == "" {
 				continue
 			}
-			if err := confine(cfg.Home, p); err == nil {
+			if err := Confine(cfg.Home, p); err == nil {
 				_ = os.Remove(p)
 			}
 		}
