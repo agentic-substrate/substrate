@@ -1,0 +1,125 @@
+# Issue #27 constraint 6 — "Tailscale is the only path" — was previously only
+# true north-south: the IngressRoute binds a tailnet-only entrypoint, but any
+# pod in the cluster could still dial substrate-server:8080 directly and skip
+# Traefik, the tailnet, and the /mcp rate limit entirely, or open a raw
+# connection to substrate-pg-rw:5432.
+#
+# Default-deny ingress for the whole namespace, then name the two flows that
+# are allowed. Egress is intentionally not restricted: the server must reach
+# Ollama, MinIO, and the skills git remote, and an egress policy here would be
+# a lockout waiting to happen without buying much on a single-node homelab.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: substrate
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-server-from-traefik
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-server
+  policyTypes:
+    - Ingress
+  ingress:
+    # Traefik is the only thing that may reach the app port, so the tailnet
+    # entrypoint and the /mcp rate limit cannot be bypassed from inside the
+    # cluster. Substitute the label that actually selects the Traefik
+    # namespace; `kubernetes.io/metadata.name` is set automatically by the
+    # apiserver on every namespace, so this works without labelling anything
+    # by hand — only the value needs substituting.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<traefik-namespace>"
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-pg-from-app-and-operator
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: substrate-pg
+  policyTypes:
+    - Ingress
+  ingress:
+    # The application, and the CNPG instances of this same cluster (streaming
+    # replication / the operator's instance manager traffic).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: substrate-server
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: substrate-pg
+      ports:
+        - protocol: TCP
+          port: 5432
+    # cnpg-system reconciles and scrapes the instance manager on 8000.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<cnpg-namespace>"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-pg-scratch-from-operator
+  namespace: substrate
+spec:
+  # The weekly restore target. Only the operator and the restore job's exec
+  # (which goes through the apiserver, not the pod network) touch it.
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: substrate-pg-scratch
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<cnpg-namespace>"
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: substrate-pg-scratch
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-from-namespace
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-otel-collector
+  policyTypes:
+    - Ingress
+  ingress:
+    # OTLP in from substrate-server; /metrics scraped by the homelab Prometheus.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: substrate-server
+      ports:
+        - protocol: TCP
+          port: 4318
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<prometheus-namespace>"
+      ports:
+        - protocol: TCP
+          port: 8889
