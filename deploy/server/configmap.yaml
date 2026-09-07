@@ -6,4 +6,8 @@ metadata:
 data:
   SUBSTRATE_OLLAMA_URL: "http://ollama.<ollama-namespace>.svc.cluster.local:11434"
   SUBSTRATE_SKILLS_REPO: ""
-  SUBSTRATE_OTLP_ENDPOINT: ""
+  # In-namespace collector from deploy/otel/collector.yaml. Export is
+  # best-effort; a collector outage must not fail a request. Set this to ""
+  # to disable export entirely (supported, not degraded) — but then nothing
+  # feeds the substrate_* series deploy/alerts.yaml alerts on.
+  SUBSTRATE_OTLP_ENDPOINT: "http://substrate-otel-collector.substrate.svc.cluster.local:4318"

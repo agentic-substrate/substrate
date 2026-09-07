@@ -1,0 +1,133 @@
+# OTel collector for Phase 1. Stood up as part of issue #27 after this PR's
+# work began: deploy/alerts.yaml describes rules over substrate_* metrics, and
+# without something that receives OTLP and exposes those series to Prometheus
+# the alert rules reference metrics nothing exports.
+#
+# substrate-server exports OTLP/HTTP (see cmd/substrate-server -otlp). Export is
+# best-effort: a collector outage must not fail a request, and an empty
+# SUBSTRATE_OTLP_ENDPOINT disables export entirely (supported, not degraded).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      # Bounded queue. An unbounded batcher turns a Prometheus outage into an
+      # OOMKill of the collector.
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+    exporters:
+      # Prometheus scrapes :8889. substrate_* names arrive already prefixed
+      # (AGENTS.md translates the EDD's acp_*), so no namespace is added here —
+      # adding one would rename every series out from under deploy/alerts.yaml.
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        resource_to_telemetry_conversion:
+          # Off on purpose: promoting every resource attribute to a label is
+          # the classic cardinality explosion. machine/instance come from the
+          # metric itself.
+          enabled: false
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheus]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheus]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: substrate-otel-collector
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          # otel/opentelemetry-collector-contrib, pinned by digest. Substitute.
+          image: "<otel-collector-image-digest>"
+          args: ["--config=/conf/collector.yaml"]
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+            - name: prom
+              containerPort: 8889
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /
+              port: prom
+            periodSeconds: 20
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: conf
+          configMap:
+            name: substrate-otel-collector
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: substrate-otel-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: prom
+      port: 8889
+      targetPort: prom
