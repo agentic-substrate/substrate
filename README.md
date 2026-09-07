@@ -115,6 +115,14 @@ curl localhost:8080/readyz
     -server "$SUBSTRATE_URL" -token "$TOKEN" \
     -scope 'global:/org:acme/team:core/project:plotlens' \
     /abs/path/plan.json
+
+./bin/substrate review list -server "$SUBSTRATE_URL" -token "$TOKEN"
+./bin/substrate review decide <id> -decision approved -reason 'keep wsl' \
+    -hostname wsl -as-kind instruction \
+    -server "$SUBSTRATE_URL" -token "$TOKEN"
+./bin/substrate review decide <id> -decision approved -reason 'keep wsl' \
+    -hostname wsl -as-kind instruction -commit \
+    -server "$SUBSTRATE_URL" -token "$TOKEN"
 ```
 
 Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
@@ -209,6 +217,18 @@ active, proposed, conflict, and memory grouped by hostname, and writes nothing.
 `-dry-run` is the same path. `-commit` performs the writes. The dry-run and the
 real run share one code path. Cutover is a separate command and is not served
 here.
+
+`substrate review list` and `substrate review decide` are the CLI path through the
+import queue (SYNC-5, R15). List calls `GET /v1/review` (default `status=open`) and
+prints each item with its id, kind, slot, and both sides tagged by hostname so a
+reviewer can choose from the listing. Long bodies are cut at a fixed rune budget
+with an explicit `truncated` marker; a side whose hostname is missing is not
+decidable in practice. `review decide` POSTs `/v1/review/{id}/decide`. Without
+`-commit` it is a dry-run: the server computes the same activate/retire set as
+the write and stores nothing. `-commit` applies that set. For an
+`import_conflict`, `-hostname` selects the winning machine and `-as-kind
+instruction|preference` flips a heuristic misfile before approval (R15). A team
+lead or `human_admin` decides; the proposer cannot self-approve.
 
 `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
 version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a
