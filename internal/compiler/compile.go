@@ -46,13 +46,15 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 
 	var d draft
 	var chain []uuid.UUID
-	ctx, dbSpan := observe.Start(ctx, observe.SpanDatabase)
-	err = st.TxChecked(ctx, "context.get", req.Scope, func(tx pgx.Tx) error {
-		var err error
-		d, chain, err = loadDraft(ctx, tx, req.Scope, p)
-		return err
-	})
-	dbSpan.End()
+	err = func() error {
+		dbCtx, dbSpan := observe.Start(ctx, observe.SpanDatabase)
+		defer dbSpan.End()
+		return st.TxChecked(dbCtx, "context.get", req.Scope, func(tx pgx.Tx) error {
+			var err error
+			d, chain, err = loadDraft(dbCtx, tx, req.Scope, p)
+			return err
+		})
+	}()
 	if err != nil {
 		return Pack{}, err
 	}
