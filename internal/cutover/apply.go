@@ -165,7 +165,11 @@ func applyCutover(rep *Report, req Request) error {
 	if err := applyRenames(rep.Renames); err != nil {
 		return errWithPlan(rep, err)
 	}
-	if err := writeJournal(req, journal{Created: rep.Created, Renames: rep.Renames}); err != nil {
+	if err := writeJournal(req, journal{
+		Created: rep.Created,
+		Renames: rep.Renames,
+		Pending: true,
+	}); err != nil {
 		return errWithPlan(rep, err)
 	}
 	contents := map[string]string{}
@@ -180,6 +184,20 @@ func applyCutover(rep *Report, req Request) error {
 		if err := write(w.Path, []byte(body), w.Mode); err != nil {
 			return errWithPlan(rep, fmt.Errorf("cutover: write %s: %w (run adapter uninstall --restore to put files back)", w.Path, err))
 		}
+	}
+	hashes := map[string]string{}
+	for _, p := range rep.Created {
+		if body, ok := contents[p]; ok {
+			hashes[p] = render.DriftHash(body)
+		}
+	}
+	if err := writeJournal(req, journal{
+		Created: rep.Created,
+		Hashes:  hashes,
+		Renames: rep.Renames,
+		Pending: false,
+	}); err != nil {
+		return errWithPlan(rep, err)
 	}
 	spec := UnitSpec{}
 	if rep.Unit != nil {
@@ -206,8 +224,10 @@ func errWithPlan(rep *Report, err error) error {
 }
 
 type journal struct {
-	Created []string `json:"created"`
-	Renames []Rename `json:"renames,omitempty"`
+	Created []string          `json:"created"`
+	Hashes  map[string]string `json:"hashes,omitempty"`
+	Renames []Rename          `json:"renames,omitempty"`
+	Pending bool              `json:"pending,omitempty"`
 }
 
 func journalPath(home string) string {

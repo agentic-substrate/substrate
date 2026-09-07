@@ -21,6 +21,9 @@ func Restore(req Request) (*Report, error) {
 		return nil, err
 	}
 	rep.DryRun = !req.Commit
+	if err := checkGeneratedRemovals(rep); err != nil {
+		return nil, err
+	}
 	if !req.Commit {
 		return rep, nil
 	}
@@ -131,6 +134,17 @@ func loadJournal(home string, rep *Report, seen map[string]struct{}) (*journal, 
 	}
 	if j != nil {
 		rep.Created = append(rep.Created, j.Created...)
+		if j.Pending {
+			rep.JournalPending = true
+		}
+		if j.Hashes != nil {
+			if rep.CreatedHashes == nil {
+				rep.CreatedHashes = map[string]string{}
+			}
+			for p, h := range j.Hashes {
+				rep.CreatedHashes[p] = h
+			}
+		}
 	}
 	return j, nil
 }
@@ -255,8 +269,8 @@ func applyRestore(rep *Report, inst UnitInstaller) error {
 			continue
 		}
 		seen[p] = struct{}{}
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("cutover: remove generated %s: %w", p, err)
+		if err := removeGenerated(p, rep); err != nil {
+			return err
 		}
 	}
 	if rep.Unit != nil && rep.Unit.Home != "" {
@@ -275,4 +289,55 @@ func applyRestore(rep *Report, inst UnitInstaller) error {
 		spec = *rep.Unit
 	}
 	return inst.Uninstall(spec)
+}
+
+func checkGeneratedRemovals(rep *Report) error {
+	if rep == nil || rep.JournalPending {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, p := range rep.Created {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		if err := generatedRemovalConflict(p, rep); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func generatedRemovalConflict(p string, rep *Report) error {
+	want, ok := rep.CreatedHashes[p]
+	if !ok {
+		return nil
+	}
+	body, err := os.ReadFile(p) //nolint:gosec // path is a journaled Created file under -root
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cutover: read generated %s: %w", p, err)
+	}
+	if render.DriftHash(string(body)) != want {
+		return fmt.Errorf("cutover: %s no longer matches the written DriftHash (operator edits); refusing to remove", p)
+	}
+	return nil
+}
+
+func removeGenerated(p string, rep *Report) error {
+	if rep.JournalPending {
+		return nil
+	}
+	if err := generatedRemovalConflict(p, rep); err != nil {
+		return err
+	}
+	if _, ok := rep.CreatedHashes[p]; !ok {
+		return nil
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("cutover: remove generated %s: %w", p, err)
+	}
+	return nil
 }

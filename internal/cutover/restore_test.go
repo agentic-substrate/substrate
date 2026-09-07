@@ -3,6 +3,7 @@ package cutover
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +157,105 @@ func TestRestoreDryRunSurfacesMissingBackupConflict(t *testing.T) {
 	_, err := Restore(Request{Roots: []string{root}, Commit: false, Installer: &FakeInstaller{}})
 	if err == nil {
 		t.Fatal("dry-run succeeded on a restore that cannot rename a file over a directory")
+	}
+}
+
+func TestRestoreDoesNotRemoveEditedGeneratedFile(t *testing.T) {
+	// os.Remove of a Created path without checking render.DriftHash is the
+	// change that makes this red. Operator edits to a file cutover created
+	// must survive --restore.
+	root := t.TempDir()
+	created := filepath.Join(root, ".cursor", "rules", "substrate.mdc")
+	rendered := renderedClaude("2026-09-07T00:00:00Z")
+	if _, err := Cutover(Request{
+		Roots:     []string{root},
+		Home:      root,
+		Commit:    true,
+		Installer: &FakeInstaller{},
+		Files:     []Replacement{{Path: created, Content: rendered}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edited := "operator edited the generated file\n"
+	mustWrite(t, created, edited)
+	_, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: &FakeInstaller{}})
+	if err == nil {
+		got, readErr := os.ReadFile(created) //nolint:gosec // under t.TempDir
+		if readErr != nil {
+			t.Fatal("restore deleted operator edits to a Created path")
+		}
+		if string(got) != edited {
+			t.Fatalf("restore overwrote operator edits: %q", got)
+		}
+		t.Fatal("restore succeeded while a Created path no longer matches the written DriftHash; want refuse")
+	}
+	got, err := os.ReadFile(created) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal("restore deleted operator edits to a Created path")
+	}
+	if string(got) != edited {
+		t.Fatalf("restore mutated operator edits: %q", got)
+	}
+}
+
+func TestRestoreFormatLabelsGeneratedRemove(t *testing.T) {
+	// Format printing CREATE for a path restore would delete is the change
+	// that makes this red. Dry-run must read as destructive: REMOVE generated.
+	root := t.TempDir()
+	created := filepath.Join(root, ".cursor", "rules", "substrate.mdc")
+	rendered := renderedClaude("2026-09-07T00:00:00Z")
+	if _, err := Cutover(Request{
+		Roots:     []string{root},
+		Home:      root,
+		Commit:    true,
+		Installer: &FakeInstaller{},
+		Files:     []Replacement{{Path: created, Content: rendered}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Restore(Request{Roots: []string{root}, Home: root, Commit: false, Installer: &FakeInstaller{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := rep.Format()
+	if !strings.Contains(out, "REMOVE generated") {
+		t.Fatalf("restore dry-run omitted REMOVE generated:\n%s", out)
+	}
+	if strings.Contains(out, "CREATE ") {
+		t.Fatalf("restore dry-run labeled a destructive remove as CREATE:\n%s", out)
+	}
+}
+
+func TestRestoreDoesNotDeleteUserFileAfterPendingJournal(t *testing.T) {
+	// Writing Created into the journal before the file exists, then
+	// os.Remove on restore, is the change that makes this red.
+	root := t.TempDir()
+	created := filepath.Join(root, ".cursor", "rules", "substrate.mdc")
+	rendered := renderedClaude("2026-09-07T00:00:00Z")
+	failing := func(string, []byte, os.FileMode) error {
+		return fmt.Errorf("injected: write failed before create")
+	}
+	if _, err := Cutover(Request{
+		Roots:     []string{root},
+		Home:      root,
+		Commit:    true,
+		Installer: &FakeInstaller{},
+		Files:     []Replacement{{Path: created, Content: rendered}},
+		WriteFile: failing,
+	}); err == nil {
+		t.Fatal("cutover succeeded; injected writer never failed")
+	}
+	user := "user created this after the failed cutover\n"
+	mustWrite(t, created, user)
+	if _, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: &FakeInstaller{}}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	got, err := os.ReadFile(created) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal("restore deleted a file the user created at a pending Created path")
+	}
+	if string(got) != user {
+		t.Fatalf("body %q, want user file", got)
 	}
 }
 

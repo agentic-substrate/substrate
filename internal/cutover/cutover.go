@@ -60,6 +60,10 @@ type Report struct {
 	Unit      *UnitSpec
 	Uninstall bool
 	Install   bool
+	// CreatedHashes is path → render.DriftHash for files cutover created.
+	// Restore only removes a Created path when the live file still matches.
+	CreatedHashes  map[string]string
+	JournalPending bool
 }
 
 // Rename is one *.pre-substrate displacement or its inverse.
@@ -191,7 +195,11 @@ func (r *Report) Format() string {
 	created := append([]string(nil), r.Created...)
 	sort.Strings(created)
 	for _, p := range created {
-		fmt.Fprintf(&b, "CREATE %s\n", p)
+		if r.Uninstall && !r.Install {
+			fmt.Fprintf(&b, "REMOVE generated %s\n", p)
+		} else {
+			fmt.Fprintf(&b, "CREATE %s\n", p)
+		}
 	}
 	return b.String()
 }
