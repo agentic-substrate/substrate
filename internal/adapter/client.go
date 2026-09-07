@@ -75,12 +75,19 @@ func (a *api) callTimeout() time.Duration {
 	return DefaultHTTPTimeout
 }
 
-func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]renderTarget, int, error) {
+// renderResponse is GET /v1/render. Scope is the chain the server compiled
+// these targets for; the adapter never derives that chain itself.
+type renderResponse struct {
+	Targets []renderTarget `json:"targets"`
+	Scope   string         `json:"scope"`
+}
+
+func (a *api) getRender(ctx context.Context, machine string, repos []string) (renderResponse, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
 	defer cancel()
 	u, err := url.Parse(a.base + "/v1/render")
 	if err != nil {
-		return nil, 0, fmt.Errorf("adapter: render url: %w", err)
+		return renderResponse{}, 0, fmt.Errorf("adapter: render url: %w", err)
 	}
 	q := u.Query()
 	if machine != "" {
@@ -92,28 +99,26 @@ func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, 0, err
+		return renderResponse{}, 0, err
 	}
 	a.auth(req)
 	res, err := a.client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("adapter: GET /v1/render: %w", err)
+		return renderResponse{}, 0, fmt.Errorf("adapter: GET /v1/render: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
-		return nil, res.StatusCode, err
+		return renderResponse{}, res.StatusCode, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, res.StatusCode, fmt.Errorf("adapter: GET /v1/render: %s", strings.TrimSpace(string(body)))
+		return renderResponse{}, res.StatusCode, fmt.Errorf("adapter: GET /v1/render: %s", strings.TrimSpace(string(body)))
 	}
-	var out struct {
-		Targets []renderTarget `json:"targets"`
-	}
+	var out renderResponse
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, res.StatusCode, fmt.Errorf("adapter: decode render: %w", err)
+		return renderResponse{}, res.StatusCode, fmt.Errorf("adapter: decode render: %w", err)
 	}
-	return out.Targets, res.StatusCode, nil
+	return out, res.StatusCode, nil
 }
 
 type batchResult struct {

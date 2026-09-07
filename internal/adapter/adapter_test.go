@@ -89,15 +89,18 @@ func TestReviewCallTimesOut(t *testing.T) {
 	cfg := testConfig(home, state, srv.URL)
 	cfg.HTTPTimeout = 50 * time.Millisecond
 
-	done := make(chan error, 1)
+	done := make(chan SyncResult, 1)
 	go func() {
-		_, err := Sync(context.Background(), db, cfg)
-		done <- err
+		res, err := Sync(context.Background(), db, cfg)
+		if err != nil {
+			t.Errorf("a hung review must degrade one target, not the daemon: %v", err)
+		}
+		done <- res
 	}()
 	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("Sync succeeded against a hung POST /v1/review")
+	case res := <-done:
+		if len(res.UnproposedDrift) != 1 || res.UnproposedDrift[0] != dest {
+			t.Fatalf("UnproposedDrift = %v, want [%s]", res.UnproposedDrift, dest)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("POST /v1/review did not time out")
@@ -408,8 +411,12 @@ func TestUntrackedExistingFileNotOverwrittenWhenReviewFails(t *testing.T) {
 	srv.setTargets(homeTarget(claudeAt(t, "2026-07-02T00:00:00Z")))
 	cfg := testConfig(home, state, srv.URL)
 
-	if _, err := Sync(t.Context(), db, cfg); err == nil {
-		t.Fatal("Sync succeeded when POST /v1/review failed")
+	res, err := Sync(t.Context(), db, cfg)
+	if err != nil {
+		t.Fatalf("a failed drift proposal must degrade one target, not the daemon: %v", err)
+	}
+	if len(res.UnproposedDrift) != 1 || res.UnproposedDrift[0] != dest {
+		t.Fatalf("UnproposedDrift = %v, want [%s]", res.UnproposedDrift, dest)
 	}
 	got := readFile(t, dest)
 	if got != preexisting {
@@ -492,7 +499,7 @@ func TestRelativeTargetsSkipUnknownRemoteCheckouts(t *testing.T) {
 	}
 }
 
-func TestDiscoverTwoLevelsUpsertsWorkspaceAndSurfacesUnknownRemote(t *testing.T) {
+func TestDiscoverUpsertsWorkspaceAndSurfacesUnknownRemote(t *testing.T) {
 	root := t.TempDir()
 	known := filepath.Join(root, "proj", "known")
 	unknown := filepath.Join(root, "proj", "unknown")
@@ -531,11 +538,11 @@ func TestDiscoverTwoLevelsUpsertsWorkspaceAndSurfacesUnknownRemote(t *testing.T)
 	if _, ok := paths[unknown]; !ok {
 		t.Fatalf("missing workspace for unknown checkout %s", unknown)
 	}
-	if _, ok := paths[shallow]; ok {
-		t.Fatal("one-level checkout was discovered; EDD R26 is two levels")
+	if _, ok := paths[shallow]; !ok {
+		t.Fatalf("flat <root>/<repo> checkout %s was not discovered (#55)", shallow)
 	}
 	if _, ok := paths[tooDeep]; ok {
-		t.Fatal("three-level checkout was discovered; EDD R26 is two levels")
+		t.Fatalf("three-level checkout was discovered; the scan stops at depth %d", MaxDiscoverDepth)
 	}
 	if paths[unknown].Remote != "github.com/acme/mystery" {
 		t.Fatalf("remote = %q, want normalized github.com/acme/mystery", paths[unknown].Remote)
@@ -833,7 +840,7 @@ func testConfig(home, state, server string) Config {
 		Machine:   "test",
 		Home:      home,
 		StatePath: state,
-		Scope:     "global:",
+		Scope:     testTeamScope,
 		Interval:  DefaultInterval,
 	}
 }
@@ -966,8 +973,10 @@ type target struct {
 }
 
 type reviewReq struct {
-	Kind string
-	Diff string
+	Kind  string
+	Diff  string
+	Scope string
+	Path  string
 }
 
 type fake struct {
@@ -978,9 +987,12 @@ type fake struct {
 	httpReqs     []string
 	reviewHook   func()
 	reviewStatus int
-	sseReady     chan struct{}
-	sseWake      <-chan struct{}
-	URL          string
+	// rejectPath makes the server 403 a proposal whose target path contains
+	// it, so one target of several can fail while the rest succeed.
+	rejectPath string
+	sseReady   chan struct{}
+	sseWake    <-chan struct{}
+	URL        string
 }
 
 func newFake(t *testing.T) *fake {
@@ -1050,7 +1062,24 @@ func (f *fake) handleRender(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"targets": targets})
+	body := map[string]any{"targets": targets}
+	// The real server answers a single-repo render with the chain it compiled
+	// for, which is what the adapter hangs a drift proposal on.
+	if len(repos) == 1 {
+		body["scope"] = repoScopeWire(repos[0])
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// testTeamScope is the scope an operator configures for home-scoped files. It
+// is deliberately not global:, which no agent token may write.
+const testTeamScope = "global:/org:acme/team:core"
+
+// repoScopeWire is the wire chain the server binds a remote to: the repo scope
+// is keyed by the normalized remote itself.
+func repoScopeWire(remote string) string {
+	return testTeamScope + "/project:" + strings.ReplaceAll(remote, "/", "-") +
+		"/repo:" + strings.ReplaceAll(remote, "/", "%2F")
 }
 
 func (f *fake) handleReview(w http.ResponseWriter, r *http.Request) {
@@ -1069,8 +1098,10 @@ func (f *fake) handleReview(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Kind    string `json:"kind"`
+		Scope   string `json:"scope"`
 		Payload struct {
 			Diff string `json:"diff"`
+			Path string `json:"path"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
@@ -1078,8 +1109,15 @@ func (f *fake) handleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.mu.Lock()
-	f.posted = append(f.posted, reviewReq{Kind: in.Kind, Diff: in.Payload.Diff})
+	reject := f.rejectPath != "" && strings.Contains(in.Payload.Path, f.rejectPath)
+	if !reject {
+		f.posted = append(f.posted, reviewReq{Kind: in.Kind, Diff: in.Payload.Diff, Scope: in.Scope, Path: in.Payload.Path})
+	}
 	f.mu.Unlock()
+	if reject {
+		http.Error(w, `{"code":"SUBSTRATE_NEEDS_REVIEW"}`, http.StatusForbidden)
+		return
+	}
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]string{"id": "rev-1", "kind": in.Kind, "status": "open"})
 }
@@ -1133,4 +1171,10 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func agentsTarget(t *testing.T) target {
+	t.Helper()
+	a := agentsAtVersion(t, "2026-09-01T00:00:00Z", "3.12")
+	return target{Path: render.RepoAgents, Content: a.body, SHA256: a.hash}
 }

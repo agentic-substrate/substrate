@@ -136,7 +136,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repos := splitCSV(r.URL.Query().Get("repos"))
-	cfg, _, err := h.effectiveConfig(r.Context(), st, repos)
+	cfg, used, err := h.effectiveConfig(r.Context(), st, repos)
 	if err != nil {
 		writePolicy(w, err)
 		return
@@ -153,7 +153,14 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 			targets = append(targets, renderTarget{Path: path, Content: content, SHA256: sum})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"targets": targets})
+	// scope is the authoritative chain these targets were compiled for. The
+	// adapter puts it on a drift proposal so the proposal carries the scope of
+	// the file it concerns rather than a local guess (#58).
+	body := map[string]any{"targets": targets}
+	if len(used) > 0 {
+		body["scope"] = used.String()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h *Handler) effectiveConfig(ctx context.Context, st *store.Store, repos []string) (render.EffectiveConfig, scope.Path, error) {
