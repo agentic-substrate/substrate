@@ -158,7 +158,8 @@ an active row become `active`. Every later machine can only add `proposed` rows 
 trusted machine established. Each conflict payload carries the applying `hostname` and the
 pair sides' hostnames. Imported memory is always `episodic`/`unverified` even when the source
 claimed `confirmed` (Gotcha 4). A replay of the same machine+plan is idempotent via
-`ingest_receipt`. `dry_run` is the default: the server classifies and returns the planned set
+`ingest_receipt` keyed on `(machine, scope, plan-hash)`; an optional `client_id` is an
+alias of that key, never a second write. `dry_run` is the default: the server classifies and returns the planned set
 grouped by hostname without opening a write transaction. Writes require `"commit": true`.
 
 Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
