@@ -90,6 +90,10 @@ func TestRequiredDeployFilesExist(t *testing.T) {
 		"deploy/server/service.yaml",
 		"deploy/server/configmap.yaml",
 		"deploy/server/secret.yaml",
+		"deploy/server/pdb.yaml",
+		"deploy/networkpolicy.yaml",
+		"deploy/otel/collector.yaml",
+		"deploy/cnpg/backups-secret.yaml",
 		"deploy/ingress/middleware.yaml",
 		"deploy/ingress/certificate.yaml",
 		"deploy/ingress/ingressroute.yaml",
@@ -98,6 +102,7 @@ func TestRequiredDeployFilesExist(t *testing.T) {
 		"deploy/restore/restore-test.sh",
 		"deploy/restore/restore-assert.sh",
 		"deploy/minio/buckets.sh",
+		"scripts/check-deploy-placeholders.sh",
 		"deploy/minio/session-policy.json",
 		".ko.yaml",
 	}
@@ -297,12 +302,88 @@ func TestIngressRouteIsTailnetOnlyWithMCPRateLimit(t *testing.T) {
 	if !strings.Contains(mw, "Authorization") {
 		t.Fatal("rate limit must key on Authorization (per-token)")
 	}
-	if !strings.Contains(ir, "mcp") || !strings.Contains(strings.ToLower(ir), "ratelimit") && !strings.Contains(ir, "mcp-") {
-		// middleware must be attached to the /mcp route
-		if !strings.Contains(ir, "middleware") {
-			t.Fatal("IngressRoute /mcp must attach the rate-limit middleware")
+	// The previous form of this assertion was `!A || (!B && !C)` by Go
+	// precedence, with all three substrings present — always false, so the
+	// t.Fatal was unreachable and deleting the middleware still passed.
+	// Parse the route instead of grepping the file: the middleware must be
+	// attached to the route that matches /mcp specifically, not merely be
+	// mentioned somewhere in the document.
+	mwName := middlewareName(t)
+	route := mcpRoute(t)
+	attached, _ := route["middlewares"].([]any)
+	if len(attached) == 0 {
+		t.Fatalf("IngressRoute /mcp route has no middlewares; %s must be attached", mwName)
+	}
+	found := false
+	for _, m := range attached {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n, _ := mm["name"].(string); n == mwName {
+			found = true
 		}
 	}
+	if !found {
+		t.Fatalf("IngressRoute /mcp does not attach middleware %q; attached=%v", mwName, attached)
+	}
+	// /v1 is deliberately unlimited. Assert the decision is written down, so
+	// it stays a choice rather than decaying into an omission nobody notices.
+	if v1 := v1Route(t); len(v1) > 0 {
+		if mws, _ := v1["middlewares"].([]any); len(mws) > 0 {
+			t.Logf("/v1 now has middlewares %v — update the comment explaining why it was unlimited", mws)
+		}
+	}
+	if !strings.Contains(ir, "/v1` has NO rate limit") && !strings.Contains(ir, "NO rate limit") {
+		t.Fatal("ingressroute.yaml must state why /v1 has no rate limit; an unexplained omission is indistinguishable from a mistake")
+	}
+}
+
+// middlewareName returns the single Middleware object's metadata.name.
+func middlewareName(t *testing.T) string {
+	t.Helper()
+	for _, d := range loadYAMLDocs(t, "deploy/ingress/middleware.yaml") {
+		if d["kind"] == "Middleware" {
+			return str(t, nested(t, d, "metadata", "name"), "middleware.metadata.name")
+		}
+	}
+	t.Fatal("deploy/ingress/middleware.yaml has no Middleware")
+	return ""
+}
+
+// routeMatching returns the IngressRoute route whose match contains want.
+func routeMatching(t *testing.T, want string) map[string]any {
+	t.Helper()
+	for _, d := range loadYAMLDocs(t, "deploy/ingress/ingressroute.yaml") {
+		if d["kind"] != "IngressRoute" {
+			continue
+		}
+		routes, _ := nested(t, d, "spec", "routes").([]any)
+		for _, r := range routes {
+			rm, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			if m, _ := rm["match"].(string); strings.Contains(m, want) {
+				return rm
+			}
+		}
+	}
+	return nil
+}
+
+func mcpRoute(t *testing.T) map[string]any {
+	t.Helper()
+	r := routeMatching(t, "/mcp")
+	if r == nil {
+		t.Fatal("IngressRoute has no route matching PathPrefix(`/mcp`)")
+	}
+	return r
+}
+
+func v1Route(t *testing.T) map[string]any {
+	t.Helper()
+	return routeMatching(t, "/v1")
 }
 
 func TestSecretTemplateHasEmptyValues(t *testing.T) {
@@ -323,9 +404,16 @@ func TestSecretTemplateHasEmptyValues(t *testing.T) {
 				t.Errorf("Secret key %s has a non-empty non-placeholder value", k)
 			}
 		}
-		for _, k := range []string{"SUBSTRATE_DSN", "ACCESS_KEY_ID", "ACCESS_SECRET_KEY"} {
-			if _, ok := data[k]; !ok {
-				t.Errorf("Secret missing key %s", k)
+		// The server's secret carries the DSN and NOTHING else. The MinIO
+		// backup keys live in deploy/cnpg/backups-secret.yaml so that an RCE
+		// in substrate-server cannot read the backup bucket out of its own
+		// environment. cmd/substrate-server never reads them.
+		if _, ok := data["SUBSTRATE_DSN"]; !ok {
+			t.Error("Secret missing key SUBSTRATE_DSN")
+		}
+		for _, k := range []string{"ACCESS_KEY_ID", "ACCESS_SECRET_KEY"} {
+			if _, ok := data[k]; ok {
+				t.Errorf("MinIO key %s must not be in the server Secret; it belongs in substrate-backups-s3", k)
 			}
 		}
 	}
@@ -344,8 +432,17 @@ func TestNoAvailabilityHA(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
+		// A PodDisruptionBudget is not necessarily HA. `maxUnavailable: 0` is
+		// the opposite: it makes a voluntary disruption (a node drain) block
+		// and say so, instead of silently evicting the only replica of a
+		// single-instance database. What must not appear is a PDB that
+		// *asserts* redundancy — minAvailable > 1 or maxUnavailable > 0.
 		if bytes.Contains(raw, []byte("kind: PodDisruptionBudget")) {
-			t.Errorf("%s: PodDisruptionBudget is HA; one replica is the design", path)
+			for _, bad := range []string{"minAvailable: 2", "minAvailable: 3", "maxUnavailable: 1", "maxUnavailable: 2"} {
+				if bytes.Contains(raw, []byte(bad)) {
+					t.Errorf("%s: PDB %q implies more than one replica; one replica is the design", path, bad)
+				}
+			}
 		}
 		if bytes.Contains(raw, []byte("type: LoadBalancer")) {
 			t.Errorf("%s: LoadBalancer would expose a public IP", path)
