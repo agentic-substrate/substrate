@@ -15,8 +15,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/instruction"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/rest"
+	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
@@ -416,9 +419,39 @@ func countBodyStatusAs(t *testing.T, dsn string, p *identity.Principal, table, b
 	return out
 }
 
+func mustUUID(t *testing.T, s string) uuid.UUID {
+	t.Helper()
+	id, err := uuid.Parse(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func countBodies(recs []instruction.Record, body string) int {
+	n := 0
+	for _, r := range recs {
+		if r.Body == body {
+			n++
+		}
+	}
+	return n
+}
+
+func countPrefBodies(recs []preference.Record, body string) int {
+	n := 0
+	for _, r := range recs {
+		if r.Body == body {
+			n++
+		}
+	}
+	return n
+}
+
 func TestReviewTwoMachineImportResolvableViaCLI(t *testing.T) {
-	// Closing the review_item without activating the chosen body is the
-	// one-line change that makes this red.
+	// Skipping the retire loop in commitReviewDecision is the one-line
+	// production change that makes the loser-retired assertions red.
+	// active==0 is already true while the loser is still proposed.
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
@@ -467,22 +500,24 @@ func TestReviewTwoMachineImportResolvableViaCLI(t *testing.T) {
 	if spaces["active"] != 1 {
 		t.Fatalf("mac Indent decision did not activate Prefer spaces.; status counts %#v", spaces)
 	}
-	if tabs["active"] != 0 {
-		t.Fatalf("losing Indent body is still active; %#v", tabs)
+	if tabs["retired"] != 1 {
+		t.Fatalf("losing Indent body is not retired; %#v", tabs)
 	}
 	prod := countBodyStatus(t, conn, "instruction", "Use the production cluster.", w.projectA)
 	stage := countBodyStatus(t, conn, "instruction", "Use the staging cluster.", w.projectA)
 	if prod["active"] != 1 {
 		t.Fatalf("wsl Deploy decision did not activate production cluster; %#v", prod)
 	}
-	if stage["active"] != 0 {
-		t.Fatalf("losing Deploy body is still active; %#v", stage)
+	if stage["retired"] != 1 {
+		t.Fatalf("losing Deploy body is not retired; %#v", stage)
 	}
 }
 
 func TestReviewKindFlipChangesStoredRow(t *testing.T) {
-	// Ignoring as_kind and writing the classified kind is the one-line
-	// change that makes this red.
+	// Skipping the retire loop (leaving Prefer tabs. proposed as a
+	// preference) is the one-line production change that makes the
+	// retired-status assertion red. Resolve must show the flipped body
+	// only as an instruction.
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
@@ -506,8 +541,38 @@ func TestReviewKindFlipChangesStoredRow(t *testing.T) {
 	if ins["active"] != 1 {
 		t.Fatalf("kind flip did not store an active instruction; instruction %#v preference %#v", ins, pref)
 	}
-	if pref["active"] != 0 {
-		t.Fatalf("kind flip left Prefer tabs. active as a preference; %#v", pref)
+	if pref["retired"] != 1 {
+		t.Fatalf("kind flip did not retire Prefer tabs. as a preference; %#v", pref)
+	}
+
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	path, err := scope.Parse(w.pathStr)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	ctx := identity.WithPrincipal(t.Context(), w.leadP)
+	var recs []instruction.Record
+	var prefs []preference.Record
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		var err error
+		recs, err = instruction.Resolve(ctx, tx, path)
+		if err != nil {
+			return err
+		}
+		prefs, _, err = preference.Resolve(ctx, tx, []uuid.UUID{mustUUID(t, w.teamA), mustUUID(t, w.org)}, instruction.Keys(recs))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := countBodies(recs, "Prefer tabs."); n != 1 {
+		t.Fatalf("instruction.Resolve has %d Prefer tabs. rows, want 1", n)
+	}
+	if n := countPrefBodies(prefs, "Prefer tabs."); n != 0 {
+		t.Fatalf("preference.Resolve still has Prefer tabs.; %#v", prefs)
 	}
 }
 
