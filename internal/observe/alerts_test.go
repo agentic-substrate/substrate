@@ -58,6 +58,23 @@ func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 		}
 	})
 
+	t.Run("outbox_29m_does_not_fire", func(t *testing.T) {
+		start := time.Unix(0, 0).UTC()
+		var samples []Sample
+		for i := 0; i <= 29; i++ {
+			samples = append(samples, Sample{T: start.Add(time.Duration(i) * time.Minute), V: 501})
+		}
+		now := start.Add(29 * time.Minute)
+		got := EvalAlert(outbox, now, []Series{{
+			Name:    MetricOutboxDepth,
+			Labels:  map[string]string{"machine": "wsl"},
+			Samples: samples,
+		}})
+		if len(got) != 0 {
+			t.Fatalf("29m of 501 fired %d alerts; for=30m must not fire yet", len(got))
+		}
+	})
+
 	t.Run("outbox_zero_does_not_fire", func(t *testing.T) {
 		start := time.Unix(0, 0).UTC()
 		var samples []Sample
@@ -104,6 +121,23 @@ func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 		msg := got[0].Summary + " " + got[0].Description
 		if !strings.Contains(msg, "cp-0") {
 			t.Fatalf("readyz alert message does not name the instance:\n%s", msg)
+		}
+	})
+
+	t.Run("readyz_4m_does_not_fire", func(t *testing.T) {
+		start := time.Unix(0, 0).UTC()
+		var samples []Sample
+		for i := 0; i <= 4; i++ {
+			samples = append(samples, Sample{T: start.Add(time.Duration(i) * time.Minute), V: 0})
+		}
+		now := start.Add(4 * time.Minute)
+		got := EvalAlert(ready, now, []Series{{
+			Name:    MetricReady,
+			Labels:  map[string]string{"instance": "cp-0"},
+			Samples: samples,
+		}})
+		if len(got) != 0 {
+			t.Fatalf("4m of ready==0 fired %d alerts; for=5m must not fire yet", len(got))
 		}
 	})
 

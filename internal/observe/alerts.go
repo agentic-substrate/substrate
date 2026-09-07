@@ -131,6 +131,7 @@ func evalCmp(rule AlertRule, now time.Time, name, op string, thresh float64, hol
 
 func held(samples []Sample, from, to time.Time, op string, thresh float64) bool {
 	var n int
+	var first, last time.Time
 	for _, s := range samples {
 		if s.T.Before(from) || s.T.After(to) {
 			continue
@@ -138,9 +139,20 @@ func held(samples []Sample, from, to time.Time, op string, thresh float64) bool 
 		if !cmp(s.V, op, thresh) {
 			return false
 		}
+		if n == 0 || s.T.Before(first) {
+			first = s.T
+		}
+		if n == 0 || s.T.After(last) {
+			last = s.T
+		}
 		n++
 	}
-	return n > 0
+	if n == 0 {
+		return false
+	}
+	// Prometheus `for` is a pending duration: matching samples must cover
+	// the whole [from, to] window, not merely exist somewhere inside it.
+	return !first.After(from) && !last.Before(to)
 }
 
 func valueAt(samples []Sample, at time.Time) (float64, bool) {
