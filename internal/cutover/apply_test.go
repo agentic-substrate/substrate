@@ -46,7 +46,7 @@ func TestCutoverPartialWriteLeavesRestoreableTree(t *testing.T) {
 		Exec: func(_ string, args ...string) error {
 			joined := strings.Join(args, " ")
 			if strings.Contains(joined, "disable") || strings.Contains(joined, "unload") {
-				return errors.New("Failed to disable unit: Unit substrate-adapter.service not loaded.")
+				return errors.New("failed to disable unit: unit substrate-adapter.service not loaded")
 			}
 			return nil
 		},
@@ -148,8 +148,8 @@ func TestOSInstallerUninstallTreatsUnitNotLoadedAsSuccess(t *testing.T) {
 	home := t.TempDir()
 	inst := OSInstaller{
 		GOOS: "linux",
-		Exec: func(name string, args ...string) error {
-			return errors.New("Failed to disable unit: Unit substrate-adapter.service not loaded.")
+		Exec: func(string, ...string) error {
+			return errors.New("failed to disable unit: unit substrate-adapter.service not loaded")
 		},
 	}
 	if err := inst.Uninstall(UnitSpec{Home: home, Roots: []string{DefaultMountRoot}}); err != nil {

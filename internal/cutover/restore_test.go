@@ -340,7 +340,7 @@ func TestRestoreIgnoresUnrelatedBackupsAndUnreadableDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = os.Chmod(filepath.Join(root, ".cache"), 0o755)
+		_ = os.Chmod(filepath.Join(root, ".cache"), 0o755) //nolint:gosec // restore test fixture perms so TempDir cleanup can remove it
 	})
 
 	live := filepath.Join(root, ".claude", "CLAUDE.md")

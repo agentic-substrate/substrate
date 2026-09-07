@@ -238,7 +238,7 @@ func applyRenames(renames []Rename) error {
 		}
 		if err := os.Rename(n.From, n.To); err != nil {
 			if rbErr := rollbackRenames(done); rbErr != nil {
-				return fmt.Errorf("cutover: rename %s -> %s: %w (rollback: %v)", n.From, n.To, err, rbErr)
+				return fmt.Errorf("cutover: rename %s -> %s: %w (rollback: %w)", n.From, n.To, err, rbErr)
 			}
 			return fmt.Errorf("cutover: rename %s -> %s: %w", n.From, n.To, err)
 		}
