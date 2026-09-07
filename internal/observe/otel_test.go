@@ -245,8 +245,10 @@ func TestEmptyOTLPEndpointIsSupported(t *testing.T) {
 	}
 }
 
-// Goes red if export runs on the request path (hanging collector delays the
-// call) or if each failed export logs again (Once was not used).
+// Goes red if export runs on the request path: ExportTimeout is far larger
+// than the call budget, so a SimpleSpanProcessor (export on End) would
+// stall each context.get for ~timeout. The batcher keeps this off the
+// request path. Also goes red if each failed export logs again.
 func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
@@ -277,7 +279,7 @@ func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 		Endpoint:       "http://" + ln.Addr().String(),
 		Service:        "substrate-test",
 		ExportInterval: time.Hour,
-		ExportTimeout:  150 * time.Millisecond,
+		ExportTimeout:  2 * time.Second,
 		Logger:         logger,
 	})
 	if err != nil {
@@ -295,11 +297,12 @@ func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 		_ = callContextGet(t, sess, w.repoKey)
 	}
 	elapsed := time.Since(start)
-	if elapsed > time.Second {
-		t.Fatalf("3 context.get calls took %s against a hanging collector; export is on the request path", elapsed)
+	const callBudget = 200 * time.Millisecond
+	if elapsed > callBudget {
+		t.Fatalf("3 context.get calls took %s against a hanging collector (export timeout 2s); export is on the request path", elapsed)
 	}
 
-	flushCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	flushCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_ = rt.ForceFlush(flushCtx)
 	_ = rt.ForceFlush(flushCtx)
