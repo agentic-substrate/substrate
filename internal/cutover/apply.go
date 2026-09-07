@@ -269,6 +269,23 @@ func readJournal(home string) (*journal, error) {
 	return &j, nil
 }
 
+var (
+	syncFile      = func(f *os.File) error { return f.Sync() }
+	syncParentDir = fsyncDir
+)
+
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // dir is the dest parent under an operator-supplied -root
+	if err != nil {
+		return fmt.Errorf("cutover: open dir %s: %w", dir, err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("cutover: sync dir %s: %w", dir, err)
+	}
+	return nil
+}
+
 func atomicWrite(path string, body []byte, mode os.FileMode) error {
 	if mode == 0 {
 		mode = 0o600
@@ -288,13 +305,17 @@ func atomicWrite(path string, body []byte, mode os.FileMode) error {
 			_ = os.Remove(tmp)
 		}
 	}()
-	if err := f.Chmod(mode); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("cutover: chmod temp: %w", err)
-	}
 	if _, err := f.Write(body); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("cutover: write temp: %w", err)
+	}
+	if err := syncFile(f); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("cutover: sync temp: %w", err)
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("cutover: chmod temp: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("cutover: close temp: %w", err)
@@ -303,5 +324,8 @@ func atomicWrite(path string, body []byte, mode os.FileMode) error {
 		return fmt.Errorf("cutover: rename temp: %w", err)
 	}
 	cleanup = false
+	if err := syncParentDir(dir); err != nil {
+		return err
+	}
 	return nil
 }

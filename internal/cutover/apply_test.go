@@ -156,3 +156,35 @@ func TestOSInstallerUninstallTreatsUnitNotLoadedAsSuccess(t *testing.T) {
 		t.Fatalf("Uninstall of a unit that was never installed: %v", err)
 	}
 }
+
+func TestAtomicWriteFsyncsFileAndParentDir(t *testing.T) {
+	// Omitting f.Sync and the parent-dir fsync (adapter/write.go:35-53) is
+	// the change that makes this red.
+	origFile := syncFile
+	origDir := syncParentDir
+	t.Cleanup(func() {
+		syncFile = origFile
+		syncParentDir = origDir
+	})
+	var fileSynced bool
+	var gotDir string
+	syncFile = func(f *os.File) error {
+		fileSynced = true
+		return origFile(f)
+	}
+	syncParentDir = func(dir string) error {
+		gotDir = dir
+		return origDir(dir)
+	}
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "CLAUDE.md")
+	if err := atomicWrite(dest, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !fileSynced {
+		t.Fatal("atomicWrite did not fsync the temp file")
+	}
+	if gotDir != dir {
+		t.Fatalf("parent dir fsync path = %q, want dest dir %q", gotDir, dir)
+	}
+}
