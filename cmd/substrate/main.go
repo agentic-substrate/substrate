@@ -1,4 +1,4 @@
-// Command substrate is the operator CLI: import, review, token, offload, doctor.
+// Command substrate is the operator CLI: import, adapter, review, token, offload, doctor.
 package main
 
 import (

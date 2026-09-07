@@ -1,6 +1,6 @@
 # Operations runbook
 
-**Last reviewed:** 2026-09-06 · **Re-read cadence:** after every incident, and at each phase exit
+**Last reviewed:** 2026-09-07 · **Re-read cadence:** after every incident, and at each phase exit
 
 Substrate is a homelab single-node deployment behind Tailscale. There is no HA and none is
 planned; adapters are designed to survive a 24-hour server outage without data loss, and that
@@ -98,3 +98,43 @@ delays process exit by that much and the timeout is not returned as a process-ex
 | Skills repo unreachable | Adapter keeps the last linked versions; `/readyz` is unaffected by design | Automatic |
 | Bad instruction rendered everywhere | — | `substrate review revert <audit-id>` → broadcast → all machines re-render within 5 min |
 | Token leaked | — | `substrate token revoke`; the audit log shows every use by `request_id` |
+
+## Import cutover and rollback
+
+Cutover replaces a machine's harness files with rendered ones and installs the
+adapter unit. The files it displaces are the only copy of that machine's
+accumulated configuration. There is no backup beyond the `*.pre-substrate`
+renames this command makes. If a `*.pre-substrate` path already exists, stop
+and resolve it by hand — overwriting it destroys an earlier cutover's state.
+
+Always dry-run first. `-root` is required and has no `$HOME` default; passing
+the real home is a deliberate operator choice.
+
+```sh
+# Preview. Writes nothing. The printed list must match what --restore would invert.
+./bin/substrate import cutover -root "$HOME" \
+  -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl
+
+# Commit. systemd --user on Linux/WSL, launchd on macOS. Unit pins -roots /work.
+./bin/substrate import cutover -root "$HOME" \
+  -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl -commit
+```
+
+Nothing in this flow deletes. Live files and the `.memorix` store are renamed
+to `*.pre-substrate`, then rendered files are written. The adapter unit's
+`-home` is the first `-root`; `-roots` is always `/work` so Phase 3 cwd slugs
+match later (CONT-4).
+
+**Rollback** — run this before anything else if cutover went wrong. Server rows
+are additive and can stay.
+
+```sh
+./bin/substrate adapter uninstall -restore -root "$HOME"
+./bin/substrate adapter uninstall -restore -root "$HOME" -commit
+```
+
+`-restore` puts every `*.pre-substrate` path back over the live path (verified
+by hash in tests), removes files cutover created, and uninstalls the unit.
+After a successful restore there must be no `*.pre-substrate` leftovers. If
+restore reports a file/directory mismatch, do not delete: rename the unexpected
+side out of the way and re-run.
