@@ -29,6 +29,11 @@ func main() {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
+		case "adapter":
+			if err := adapterCmd(os.Args[2:], os.Stdout, os.Stderr, nil); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 			return
 		}
 	}
