@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -398,6 +399,39 @@ func TestActiveVersionIDRejectedByDatabase(t *testing.T) {
 	}
 }
 
+// One-line production change that makes this go red: drop INSERT from
+// `BEFORE INSERT OR UPDATE OF active_version_id` on skill.
+func TestActiveVersionIDRejectedOnInsert(t *testing.T) {
+	_, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	skillA := newID(t, conn)
+	skillB := newID(t, conn)
+	verA := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+		VALUES ($1, 'team/plotlens/r6-insert-src', $2, 'team', $3, 'd')`, skillA, c.project, c.actor)
+	mustExec(t, conn, `INSERT INTO skill_version (id, skill_id, semver, git_sha, git_path, author_id, approval)
+		VALUES ($1, $2, '1.0.0', 'abc', 'skills/team/plotlens/r6-insert-src', $3, 'proposed')`, verA, skillA, c.actor)
+	_, err := conn.Exec(t.Context(), `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description, active_version_id)
+		VALUES ($1, 'team/plotlens/r6-insert-dst', $2, 'team', $3, 'd', $4)`, skillB, c.project, c.actor, verA)
+	if err == nil {
+		t.Fatal("INSERT succeeded; the database must reject an unapproved active_version_id on INSERT (R6)")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("want a Postgres error, got %T %v (a Go-side guard is not R6)", err, err)
+	}
+	if pgErr.Code != "P0001" {
+		t.Fatalf("SQLSTATE %s, want P0001 (RAISE EXCEPTION from the trigger)", pgErr.Code)
+	}
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM skill WHERE id = $1`, skillB).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("skill row count = %d after rejected INSERT; the trigger must not write", n)
+	}
+}
+
 func TestCannotUnapproveActiveSkillVersion(t *testing.T) {
 	_, conn := startMigrated(t)
 	c := seedChain(t, conn)
@@ -411,6 +445,88 @@ func TestCannotUnapproveActiveSkillVersion(t *testing.T) {
 	err := mustFail(t, conn, `UPDATE skill_version SET approval = 'rejected' WHERE id = $1`, verID)
 	if !strings.Contains(strings.ToLower(err.Error()), "approved") {
 		t.Fatalf("error %q does not mention the active-version approval rule", err)
+	}
+}
+
+// One-line production change that makes this go red: drop FOR UPDATE from
+// skill_active_version_approved / skill_version_keep_active_approved so the
+// two UPDATEs can both commit under READ COMMITTED.
+func TestConcurrentActivateAndRejectCannotLeaveRejectedActive(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	c := seedChain(t, conn)
+	skillID := newID(t, conn)
+	verID := newID(t, conn)
+	mustExec(t, conn, `INSERT INTO skill (id, name, scope_id, visibility, owner_id, description)
+		VALUES ($1, 'team/plotlens/r6-race', $2, 'team', $3, 'd')`, skillID, c.project, c.actor)
+	mustExec(t, conn, `INSERT INTO skill_version (id, skill_id, semver, git_sha, git_path, author_id, approval)
+		VALUES ($1, $2, '1.0.0', 'abc', 'skills/team/plotlens/r6-race', $3, 'approved')`, verID, skillID, c.actor)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	connA, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connB, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		_ = connA.Close(context.Background())
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errA := make(chan error, 1)
+	errB := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		tx, err := connA.Begin(ctx)
+		if err != nil {
+			errA <- err
+			return
+		}
+		<-start
+		if _, err := tx.Exec(ctx, `UPDATE skill SET active_version_id = $1 WHERE id = $2`, verID, skillID); err != nil {
+			_ = tx.Rollback(context.Background())
+			errA <- err
+			return
+		}
+		errA <- tx.Commit(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		tx, err := connB.Begin(ctx)
+		if err != nil {
+			errB <- err
+			return
+		}
+		<-start
+		if _, err := tx.Exec(ctx, `UPDATE skill_version SET approval = 'rejected' WHERE id = $1`, verID); err != nil {
+			_ = tx.Rollback(context.Background())
+			errB <- err
+			return
+		}
+		errB <- tx.Commit(ctx)
+	}()
+	close(start)
+	aErr := <-errA
+	bErr := <-errB
+	wg.Wait()
+	_ = connA.Close(context.Background())
+	_ = connB.Close(context.Background())
+	if aErr == nil && bErr == nil {
+		t.Fatal("both UPDATE skill.active_version_id and UPDATE skill_version.approval committed; R6 is broken by the race")
+	}
+
+	var active *string
+	var approval string
+	if err := conn.QueryRow(ctx, `SELECT active_version_id::text, (
+		SELECT approval::text FROM skill_version WHERE id = $1
+	) FROM skill WHERE id = $2`, verID, skillID).Scan(&active, &approval); err != nil {
+		t.Fatal(err)
+	}
+	if active != nil && *active == verID && approval != "approved" {
+		t.Fatalf("active_version_id=%s points at approval=%s; R6 forbids an unapproved active version", *active, approval)
 	}
 }
 

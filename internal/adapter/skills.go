@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-var gitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
+var gitSHAPattern = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 const maxSkillFileBytes = 1 << 20
 
@@ -40,7 +40,7 @@ func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []strin
 	keep := make(map[string]struct{}, len(skills))
 	for _, s := range skills {
 		if err := materializeSkill(ctx, db, cfg, mirror, s); err != nil {
-			return err
+			slog.Error("skill materialize failed; keeping last linked version", "skill", s.Name, "err", err)
 		}
 		keep[s.Name] = struct{}{}
 	}
@@ -81,7 +81,8 @@ func materializeSkill(ctx context.Context, db *DB, cfg Config, mirror string, s 
 	if err != nil {
 		return err
 	}
-	if !has || prev.GitSHA != s.GitSHA {
+	_, destErr := os.Stat(dest)
+	if !has || prev.GitSHA != s.GitSHA || destErr != nil {
 		if err := exportSkillTree(ctx, mirror, s.GitSHA, s.GitPath, dest); err != nil {
 			return err
 		}
@@ -107,11 +108,18 @@ func validateSkillRef(s manifestSkill) error {
 }
 
 func exportSkillTree(ctx context.Context, gitDir, sha, gitPath, dest string) error {
-	spec := sha + ":" + strings.TrimPrefix(gitPath, "/")
-	cmd := gitCommand(ctx, "--git-dir", gitDir, "archive", "--format=tar", spec)
+	resolved, err := verifyCommit(ctx, gitDir, sha)
+	if err != nil {
+		return err
+	}
+	rel := strings.TrimPrefix(gitPath, "/")
+	if err := disableArchiveSubst(gitDir); err != nil {
+		return err
+	}
+	cmd := gitCommand(ctx, "--git-dir", gitDir, "archive", "--format=tar", resolved, "--", rel)
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("git archive %s: %w", spec, err)
+		return fmt.Errorf("git archive %s: %w", resolved, err)
 	}
 	parent := filepath.Dir(dest)
 	if err := os.MkdirAll(parent, 0o750); err != nil {
@@ -122,6 +130,7 @@ func exportSkillTree(ctx context.Context, gitDir, sha, gitPath, dest string) err
 		return fmt.Errorf("adapter: skill temp: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
+	prefix := filepath.ToSlash(rel) + "/"
 	tr := tar.NewReader(bytes.NewReader(out))
 	for {
 		hdr, err := tr.Next()
@@ -131,8 +140,23 @@ func exportSkillTree(ctx context.Context, gitDir, sha, gitPath, dest string) err
 		if err != nil {
 			return fmt.Errorf("adapter: skill tar: %w", err)
 		}
-		name := filepath.Clean(hdr.Name)
-		if name == "." {
+		switch hdr.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			continue
+		}
+		name := filepath.ToSlash(filepath.Clean(hdr.Name))
+		relSlash := filepath.ToSlash(rel)
+		if name == "." || name == relSlash {
+			continue
+		}
+		if relSlash != "" && strings.HasPrefix(relSlash, name+"/") {
+			continue
+		}
+		if !strings.HasPrefix(name, prefix) {
+			return fmt.Errorf("adapter: refusing archive path %s", hdr.Name)
+		}
+		name = strings.TrimPrefix(name, prefix)
+		if name == "" || name == "." {
 			continue
 		}
 		if filepath.IsAbs(name) || strings.HasPrefix(name, "..") {
@@ -239,4 +263,25 @@ func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 		"GIT_CONFIG_SYSTEM=/dev/null",
 	)
 	return cmd
+}
+
+func verifyCommit(ctx context.Context, gitDir, sha string) (string, error) {
+	cmd := gitCommand(ctx, "--git-dir", gitDir, "rev-parse", "--verify", sha+"^{commit}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s^{commit}: %w", sha, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func disableArchiveSubst(gitDir string) error {
+	info := filepath.Join(gitDir, "info")
+	if err := os.MkdirAll(info, 0o750); err != nil {
+		return fmt.Errorf("adapter: git info dir: %w", err)
+	}
+	// info/attributes outranks tree .gitattributes, so export-subst cannot rewrite blobs.
+	if err := os.WriteFile(filepath.Join(info, "attributes"), []byte("* -export-subst\n"), 0o600); err != nil {
+		return fmt.Errorf("adapter: git attributes: %w", err)
+	}
+	return nil
 }
