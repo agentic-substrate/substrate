@@ -84,8 +84,10 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 	plan := &Plan{}
 	for _, k := range slotOrder {
 		blocks := bySlot[k]
-		if len(blocks) == 1 {
-			plan.Blocks = append(plan.Blocks, *blocks[0])
+		if len(blocks) == 1 || !slotHasDistinctOrigins(blocks) {
+			for _, b := range blocks {
+				plan.Blocks = append(plan.Blocks, *b)
+			}
 			continue
 		}
 		c := Conflict{Slot: k.rel + "#" + k.heading}
@@ -182,4 +184,16 @@ func hostnames(sources []Source) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func slotHasDistinctOrigins(blocks []*Block) bool {
+	hosts := make(map[string]struct{})
+	paths := make(map[string]struct{})
+	for _, b := range blocks {
+		for _, s := range b.Sources {
+			hosts[s.Hostname] = struct{}{}
+			paths[s.Path] = struct{}{}
+		}
+	}
+	return len(hosts) > 1 || len(paths) > 1
 }

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/agentic-substrate/substrate/internal/importer"
 )
@@ -36,6 +37,7 @@ func importScan(args []string, stdout, stderr io.Writer) error {
 	})
 	hostname := fs.String("hostname", "", "machine name tagged on inventoried files")
 	out := fs.String("out", "", "absolute path to write inventory.json")
+	memorixJSON := fs.String("memorix-json", "", "absolute path to a pre-exported memorix JSON file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -51,7 +53,16 @@ func importScan(args []string, stdout, stderr io.Writer) error {
 	if !filepath.IsAbs(*out) {
 		return fmt.Errorf("import scan: -out must be an absolute path, got %q", *out)
 	}
-	inv, err := importer.Scan(importer.Request{Roots: roots, Hostname: *hostname})
+	if *memorixJSON != "" && !filepath.IsAbs(*memorixJSON) {
+		return fmt.Errorf("import scan: -memorix-json must be an absolute path, got %q", *memorixJSON)
+	}
+	outPath := filepath.Clean(*out)
+	for _, root := range roots {
+		if pathInside(filepath.Clean(root), outPath) {
+			return fmt.Errorf("import scan: -out %s is inside -root %s (refuses to overwrite inventoried files)", outPath, root)
+		}
+	}
+	inv, err := importer.Scan(importer.Request{Roots: roots, Hostname: *hostname, MemorixJSON: *memorixJSON})
 	if err != nil {
 		return err
 	}
@@ -91,6 +102,14 @@ func importPlan(args []string, stdout, stderr io.Writer) error {
 		}
 		invs = append(invs, inv)
 	}
+	outPath := filepath.Clean(*out)
+	for _, inv := range invs {
+		for _, f := range inv.Files {
+			if f.Path != "" && filepath.Clean(f.Path) == outPath {
+				return fmt.Errorf("import plan: -out %s equals an inventoried path (refuses to overwrite inventoried files)", outPath)
+			}
+		}
+	}
 	plan, err := importer.BuildPlan(invs, nil)
 	if err != nil {
 		return err
@@ -114,14 +133,48 @@ func readInventory(path string) (importer.Inventory, error) {
 	return inv, nil
 }
 
+// pathInside reports whether child is root or a path under it. Rel-based so
+// /home/u-other is not treated as inside /home/u.
+func pathInside(root, child string) bool {
+	rel, err := filepath.Rel(root, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
 func writeJSON(path string, v any) error {
 	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+	tmp := f.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	cleanup = false
 	return nil
 }

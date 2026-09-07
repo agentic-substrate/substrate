@@ -104,7 +104,7 @@ curl localhost:8080/readyz
     --scopes memory:write --dsn "$SUBSTRATE_DSN"
 
 ./bin/substrate import scan -root /abs/machine-root -hostname wsl \
-    -out /abs/path/inventory.json
+    -out /abs/path/inventory.json [-memorix-json /abs/path/memorix.json]
 ./bin/substrate import plan -out /abs/path/plan.json /abs/path/inventory.json
 ```
 
@@ -151,17 +151,20 @@ arguments reports the version.
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
 requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
 more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
-default, and the command will not guess one. Scan never writes, moves, or modifies
+default, and the command will not guess one. `-out` is rejected if it falls inside any
+`-root` (scan) or equals any inventoried `Path` (plan), and the written file is always
+mode `0600`, even when it already existed. Scan never writes, moves, or modifies
 anything under the scanned roots; it only writes the file named by `-out`. It inventories
 `.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.cursor/rules/`, and any `AGENTS.md` /
-`CLAUDE.md` found under those roots. Memorix is read by shelling out to
-`memorix transfer export --format json`; if that binary is absent the source is skipped
-with a logged reason and the rest of the scan still succeeds. Plan splits markdown into
-blocks, **dedupes by content hash**, then classifies each unique block as `instruction` or
-`preference`. Classification is heuristic and will misfile (R15); confidence is never
-certainty. Identical blocks from two machines appear once in `plan.json`; differing
-blocks at the same heading are a conflict pair tagged with hostname. Apply and cutover
-are separate commands and are not served here.
+`CLAUDE.md` found under those roots. Symlinks are not followed. Memorix is read only from
+an operator-exported JSON file passed as `-memorix-json`; scan never execs `memorix`.
+If that flag is omitted the source is skipped with a logged reason and the rest of the
+scan still succeeds. Plan splits markdown into blocks, **dedupes by content hash**, then
+classifies each unique block as `instruction` or `preference`. Classification is heuristic
+and will misfile (R15); confidence is never certainty. Identical blocks from two machines
+appear once in `plan.json`; differing blocks at the same heading from distinct hostnames
+or paths are a conflict pair tagged with hostname. Extra hashes from a single file stay
+in `blocks`. Apply and cutover are separate commands and are not served here.
 
 `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
 version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a

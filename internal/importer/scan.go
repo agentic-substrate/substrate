@@ -1,21 +1,22 @@
 package importer
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 )
 
-const memorixTimeout = 10 * time.Second
+const (
+	// maxScanFile caps a harness file so a symlink-to-huge or DT_UNKNOWN
+	// surprise cannot pull unbounded bytes into inventory.json.
+	maxScanFile    int64 = 1 << 20
+	maxMemorixJSON int64 = 8 << 20
+)
 
 var skipDirs = map[string]bool{
 	".git":         true,
@@ -25,7 +26,8 @@ var skipDirs = map[string]bool{
 }
 
 // Scan inventories harness config under explicit absolute roots. It never
-// consults $HOME and never writes under those roots.
+// consults $HOME and never writes under those roots. Memorix is ingested
+// only from a pre-exported JSON file; scan never execs the memorix binary.
 func Scan(req Request) (*Inventory, error) {
 	if len(req.Roots) == 0 {
 		return nil, fmt.Errorf("import scan: -root is required (refuses to guess $HOME)")
@@ -52,7 +54,9 @@ func Scan(req Request) (*Inventory, error) {
 	sort.Slice(inv.Files, func(i, j int) bool {
 		return inv.Files[i].Rel < inv.Files[j].Rel
 	})
-	collectMemorix(req, inv)
+	if err := collectMemorix(req, inv); err != nil {
+		return nil, err
+	}
 	return inv, nil
 }
 
@@ -65,9 +69,6 @@ func walkRoot(root string, seen map[string]struct{}, inv *Inventory) error {
 			if skipDirs[d.Name()] {
 				return fs.SkipDir
 			}
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -85,8 +86,22 @@ func walkRoot(root string, seen map[string]struct{}, inv *Inventory) error {
 		if _, dup := seen[path]; dup {
 			return nil
 		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("import scan: lstat %s: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		if info.Size() > maxScanFile {
+			inv.Skipped = append(inv.Skipped, Skipped{
+				Source: path,
+				Reason: fmt.Sprintf("file exceeds %d byte cap", maxScanFile),
+			})
+			return nil
+		}
 		seen[path] = struct{}{}
-		body, err := os.ReadFile(path) //nolint:gosec // path is confined to an operator-supplied root
+		body, err := os.ReadFile(path) //nolint:gosec // path is confined to an operator-supplied root; Lstat required a regular file
 		if err != nil {
 			return fmt.Errorf("import scan: read %s: %w", path, err)
 		}
@@ -130,57 +145,42 @@ func detectFile(rel string) (detected, scope string, ok bool) {
 	return "", "", false
 }
 
-func collectMemorix(req Request, inv *Inventory) {
-	look := req.LookPath
-	if look == nil {
-		look = exec.LookPath
-	}
-	bin, err := look("memorix")
-	if err != nil {
+func collectMemorix(req Request, inv *Inventory) error {
+	if req.MemorixJSON == "" {
 		inv.Skipped = append(inv.Skipped, Skipped{
 			Source: "memorix",
-			Reason: "memorix binary not found; skipping that source",
+			Reason: "memorix JSON not provided; skipping that source",
 		})
-		return
+		return nil
 	}
-	run := req.RunCmd
-	if run == nil {
-		run = runMemorix
+	if !filepath.IsAbs(req.MemorixJSON) {
+		return fmt.Errorf("import scan: -memorix-json must be an absolute path, got %q", req.MemorixJSON)
 	}
-	out, err := run(bin, []string{"transfer", "export", "--format", "json"})
+	path := filepath.Clean(req.MemorixJSON)
+	info, err := os.Lstat(path)
 	if err != nil {
-		inv.Skipped = append(inv.Skipped, Skipped{
-			Source: "memorix",
-			Reason: "memorix transfer export failed: " + err.Error(),
-		})
-		return
+		return fmt.Errorf("import scan: memorix JSON %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("import scan: -memorix-json %s is not a regular file", path)
+	}
+	if info.Size() > maxMemorixJSON {
+		return fmt.Errorf("import scan: -memorix-json %s exceeds %d byte cap", path, maxMemorixJSON)
+	}
+	body, err := os.ReadFile(path) //nolint:gosec // operator-supplied pre-exported memorix JSON
+	if err != nil {
+		return fmt.Errorf("import scan: read memorix JSON %s: %w", path, err)
 	}
 	inv.Files = append(inv.Files, File{
-		Path:         bin,
+		Path:         path,
 		Rel:          "memorix",
-		Size:         int64(len(out)),
-		Hash:         sha256Hex(out),
+		Size:         int64(len(body)),
+		Hash:         sha256Hex(body),
 		DetectedType: "memorix",
 		ImpliedScope: "user",
-		Content:      string(out),
+		Content:      string(body),
 	})
-}
-
-func runMemorix(name string, args []string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), memorixTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is exec.LookPath("memorix"); args are fixed
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: %s", err, msg)
-	}
-	return stdout.Bytes(), nil
+	return nil
 }
 
 func sha256Hex(b []byte) string {

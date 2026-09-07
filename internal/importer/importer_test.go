@@ -3,7 +3,6 @@ package importer
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,14 +13,14 @@ func TestScanRequiresRoot(t *testing.T) {
 	mustWrite(t, filepath.Join(canary, ".claude", "CLAUDE.md"), "# Canary\nfrom HOME\n")
 	t.Setenv("HOME", canary)
 
-	_, err := Scan(Request{Hostname: "wsl", LookPath: missingMemorix})
+	_, err := Scan(Request{Hostname: "wsl"})
 	if err == nil || !strings.Contains(err.Error(), "-root") {
 		t.Fatalf("got %v, want error naming -root", err)
 	}
 }
 
 func TestScanRefusesRelativeRoot(t *testing.T) {
-	_, err := Scan(Request{Roots: []string{"."}, Hostname: "wsl", LookPath: missingMemorix})
+	_, err := Scan(Request{Roots: []string{"."}, Hostname: "wsl"})
 	if err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("got %v, want absolute-path error", err)
 	}
@@ -35,7 +34,7 @@ func TestScanDoesNotReadHOMEWhenRootGiven(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
 
-	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,13 +50,48 @@ func TestScanDoesNotReadHOMEWhenRootGiven(t *testing.T) {
 	}
 }
 
+func TestScanDoesNotFollowSymlinkOutsideRoot(t *testing.T) {
+	// Replacing Lstat with os.ReadFile (which follows links) is the one-line change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "id_rsa")
+	mustWrite(t, secret, "SECRET-KEY-MATERIAL\n")
+
+	root := t.TempDir()
+	link := filepath.Join(root, ".claude", "CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(link), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "SECRET-KEY-MATERIAL") || strings.Contains(string(raw), secret) {
+		t.Fatalf("scan followed a symlink outside -root:\n%s", raw)
+	}
+	for _, f := range inv.Files {
+		if f.Rel == ".claude/CLAUDE.md" {
+			t.Fatalf("inventoried symlink %s", f.Path)
+		}
+	}
+}
+
 func TestScanDoesNotWriteUnderRoot(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ".claude", "CLAUDE.md")
 	mustWrite(t, path, "# Shared\nAlways run gofmt.\n")
+	makeReadOnly(t, root)
 	before := treeSnapshot(t, root)
 
-	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +115,7 @@ func TestScanInventoriesHarnessFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(root, ".cursor", "rules", "team.mdc"), cursor)
 	mustWrite(t, filepath.Join(root, "plotlens", "api", "AGENTS.md"), repoAgents)
 
-	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,11 +154,61 @@ func TestScanInventoriesHarnessFiles(t *testing.T) {
 	assertFile("plotlens/api/AGENTS.md", "agents", "repo", repoAgents)
 }
 
+func TestScanDoesNotExecMemorix(t *testing.T) {
+	// Restoring collectMemorix's exec.LookPath/runMemorix path is the change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	binDir := t.TempDir()
+	sentinel := filepath.Join(t.TempDir(), "memorix-ran")
+	fake := filepath.Join(binDir, "memorix")
+	script := "#!/bin/sh\nprintf ran > '" + sentinel + "'\nexit 0\n"
+	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil { //nolint:gosec // test fixture binary
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Fatal("scan exec'd memorix; the live store is not a scan input")
+	}
+	for _, f := range inv.Files {
+		if f.DetectedType == "memorix" {
+			t.Fatalf("scan produced a memorix file without --memorix-json: %#v", f)
+		}
+	}
+
+	exportPath := filepath.Join(t.TempDir(), "memorix.json")
+	if err := os.WriteFile(exportPath, []byte(`{"memories":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err = Scan(Request{Roots: []string{root}, Hostname: "wsl", MemorixJSON: exportPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Fatal("scan exec'd memorix while reading --memorix-json")
+	}
+	found := false
+	for _, f := range inv.Files {
+		if f.DetectedType == "memorix" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("want memorix file from --memorix-json")
+	}
+}
+
 func TestScanSkipsMissingMemorix(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
 
-	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", LookPath: missingMemorix})
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +226,7 @@ func TestScanSkipsMissingMemorix(t *testing.T) {
 	}
 	for _, f := range inv.Files {
 		if f.DetectedType == "memorix" {
-			t.Fatalf("missing binary still produced a memorix file: %#v", f)
+			t.Fatalf("skipped memorix still produced a memorix file: %#v", f)
 		}
 	}
 }
@@ -151,21 +235,15 @@ func TestScanRecordsMemorixExportWithoutParsing(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
 	payload := []byte(`{"memories":[{"id":"raw-export"}]}`)
+	exportPath := filepath.Join(t.TempDir(), "memorix.json")
+	if err := os.WriteFile(exportPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	inv, err := Scan(Request{
-		Roots:    []string{root},
-		Hostname: "wsl",
-		LookPath: func(string) (string, error) { return "/usr/bin/memorix", nil },
-		RunCmd: func(name string, args []string) ([]byte, error) {
-			if name != "/usr/bin/memorix" {
-				t.Fatalf("ran %s, want /usr/bin/memorix", name)
-			}
-			want := []string{"transfer", "export", "--format", "json"}
-			if strings.Join(args, " ") != strings.Join(want, " ") {
-				t.Fatalf("args %v, want %v", args, want)
-			}
-			return payload, nil
-		},
+		Roots:       []string{root},
+		Hostname:    "wsl",
+		MemorixJSON: exportPath,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +256,36 @@ func TestScanRecordsMemorixExportWithoutParsing(t *testing.T) {
 	}
 	if got.Content != string(payload) {
 		t.Fatalf("memorix content %q, want raw export", got.Content)
+	}
+}
+
+func TestPlanSameFileTwoParagraphsAreBlocksNotConflicts(t *testing.T) {
+	// Treating any slot with two hashes as a conflict is the one-line change that makes this red.
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "machine")
+	mustWrite(t, filepath.Join(home, ".claude", "CLAUDE.md"), ""+
+		"# Shared\n"+
+		"Always run gofmt.\n"+
+		"\n"+
+		"Use modules.\n")
+
+	inv, err := Scan(Request{Roots: []string{home}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := BuildPlan([]Inventory{*inv}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Conflicts) != 0 {
+		t.Fatalf("conflicts = %d, want 0 for two paragraphs in one file\n%s", len(plan.Conflicts), raw)
+	}
+	if len(plan.Blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2\n%s", len(plan.Blocks), raw)
 	}
 }
 
@@ -198,11 +306,11 @@ func TestPlanTwoMachinesDifferingClaude(t *testing.T) {
 		"# Indent\n"+
 		"Prefer spaces.\n")
 
-	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl", LookPath: missingMemorix})
+	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac", LookPath: missingMemorix})
+	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,11 +384,11 @@ func TestPlanDedupesBeforeClassify(t *testing.T) {
 		"# Indent\n"+
 		"Prefer spaces.\n")
 
-	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl", LookPath: missingMemorix})
+	invA, err := Scan(Request{Roots: []string{aHome}, Hostname: "wsl"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac", LookPath: missingMemorix})
+	invB, err := Scan(Request{Roots: []string{bHome}, Hostname: "mac"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,10 +453,6 @@ func TestClassifyFirstPersonUserGlobalIsPreference(t *testing.T) {
 	}
 }
 
-func missingMemorix(string) (string, error) {
-	return "", exec.ErrNotFound
-}
-
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -357,6 +461,46 @@ func mustWrite(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// makeReadOnly turns the tree unwritable so a write (including write-then-delete)
+// fails the scan instead of looking clean in a post-hoc snapshot. Restores
+// permissions so t.TempDir cleanup can remove the tree.
+func makeReadOnly(t *testing.T, root string) {
+	t.Helper()
+	var dirs, files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range files {
+		if err := os.Chmod(p, 0o444); err != nil { //nolint:gosec // fixture must be unwritable
+			t.Fatal(err)
+		}
+	}
+	for _, p := range dirs {
+		if err := os.Chmod(p, 0o555); err != nil { //nolint:gosec // fixture must be unwritable
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, p := range dirs {
+			_ = os.Chmod(p, 0o750) //nolint:gosec // restore so TempDir cleanup can run
+		}
+		for _, p := range files {
+			_ = os.Chmod(p, 0o600) //nolint:gosec // restore so TempDir cleanup can run
+		}
+	})
 }
 
 func treeSnapshot(t *testing.T, root string) string {

@@ -3,11 +3,12 @@
 package importer
 
 // Request is a Scan input. Roots must be absolute; there is no $HOME default.
+// MemorixJSON is an optional absolute path to a file the operator exported
+// beforehand; scan never execs the memorix binary.
 type Request struct {
-	Roots    []string
-	Hostname string
-	LookPath func(string) (string, error)
-	RunCmd   func(name string, args []string) ([]byte, error)
+	Roots       []string
+	Hostname    string
+	MemorixJSON string
 }
 
 // Inventory is the scan product written as inventory.json.
