@@ -38,6 +38,11 @@ func importScan(args []string, stdout, stderr io.Writer) error {
 	hostname := fs.String("hostname", "", "machine name tagged on inventoried files")
 	out := fs.String("out", "", "absolute path to write inventory.json")
 	memorixJSON := fs.String("memorix-json", "", "absolute path to a pre-exported memorix JSON file")
+	var exclude []string
+	fs.Func("exclude", "glob matched against a file's path relative to its root; ** spans separators (repeatable)", func(s string) error {
+		exclude = append(exclude, s)
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -62,7 +67,12 @@ func importScan(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("import scan: -out %s is inside -root %s (refuses to overwrite inventoried files)", outPath, root)
 		}
 	}
-	inv, err := importer.Scan(importer.Request{Roots: roots, Hostname: *hostname, MemorixJSON: *memorixJSON})
+	inv, err := importer.Scan(importer.Request{
+		Roots:       roots,
+		Hostname:    *hostname,
+		MemorixJSON: *memorixJSON,
+		Exclude:     exclude,
+	})
 	if err != nil {
 		return err
 	}

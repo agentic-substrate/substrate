@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -55,6 +57,67 @@ var skipPathContains = []string{
 	"/.cursor/plugins/",
 }
 
+// excluder matches slash-relative paths against operator-supplied globs.
+// "**" is expanded to match across separators, which path.Match cannot do.
+type excluder struct{ res []*regexp.Regexp }
+
+func newExcluder(patterns []string) (*excluder, error) {
+	e := &excluder{}
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		// Validate as a shell glob first. globToRegexp quotes everything it
+		// does not handle, so "[bad" would compile into a harmless literal
+		// and silently match nothing — a typo indistinguishable from a
+		// working filter.
+		if _, err := path.Match(strings.ReplaceAll(p, "**", "*"), "probe"); err != nil {
+			return nil, fmt.Errorf("import scan: -exclude %q: %w", p, err)
+		}
+		re, err := globToRegexp(p)
+		if err != nil {
+			return nil, fmt.Errorf("import scan: -exclude %q: %w", p, err)
+		}
+		e.res = append(e.res, re)
+	}
+	return e, nil
+}
+
+func (e *excluder) match(rel string) bool {
+	for _, re := range e.res {
+		if re.MatchString(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+func globToRegexp(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; c {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				i++
+				b.WriteString(".*")
+				continue
+			}
+			b.WriteString("[^/]*")
+		case '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil, err
+	}
+	return re, nil
+}
+
 func skipPath(path string) bool {
 	slash := filepath.ToSlash(path)
 	for _, frag := range skipPathContains {
@@ -85,9 +148,13 @@ func Scan(req Request) (*Inventory, error) {
 		Hostname: req.Hostname,
 		Roots:    append([]string(nil), req.Roots...),
 	}
+	ex, err := newExcluder(req.Exclude)
+	if err != nil {
+		return nil, err
+	}
 	seen := make(map[string]struct{})
 	for _, root := range req.Roots {
-		if err := walkRoot(root, seen, inv); err != nil {
+		if err := walkRoot(root, seen, inv, ex); err != nil {
 			return nil, err
 		}
 	}
@@ -100,7 +167,7 @@ func Scan(req Request) (*Inventory, error) {
 	return inv, nil
 }
 
-func walkRoot(root string, seen map[string]struct{}, inv *Inventory) error {
+func walkRoot(root string, seen map[string]struct{}, inv *Inventory, ex *excluder) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// An unreadable directory somewhere under the root is normal on a
@@ -130,6 +197,9 @@ func walkRoot(root string, seen map[string]struct{}, inv *Inventory) error {
 			return nil
 		}
 		slash := filepath.ToSlash(rel)
+		if ex.match(slash) {
+			return nil
+		}
 		detected, scope, ok := detectFile(slash)
 		if !ok {
 			return nil

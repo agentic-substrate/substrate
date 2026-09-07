@@ -662,3 +662,41 @@ func TestScanSkipsDependencyCachesByPath(t *testing.T) {
 		t.Fatalf("scan inventoried %v, want only .claude/CLAUDE.md", got)
 	}
 }
+
+func TestScanExcludeGlobsDropMatchingPaths(t *testing.T) {
+	// Ignoring Request.Exclude is the one-line change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\nAlways run gofmt.\n")
+	mustWrite(t, filepath.Join(root, ".claude", "skills", "wk", "fixtures", "a", "AGENTS.md"), "# Fixture\n")
+	mustWrite(t, filepath.Join(root, ".claude", "skills", "wk", "iteration-1", "out", "AGENTS.md"), "# Fixture\n")
+
+	inv, err := Scan(Request{
+		Roots:    []string{root},
+		Hostname: "wsl",
+		Exclude:  []string{".claude/skills/wk/**"},
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(inv.Files) != 1 || inv.Files[0].Rel != ".claude/CLAUDE.md" {
+		var got []string
+		for _, f := range inv.Files {
+			got = append(got, f.Rel)
+		}
+		t.Fatalf("scan inventoried %v, want only .claude/CLAUDE.md", got)
+	}
+}
+
+func TestScanExcludeRejectsBadPattern(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\n")
+
+	_, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", Exclude: []string{"[bad"}})
+	if err == nil || !strings.Contains(err.Error(), "-exclude") {
+		t.Fatalf("got %v, want an error naming -exclude; a silently-ignored bad pattern excludes nothing", err)
+	}
+}
