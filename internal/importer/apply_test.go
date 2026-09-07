@@ -521,7 +521,7 @@ func dbWriteSet(t *testing.T, conn *pgx.Conn, w importWorld) string {
 	q(`SELECT 'instruction' || E'\t' || body, status::text FROM instruction WHERE scope_id = $1 AND key <> 'ci.required'`, w.project)
 	q(`SELECT 'preference' || E'\t' || body, status::text FROM preference WHERE scope_id = $1`, w.team)
 	q(`SELECT 'memory' || E'\t' || body, status::text FROM memory WHERE scope_id = $1`, w.project)
-	q(`SELECT 'review_item' || E'\t' || COALESCE(payload->>'slot', ''), status::text FROM review_item WHERE kind = 'import_conflict'`, )
+	q(`SELECT 'review_item' || E'\t' || COALESCE(payload->>'slot', ''), status::text FROM review_item WHERE kind = 'import_conflict'`)
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
@@ -786,6 +786,49 @@ func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
 	after := tableCounts(t, conn)
 	if after != before {
 		t.Fatalf("fresh client_id duplicated rows\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+func TestApplyReviewItemUsesLeafScopeTeam(t *testing.T) {
+	// review_item.team_id = p.TeamIDs[0] is the one-line change that makes
+	// this red: a multi-team principal importing --scope .../team:other
+	// files the conflict on the wrong team.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	if _, err := conn.Exec(t.Context(), `INSERT INTO membership (principal_id, team_id, role) VALUES ($1, $2, 'member')`, w.actor, w.teamBID); err != nil {
+		t.Fatal(err)
+	}
+	core, err := uuid.Parse(w.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := uuid.Parse(w.teamBID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := *w.aliceP
+	p.TeamIDs = []uuid.UUID{core, other}
+	ctx := identity.WithPrincipal(t.Context(), &p)
+	scopePath := strings.Replace(w.pathStr, "/team:core/project:plotlens", "/team:other", 1)
+
+	req := applyReq(w, "mac", true)
+	req.Scope = scopePath
+	if _, err := Apply(ctx, st, req); err != nil {
+		t.Fatal(err)
+	}
+	req = applyReq(w, "wsl", true)
+	req.Scope = scopePath
+	if _, err := Apply(ctx, st, req); err != nil {
+		t.Fatal(err)
+	}
+
+	var team string
+	if err := conn.QueryRow(t.Context(), `SELECT team_id::text FROM review_item WHERE kind = 'import_conflict' AND scope_id = $1`, w.teamB).Scan(&team); err != nil {
+		t.Fatal(err)
+	}
+	if team != w.teamBID {
+		t.Fatalf("review_item.team_id %s, want leaf team %s (principal TeamIDs[0] is %s)", team, w.teamBID, w.teamID)
 	}
 }
 

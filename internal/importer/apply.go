@@ -87,7 +87,7 @@ func Apply(ctx context.Context, st *store.Store, req ApplyRequest) (*ApplyResult
 
 func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req ApplyRequest, sc scope.Path) (*ApplyResult, error) {
 	q := store.New(tx)
-	ids, teamID, leafID, err := lookupPath(ctx, q, sc)
+	ids, teamID, leafID, _, err := lookupPath(ctx, q, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -284,14 +284,11 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 		return nil
 	}
 	q := store.New(tx)
-	_, teamScopeID, leafID, err := lookupPath(ctx, q, sc)
+	_, teamScopeID, leafID, leafTeam, err := lookupPath(ctx, q, sc)
 	if err != nil {
 		return err
 	}
-	teamID := uuid.Nil
-	if len(p.TeamIDs) > 0 {
-		teamID = p.TeamIDs[0]
-	}
+	teamID := leafTeam
 
 	writeRow := func(row PlannedRow) error {
 		id, err := uuid.NewV7()
@@ -561,7 +558,7 @@ func activeBodyAtSlot(kind, rel, heading string, ins []store.ListActiveInstructi
 	return ""
 }
 
-func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgtype.UUID, teamID, leaf uuid.UUID, err error) {
+func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgtype.UUID, teamScopeID, leaf, leafTeam uuid.UUID, err error) {
 	var parent pgtype.UUID
 	for i := range p {
 		row, err := q.LookupScope(ctx, store.LookupScopeParams{
@@ -570,20 +567,23 @@ func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgty
 			ParentID: parent,
 		})
 		if err != nil {
-			return nil, uuid.Nil, uuid.Nil, fmt.Errorf("import apply: unknown scope %s: %w", p[:i+1].String(), err)
+			return nil, uuid.Nil, uuid.Nil, uuid.Nil, fmt.Errorf("import apply: unknown scope %s: %w", p[:i+1].String(), err)
 		}
 		ids = append(ids, row.ID)
 		id := uuid.UUID(row.ID.Bytes)
 		leaf = id
+		if row.TeamID.Valid {
+			leafTeam = uuid.UUID(row.TeamID.Bytes)
+		}
 		if p[i].Kind == scope.Team {
-			teamID = id
+			teamScopeID = id
 		}
 		parent = row.ID
 	}
-	if teamID == uuid.Nil {
-		teamID = leaf
+	if teamScopeID == uuid.Nil {
+		teamScopeID = leaf
 	}
-	return ids, teamID, leaf, nil
+	return ids, teamScopeID, leaf, leafTeam, nil
 }
 
 func identicalActive(body string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) bool {
