@@ -156,7 +156,9 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 	canActivate := req.Machine == req.TrustedMachine && (storedHost == "" || storedHost == req.Machine)
 	res := &ApplyResult{}
 	conflictHash := map[string]Conflict{}
+	conflictSlots := map[string]bool{}
 	for _, c := range req.Plan.Conflicts {
+		conflictSlots[c.Slot] = true
 		for _, side := range c.Pair {
 			conflictHash[side.Hash] = c
 		}
@@ -164,6 +166,12 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 
 	for _, b := range req.Plan.Blocks {
 		if !blockOnMachine(b, req.Machine) {
+			continue
+		}
+		if _, ok := conflictHash[b.Hash]; ok {
+			continue
+		}
+		if conflictSlots[b.Rel+"#"+b.Heading] {
 			continue
 		}
 		if identicalActive(b.Body, activeIns, activePref) {

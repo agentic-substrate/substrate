@@ -789,6 +789,39 @@ func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
 	}
 }
 
+func TestApplySkipsBlocksAlreadyInConflict(t *testing.T) {
+	// Inserting Blocks whose hash is already in Conflicts (ignoring
+	// conflictHash) is the one-line change that makes this red.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	plan := twoMachinePlan()
+	spaces := "Prefer spaces."
+	plan.Blocks = append(plan.Blocks, Block{
+		Hash: sha256Hex([]byte(spaces)), Heading: "Indent", Body: spaces,
+		Kind: "preference", Rel: ".claude/CLAUDE.md",
+		Sources: []Source{{Hostname: "mac"}},
+	})
+	if _, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM preference WHERE body = $1 AND scope_id = $2`, spaces, w.team).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("conflict-side block written %d times, want 1 (proposed from Conflicts only)", n)
+	}
+	prefs := countByBodyStatus(t, conn, "preference", w.team)
+	if prefs[spaces] != "proposed" {
+		t.Fatalf("conflict-side block status %q, want proposed; %#v", prefs[spaces], prefs)
+	}
+}
+
 func TestApplyRejectsConflictSideWithEmptyHostname(t *testing.T) {
 	// Passing conflict sides through with empty Hostnames is the one-line
 	// change that makes this red.
