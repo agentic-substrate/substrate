@@ -153,7 +153,9 @@ memory row are created in one transaction, and a replay with a known `client_id`
 original id with `duplicate: true`. Render `sha256` values are `render.DriftHash` of the content
 (footer excluded). `POST /v1/import` consumes a `plan.json` (SYNC-5, EDD §9). The most-trusted
 machine is applied first; only its non-conflict blocks that are not already byte-identical to
-an active row become `active`. Every later machine can only add `proposed` rows and
+an active row become `active`. The first successful trusted commit stores a per-scope
+marker; a later `-trusted` that names a different host is rejected, including when the
+later host uses a different token. Every later machine can only add `proposed` rows and
 `import_conflict` review items — it cannot promote anything to `active` or modify a row the
 trusted machine established. Each conflict payload carries the applying `hostname` and the
 pair sides' hostnames. Imported memory is always `episodic`/`unverified` even when the source
