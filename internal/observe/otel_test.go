@@ -231,6 +231,33 @@ func TestContextGetEmitsLatencyMetricAndCompileDatabaseSpans(t *testing.T) {
 	}
 }
 
+// Goes red if substrate_render_drift_total labels scope_path (unbounded:
+// every repo or file path is a new series) instead of only machine.
+func TestRenderDriftMetricLabelsMachineNotScopePath(t *testing.T) {
+	rec := newOTLPReceiver(t)
+	rt, err := observe.Setup(t.Context(), observe.Config{
+		Endpoint:       rec.URL,
+		Service:        "substrate-test",
+		ExportInterval: time.Hour,
+		ExportTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+
+	rt.RecordRenderDrift(t.Context(), "wsl")
+	rt.RecordRenderDrift(t.Context(), "wsl")
+	flushOTLP(t, rt)
+
+	if !rec.hasMetric(observe.MetricRenderDrift, "machine", "wsl") {
+		t.Fatalf("collector did not receive %s{machine=wsl}; metrics=%v", observe.MetricRenderDrift, rec.metricNames())
+	}
+	if rec.hasAttrKey(observe.MetricRenderDrift, "scope_path") {
+		t.Fatalf("%s labeled scope_path; that cardinality explodes if the adapter later passes a repo or file path", observe.MetricRenderDrift)
+	}
+}
+
 // Goes red if Setup with an empty endpoint returns an error, or if recording panics.
 func TestEmptyOTLPEndpointIsSupported(t *testing.T) {
 	rt, err := observe.Setup(t.Context(), observe.Config{Endpoint: ""})

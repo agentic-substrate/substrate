@@ -14,7 +14,7 @@ import (
 // A machine that stopped reporting must not look like a machine reporting zero.
 type Metrics interface {
 	SetOutboxDepth(ctx context.Context, machine string, depth int64)
-	RecordRenderDrift(ctx context.Context, machine, scopePath string)
+	RecordRenderDrift(ctx context.Context, machine string)
 }
 
 const (

@@ -19,8 +19,9 @@ func alertsRepoRoot() string {
 }
 
 // Goes red if deploy/alerts.yaml is missing a Phase 1 rule, if a firing
-// series does not interpolate the machine/instance/scope into the message, or
-// if the drift annotation no longer says someone is bypassing the adapter.
+// series does not interpolate the machine/instance into the message, or
+// if the drift annotation no longer says someone is bypassing the adapter
+// and no longer points at the review queue.
 func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 	path := filepath.Join(alertsRepoRoot(), "deploy", "alerts.yaml")
 	raw, err := os.ReadFile(path) //nolint:gosec // test fixture path is the repo's deploy/alerts.yaml
@@ -106,11 +107,11 @@ func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 		}
 	})
 
-	t.Run("drift_names_machine_and_scope", func(t *testing.T) {
+	t.Run("drift_names_machine_and_review_queue", func(t *testing.T) {
 		start := time.Unix(0, 0).UTC()
 		got := EvalAlert(drift, start.Add(24*time.Hour), []Series{{
 			Name:   MetricRenderDrift,
-			Labels: map[string]string{"machine": "wsl", "scope_path": "global:/org:acme"},
+			Labels: map[string]string{"machine": "wsl"},
 			Samples: []Sample{
 				{T: start, V: 0},
 				{T: start.Add(24 * time.Hour), V: 11},
@@ -123,8 +124,11 @@ func TestPhase1AlertsFireAgainstSyntheticSeries(t *testing.T) {
 		if !strings.Contains(msg, "wsl") {
 			t.Fatalf("drift alert message does not name the machine:\n%s", msg)
 		}
-		if !strings.Contains(msg, "global:/org:acme") {
-			t.Fatalf("drift alert message does not name the scope:\n%s", msg)
+		if strings.Contains(msg, "$labels.scope_path") || strings.Contains(strings.ToLower(msg), "at scope") {
+			t.Fatalf("drift alert still interpolates scope_path (unbounded cardinality):\n%s", msg)
+		}
+		if !strings.Contains(strings.ToLower(msg), "review") {
+			t.Fatalf("drift alert does not point at the review queue:\n%s", msg)
 		}
 		if !strings.Contains(strings.ToLower(msg), "bypass") && !strings.Contains(strings.ToLower(msg), "missing instruction") {
 			t.Fatalf("drift alert does not say someone is bypassing the adapter or an instruction key is missing:\n%s", msg)

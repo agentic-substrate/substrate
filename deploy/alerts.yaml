@@ -39,7 +39,8 @@ groups:
         annotations:
           summary: Drift proposals > 10/day on {{ $labels.machine }}
           description: >
-            More than 10 drift proposals in 24h for machine {{ $labels.machine }}
-            at scope {{ $labels.scope_path }}. Someone is bypassing the adapter
-            or an instruction key is missing — usually a missing instruction
-            key, not misbehavior. An alert nobody can act on gets muted.
+            More than 10 drift proposals in 24h for machine {{ $labels.machine }}.
+            Check the review queue for open drift_proposal items. Someone is
+            bypassing the adapter or an instruction key is missing — usually a
+            missing instruction key, not misbehavior. An alert nobody can act
+            on gets muted.

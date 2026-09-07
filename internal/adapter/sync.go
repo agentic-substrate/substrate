@@ -133,7 +133,7 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest string, t
 			return err
 		}
 		if cfg.Metrics != nil {
-			cfg.Metrics.RecordRenderDrift(ctx, cfg.Machine, cfg.scope())
+			cfg.Metrics.RecordRenderDrift(ctx, cfg.Machine)
 		}
 		if err := AtomicWrite(dest, []byte(tgt.Content)); err != nil {
 			return err

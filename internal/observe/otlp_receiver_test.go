@@ -219,6 +219,22 @@ func (r *otlpReceiver) hasMetric(name, attrKey, attrVal string) bool {
 	return false
 }
 
+func (r *otlpReceiver) hasAttrKey(name, attrKey string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, m := range r.metrics {
+		if m.Name != name {
+			continue
+		}
+		for _, a := range m.Attributes {
+			if a.Key == attrKey {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // latestInt is the last exported integer value for name{attrKey=attrVal}.
 func (r *otlpReceiver) latestInt(name, attrKey, attrVal string) (int64, bool) {
 	r.mu.Lock()

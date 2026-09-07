@@ -40,15 +40,14 @@ func (r *Runtime) SetOutboxDepth(ctx context.Context, machine string, depth int6
 	r.outboxDepth.Record(ctx, depth, metric.WithAttributes(attribute.String("machine", machine)))
 }
 
-// RecordRenderDrift increments substrate_render_drift_total{machine,scope_path}.
-func (r *Runtime) RecordRenderDrift(ctx context.Context, machine, scopePath string) {
+// RecordRenderDrift increments substrate_render_drift_total{machine}.
+// scope_path is not a label: it is unbounded if a repo or file path is
+// passed, and today it is always the adapter's configured scope (noise).
+func (r *Runtime) RecordRenderDrift(ctx context.Context, machine string) {
 	if r == nil || r.renderDrift == nil {
 		return
 	}
-	r.renderDrift.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("machine", machine),
-		attribute.String("scope_path", scopePath),
-	))
+	r.renderDrift.Add(ctx, 1, metric.WithAttributes(attribute.String("machine", machine)))
 }
 
 // RecordEmbedFailure increments substrate_embed_failures_total.

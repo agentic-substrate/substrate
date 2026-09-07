@@ -19,7 +19,7 @@ func (c *captureMetrics) SetOutboxDepth(_ context.Context, machine string, depth
 	c.calls++
 }
 
-func (c *captureMetrics) RecordRenderDrift(_ context.Context, _, _ string) {
+func (c *captureMetrics) RecordRenderDrift(_ context.Context, _ string) {
 	c.drift++
 }
 
