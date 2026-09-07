@@ -297,6 +297,7 @@ func TestRESTRenderStartsRequestSpan(t *testing.T) {
 
 	srv := instrumentedREST(t, dsn, map[string]*identity.Principal{"alice": w.aliceP}, rt)
 	res := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "alice", nil)
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(res.Body)
 		t.Fatalf("/v1/render = %d: %s", res.StatusCode, b)
@@ -492,6 +493,7 @@ func TestReviewOpenGaugeZerosWhenLastItemDecided(t *testing.T) {
 		})
 		if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
 			t.Fatalf("create review %d = %d: %s", i, res.StatusCode, b)
 		}
 		var item struct {
@@ -520,9 +522,11 @@ func TestReviewOpenGaugeZerosWhenLastItemDecided(t *testing.T) {
 		})
 		if res.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
 			t.Fatalf("decide %s = %d: %s", id, res.StatusCode, b)
 		}
 		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
 	}
 
 	flushOTLP(t, rt)
@@ -607,6 +611,7 @@ func doJSON(t *testing.T, srv *httptest.Server, method, path, token string, body
 
 func decodeBody(t *testing.T, res *http.Response, dest any) {
 	t.Helper()
+	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
