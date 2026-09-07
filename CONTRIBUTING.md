@@ -26,7 +26,27 @@ make ko-build  # distroless substrate-server via ko --local; does not push
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
 scripts/check-deploy-secrets.sh     # grep-based: no credential, token, or tailnet name under deploy/
 scripts/restore-assert.sh N N N     # weekly restore job: zero rows on memory/instruction/audit is a failure
+
+# Placeholder state of deploy/. CI runs --committed; the operator runs --substituted
+# after filling values in, before `kubectl apply`.
+scripts/check-deploy-placeholders.sh --committed deploy     # nothing is substituted yet, and every
+                                                            # placeholder is named in the runbook
+scripts/check-deploy-placeholders.sh --substituted deploy   # nothing is LEFT to substitute, images
+                                                            # are digest-pinned, no secret is empty
 ```
+
+`check-deploy-secrets.sh` and `check-deploy-placeholders.sh` answer different questions and
+neither subsumes the other. The secret scanner catches a value that should never have been
+written down. The placeholder checker catches a value that *looks* filled in but is not —
+`imageName: substrate-pg:16-pgvector` reads as a real tag, applies cleanly, and lands in
+`ImagePullBackOff`; `password: ""` applies as a literal empty password, which the secret
+scanner explicitly allows because empty is the correct *committed* state.
+
+The restore scripts under `deploy/restore/` are **POSIX sh, not bash**, and that is enforced by
+a test that executes them under `dash`. They run in a kubectl image (`rancher/kubectl`,
+`alpine/k8s`) which is busybox-only; a `[[ ]]` or `(( ))` there is a parse error that fires
+*after* the row counts were collected, so the operator ends up debugging the shell instead of
+the backup.
 
 
 Go 1.26.6+ — the floor in `go.mod`, set by `govulncheck`: earlier 1.26 patches carry reachable
