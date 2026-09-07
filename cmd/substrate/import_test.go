@@ -2,7 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +18,8 @@ import (
 
 func TestImportUsage(t *testing.T) {
 	err := importCmd(nil, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "scan or plan") {
-		t.Fatalf("got %v, want usage", err)
+	if err == nil || !strings.Contains(err.Error(), "apply") {
+		t.Fatalf("got %v, want usage naming apply", err)
 	}
 }
 
@@ -214,6 +219,127 @@ func TestImportPlanTwoMachinesWritesPlanJSON(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(aHome, "inventory.json")); !os.IsNotExist(err) {
 		t.Fatalf("scan wrote inside machine-a: %v", err)
 	}
+}
+
+func TestImportApplyDefaultsToDryRun(t *testing.T) {
+	// Defaulting Commit to true when -commit is omitted is the one-line
+	// change that makes this red.
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planPath, []byte(`{"blocks":[],"conflicts":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sawCommit *bool
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/import" || r.Method != http.MethodPost {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		body, _ = io.ReadAll(r.Body)
+		var in struct {
+			Commit *bool `json:"commit"`
+			DryRun bool  `json:"dry_run"`
+		}
+		_ = json.Unmarshal(body, &in)
+		sawCommit = in.Commit
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dry_run":true,"by_hostname":{"mac":{"active":1,"proposed":1,"conflict":1}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout := &bytes.Buffer{}
+	err := importCmd([]string{
+		"apply", "-machine", "mac", "-trusted", "mac",
+		"-server", srv.URL, "-token", "alice",
+		"-scope", "global:/org:acme/team:core/project:plotlens",
+		planPath,
+	}, stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawCommit != nil && *sawCommit {
+		t.Fatal("apply without -commit posted commit=true")
+	}
+	if !strings.Contains(string(body), `"dry_run":true`) && (sawCommit == nil || *sawCommit) {
+		t.Fatalf("apply without -commit must be dry-run; body %s", body)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("dry-run printed nothing")
+	}
+}
+
+func TestImportApplyDryRunDoesNotWriteLocalFiles(t *testing.T) {
+	// Writing plan.json or a file under the fixture tree from apply is the
+	// change that makes this red.
+	root := t.TempDir()
+	mustWriteCLI(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planPath, []byte(`{"blocks":[],"conflicts":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotDir(t, root)
+	planBefore := snapshotDir(t, filepath.Dir(planPath))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dry_run":true,"active":[{"hostname":"mac","kind":"instruction","status":"active","hash":"abc","body":"Always run gofmt."}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout := &bytes.Buffer{}
+	err := importCmd([]string{
+		"apply", "-machine", "mac", "-trusted", "mac",
+		"-server", srv.URL, "-token", "alice",
+		"-scope", "global:/org:acme/team:core/project:plotlens",
+		planPath,
+	}, stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("dry-run printed nothing")
+	}
+	if snapshotDir(t, root) != before {
+		t.Fatal("apply --dry-run mutated the fixture tree")
+	}
+	if snapshotDir(t, filepath.Dir(planPath)) != planBefore {
+		t.Fatal("apply --dry-run mutated files next to plan.json")
+	}
+}
+
+func snapshotDir(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		b.WriteString(filepath.ToSlash(rel))
+		b.WriteByte(' ')
+		b.WriteString(info.Mode().String())
+		if !d.IsDir() {
+			body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(body)
+			b.WriteByte(' ')
+			b.WriteString(hex.EncodeToString(sum[:]))
+		}
+		b.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
 }
 
 func mustWriteCLI(t *testing.T, path, body string) {

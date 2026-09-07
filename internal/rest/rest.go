@@ -110,6 +110,7 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/review/{id}/decide", h.reviewDecide)
 	mux.HandleFunc("GET /v1/events", h.events)
 	mux.HandleFunc("GET /v1/health/git", h.gitHealth)
+	mux.HandleFunc("POST /v1/import", h.importApply)
 }
 
 type renderTarget struct {

@@ -274,6 +274,11 @@ func TestUnauthenticatedV1Rejected(t *testing.T) {
 			t.Errorf("%s without bearer = %d, want 401", path, res.StatusCode)
 		}
 	}
+	post := doJSON(t, srv, http.MethodPost, "/v1/import", "", map[string]any{"machine": "mac"})
+	_ = post.Body.Close()
+	if post.StatusCode != http.StatusUnauthorized {
+		t.Errorf("POST /v1/import without bearer = %d, want 401", post.StatusCode)
+	}
 }
 
 func TestRenderTargetsMatchDriftHash(t *testing.T) {
@@ -898,6 +903,16 @@ func TestRequestBodiesAreBounded(t *testing.T) {
 		{
 			path: "/v1/review/" + w.reviewOpen + "/decide",
 			body: map[string]any{"decision": "approved", "reason": pad},
+		},
+		{
+			path: "/v1/import",
+			body: map[string]any{
+				"machine":         "mac",
+				"trusted_machine": "mac",
+				"scope":           w.pathStr,
+				"dry_run":         true,
+				"plan":            map[string]any{"pad": pad},
+			},
 		},
 	}
 	for _, tc := range cases {

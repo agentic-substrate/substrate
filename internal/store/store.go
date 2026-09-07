@@ -86,6 +86,28 @@ func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool
 }
 
+// TxReadOnly runs fn in a READ ONLY transaction with RLS session settings.
+// It never COMMITs. A write inside fn fails with a Postgres read-only error,
+// which is how import --dry-run is provably write-free.
+func (s *Store) TxReadOnly(ctx context.Context, fn func(pgx.Tx) error) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("store not configured")
+	}
+	p := identity.FromContext(ctx)
+	if p == nil {
+		return ErrNoPrincipal
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("begin read-only: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := identity.ApplySession(ctx, tx, p); err != nil {
+		return err
+	}
+	return fn(tx)
+}
+
 // Tx runs fn in one transaction with RLS session settings applied from ctx
 // (EDD §8.2). Identity is loaded by middleware; this only SET LOCALs.
 func (s *Store) Tx(ctx context.Context, fn func(pgx.Tx) error) error {

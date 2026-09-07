@@ -43,8 +43,61 @@ type Skipped struct {
 
 // Plan is the plan.json product: unique blocks plus conflict pairs.
 type Plan struct {
-	Blocks    []Block    `json:"blocks"`
-	Conflicts []Conflict `json:"conflicts"`
+	Blocks    []Block      `json:"blocks"`
+	Conflicts []Conflict   `json:"conflicts"`
+	Memories  []MemoryItem `json:"memories,omitempty"`
+}
+
+// MemoryItem is one memorix-exported memory. SourceStatus is what the export
+// claimed; Apply must ignore it (Gotcha 4).
+type MemoryItem struct {
+	Hash         string `json:"hash"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	Kind         string `json:"kind"`
+	Hostname     string `json:"hostname"`
+	SourceStatus string `json:"source_status,omitempty"`
+}
+
+// ApplyRequest is one POST /v1/import (or CLI apply) invocation.
+type ApplyRequest struct {
+	Plan           Plan
+	Machine        string
+	TrustedMachine string
+	Scope          string
+	Commit         bool
+	ClientID       string
+}
+
+// PlannedRow is one row the apply would insert, used by dry-run and commit.
+type PlannedRow struct {
+	Hostname string `json:"hostname"`
+	Kind     string `json:"kind"`
+	Status   string `json:"status"`
+	Key      string `json:"key,omitempty"`
+	Hash     string `json:"hash"`
+	Body     string `json:"body"`
+	Title    string `json:"title,omitempty"`
+	Slot     string `json:"slot,omitempty"`
+}
+
+// HostSummary counts planned writes for one hostname.
+type HostSummary struct {
+	Active   int `json:"active"`
+	Proposed int `json:"proposed"`
+	Conflict int `json:"conflict"`
+	Memory   int `json:"memory"`
+}
+
+// ApplyResult is the dry-run preview and the commit report.
+type ApplyResult struct {
+	DryRun     bool                   `json:"dry_run"`
+	Duplicate  bool                   `json:"duplicate,omitempty"`
+	Active     []PlannedRow           `json:"active"`
+	Proposed   []PlannedRow           `json:"proposed"`
+	Conflict   []PlannedRow           `json:"conflict"`
+	Memory     []PlannedRow           `json:"memory"`
+	ByHostname map[string]HostSummary `json:"by_hostname"`
 }
 
 // Block is one content-hash-unique markdown block after classification.

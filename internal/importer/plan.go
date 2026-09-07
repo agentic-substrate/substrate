@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 )
@@ -102,7 +103,63 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 	}
 	sort.Slice(plan.Blocks, func(i, j int) bool { return plan.Blocks[i].Hash < plan.Blocks[j].Hash })
 	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Slot < plan.Conflicts[j].Slot })
+	plan.Memories = extractMemories(invs)
 	return plan, nil
+}
+
+type memorixFile struct {
+	Memories []memorixItem `json:"memories"`
+}
+
+type memorixItem struct {
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Kind   string `json:"kind"`
+	Status string `json:"status"`
+}
+
+func extractMemories(invs []Inventory) []MemoryItem {
+	var out []MemoryItem
+	for _, inv := range invs {
+		for _, f := range inv.Files {
+			if f.DetectedType != "memorix" {
+				continue
+			}
+			var doc memorixFile
+			if err := json.Unmarshal([]byte(f.Content), &doc); err != nil {
+				continue
+			}
+			for _, m := range doc.Memories {
+				body := strings.TrimSpace(m.Body)
+				if body == "" {
+					continue
+				}
+				title := strings.TrimSpace(m.Title)
+				if title == "" {
+					title = body
+				}
+				kind := m.Kind
+				if kind == "" {
+					kind = "observation"
+				}
+				out = append(out, MemoryItem{
+					Hash:         sha256Hex([]byte(body)),
+					Title:        title,
+					Body:         body,
+					Kind:         kind,
+					Hostname:     inv.Hostname,
+					SourceStatus: m.Status,
+				})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Hostname != out[j].Hostname {
+			return out[i].Hostname < out[j].Hostname
+		}
+		return out[i].Hash < out[j].Hash
+	})
+	return out
 }
 
 type mdBlock struct {

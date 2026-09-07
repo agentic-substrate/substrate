@@ -1,27 +1,33 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/agentic-substrate/substrate/internal/importer"
 )
 
 func importCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("want scan or plan subcommand")
+		return fmt.Errorf("want scan, plan, or apply subcommand")
 	}
 	switch args[0] {
 	case "scan":
 		return importScan(args[1:], stdout, stderr)
 	case "plan":
 		return importPlan(args[1:], stdout, stderr)
+	case "apply":
+		return importApply(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown import command %q", args[0])
 	}
@@ -128,6 +134,93 @@ func importPlan(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	_, err = fmt.Fprintln(stdout, *out)
+	return err
+}
+
+func importApply(args []string, stdout, stderr io.Writer) error {
+	_ = stderr
+	fs := flag.NewFlagSet("import apply", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	machine := fs.String("machine", "", "hostname this apply is for")
+	trusted := fs.String("trusted", "", "most-trusted hostname; only it may create active rows")
+	server := fs.String("server", os.Getenv("SUBSTRATE_URL"), "control plane base URL")
+	token := fs.String("token", os.Getenv("SUBSTRATE_TOKEN"), "bearer token")
+	scope := fs.String("scope", "", "scope path for imported rows")
+	dryRun := fs.Bool("dry-run", false, "classify and print; write nothing (default unless -commit)")
+	commit := fs.Bool("commit", false, "perform database writes; without this, apply is a dry-run")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("import apply: want one plan.json")
+	}
+	if *machine == "" {
+		return fmt.Errorf("import apply: -machine is required")
+	}
+	if *trusted == "" {
+		return fmt.Errorf("import apply: -trusted is required")
+	}
+	if *server == "" {
+		return fmt.Errorf("import apply: -server or SUBSTRATE_URL is required")
+	}
+	if *token == "" {
+		return fmt.Errorf("import apply: -token or SUBSTRATE_TOKEN is required")
+	}
+	if *scope == "" {
+		return fmt.Errorf("import apply: -scope is required")
+	}
+	if *dryRun && *commit {
+		return fmt.Errorf("import apply: -dry-run and -commit cannot both be set")
+	}
+	doCommit := *commit && !*dryRun
+	raw, err := os.ReadFile(fs.Arg(0)) //nolint:gosec // operator-supplied plan.json path
+	if err != nil {
+		return fmt.Errorf("import apply: read %s: %w", fs.Arg(0), err)
+	}
+	var plan importer.Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return fmt.Errorf("import apply: parse %s: %w", fs.Arg(0), err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"machine":         *machine,
+		"trusted_machine": *trusted,
+		"scope":           *scope,
+		"dry_run":         !doCommit,
+		"commit":          doCommit,
+		"plan":            plan,
+	})
+	if err != nil {
+		return err
+	}
+	url := strings.TrimRight(*server, "/") + "/v1/import"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body)) //nolint:gosec // G704: -server is the operator's control plane
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+*token)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	res, err := client.Do(req) //nolint:gosec // G704: -server is the operator's control plane
+	if err != nil {
+		return fmt.Errorf("import apply: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	respBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("import apply: read response: %w", err)
+	}
+	if res.StatusCode >= 400 {
+		return fmt.Errorf("import apply: %s: %s", res.Status, respBody)
+	}
+	var parsed importer.ApplyResult
+	if err := json.Unmarshal(respBody, &parsed); err == nil {
+		out := parsed.Format()
+		if strings.TrimSpace(out) != "" {
+			_, err = fmt.Fprint(stdout, out)
+			return err
+		}
+	}
+	_, err = fmt.Fprint(stdout, string(respBody))
 	return err
 }
 
