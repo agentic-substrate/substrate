@@ -405,6 +405,57 @@ func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
 	}
 }
 
+// Goes red if Shutdown waits on a hanging collector past the caller's
+// context, or if it returns that timeout as a process-exit error.
+// Requests are unaffected; this only bounds SIGTERM. Removing the
+// context from exporter.Shutdown (using context.Background()) is the
+// one-line production change that makes the deadline assertion fail.
+func TestShutdownAgainstHangingCollectorHonorsContextAndIsQuiet(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	hang := make(chan struct{})
+	t.Cleanup(func() { close(hang) })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				<-hang
+				_ = c.Close()
+			}(c)
+		}
+	}()
+
+	rt, err := observe.Setup(t.Context(), observe.Config{
+		Endpoint:       "http://" + ln.Addr().String(),
+		Service:        "substrate-test",
+		ExportInterval: time.Hour,
+		ExportTimeout:  5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	rt.RecordToolLatency(t.Context(), "context.get", time.Millisecond)
+
+	const budget = 200 * time.Millisecond
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	err = rt.Shutdown(ctx)
+	elapsed := time.Since(start)
+	if elapsed > time.Second {
+		t.Fatalf("Shutdown took %s against a hanging collector (caller budget %s, export timeout 5s); process exit would stall", elapsed, budget)
+	}
+	if err != nil {
+		t.Fatalf("Shutdown returned %v; a hanging collector must not fail process exit", err)
+	}
+}
+
 // Goes red if recordReviewOpen only writes kinds that still have open rows:
 // deciding the last drift_proposal leaves substrate_review_open{kind} stuck
 // at the last GROUP BY count, so the alert stays lit on an empty queue.

@@ -244,18 +244,19 @@ func (r *Runtime) initInstruments(m metric.Meter) error {
 }
 
 // Shutdown flushes and releases providers. Safe on a no-op Runtime.
+// A hanging collector can delay return up to ctx; the error is logged
+// once and never returned, so process exit is not a failed export.
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	var err error
 	if r.tp != nil {
-		err = errors.Join(err, r.tp.Shutdown(ctx))
+		r.fails.record(r.tp.Shutdown(ctx))
 	}
 	if r.mp != nil {
-		err = errors.Join(err, r.mp.Shutdown(ctx))
+		r.fails.record(r.mp.Shutdown(ctx))
 	}
-	return err
+	return nil
 }
 
 // ForceFlush exports pending signals. Used by tests; production relies on the

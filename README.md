@@ -132,7 +132,8 @@ vector neighbour can never outrank a typed filename or symbol (MEM-3).
 `-otlp` (or `SUBSTRATE_OTLP_ENDPOINT`) is the OTLP HTTP collector. Leave it empty and export is
 disabled, which is a supported configuration the same way empty `-ollama` is keyword-only: the
 collector being down, or never configured, must not fail a request. When set, the process pushes
-metrics and traces best-effort; a failure is logged once, not per request. Metric names are
+metrics and traces best-effort; a failure is logged once, not per request. On SIGTERM, shutdown
+waits up to 5s for the collector — a hang delays process exit, not in-flight requests. Metric names are
 `substrate_*` (the EDD's `acp_*` translated). The adapter reports `substrate_outbox_depth` per
 machine, including zero — a machine that stopped reporting drops the series rather than looking
 like an empty queue. Phase 1 alert rules live in [`deploy/alerts.yaml`](deploy/alerts.yaml).

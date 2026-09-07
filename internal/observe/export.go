@@ -25,7 +25,10 @@ func (e *quietSpanExporter) Shutdown(ctx context.Context) error {
 	if e.next == nil {
 		return nil
 	}
-	return e.next.Shutdown(ctx)
+	// Honors ctx: a hanging collector delays process exit up to the
+	// caller's deadline (5s in substrate-server). Requests are unaffected.
+	e.fails.record(e.next.Shutdown(ctx))
+	return nil
 }
 
 type quietMetricExporter struct {
@@ -46,5 +49,13 @@ func (e *quietMetricExporter) ForceFlush(ctx context.Context) error {
 		return nil
 	}
 	e.fails.record(e.Exporter.ForceFlush(ctx))
+	return nil
+}
+
+func (e *quietMetricExporter) Shutdown(ctx context.Context) error {
+	if e.Exporter == nil {
+		return nil
+	}
+	e.fails.record(e.Exporter.Shutdown(ctx))
 	return nil
 }

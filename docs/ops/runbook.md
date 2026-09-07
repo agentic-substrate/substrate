@@ -76,7 +76,8 @@ A machine that stopped reporting drops the series; do not default missing to 0.
 
 The collector endpoint is `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`. Empty disables export (supported,
 not degraded). A collector outage must not fail a request; export is best-effort and a failure
-is logged once.
+is logged once. On SIGTERM, `Shutdown` waits up to 5s for the collector; a hanging collector
+delays process exit by that much and the timeout is not returned as a process-exit error.
 
 | Alert | Threshold | What it usually means |
 |---|---|---|
