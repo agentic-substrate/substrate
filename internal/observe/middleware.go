@@ -9,15 +9,18 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 )
 
-// Middleware attaches the Runtime and a per-request fields slot. It does not
-// log bodies, tokens, or Authorization headers. MCP tool latency is recorded
-// by mcpx.AddTool, which sees the tool name the HTTP path does not.
+// Middleware attaches the Runtime, a per-request fields slot, and one span
+// per request (EDD §12). REST /v1 traffic has no AddTool wrapper, so the
+// span must start here; MCP tool spans nest under it. It does not log
+// bodies, tokens, or Authorization headers.
 func Middleware(r *Runtime) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := WithRuntime(req.Context(), r)
 			ctx = withFields(ctx)
 			ctx = context.WithValue(ctx, slotKey, SlotFrom(ctx))
+			ctx, span := Start(ctx, req.Method+" "+req.URL.Path)
+			defer span.End()
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	}

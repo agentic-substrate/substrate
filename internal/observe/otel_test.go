@@ -272,6 +272,45 @@ func TestEmptyOTLPEndpointIsSupported(t *testing.T) {
 	}
 }
 
+// Goes red if HTTP middleware attaches Runtime but never Start()s a span:
+// REST /v1/render (adapter traffic) would be untraced while MCP tools are
+// spanned in AddTool. EDD §12 wants one span per request.
+func TestRESTRenderStartsRequestSpan(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	rec := newOTLPReceiver(t)
+	rt, err := observe.Setup(t.Context(), observe.Config{
+		Endpoint:       rec.URL,
+		Service:        "substrate-test",
+		ExportInterval: time.Hour,
+		ExportTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+
+	srv := instrumentedREST(t, dsn, map[string]*identity.Principal{"alice": w.aliceP}, rt)
+	res := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "alice", nil)
+	if res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("/v1/render = %d: %s", res.StatusCode, b)
+	}
+	_, _ = io.Copy(io.Discard, res.Body)
+	flushOTLP(t, rt)
+
+	var found bool
+	for _, s := range rec.allSpans() {
+		if strings.Contains(s.Name, "/v1/render") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no request span for /v1/render; REST adapter traffic is untraced. spans=%v", rec.spanNames())
+	}
+}
+
 // Goes red if export runs on the request path: ExportTimeout is far larger
 // than the call budget, so a SimpleSpanProcessor (export on End) would
 // stall each context.get for ~timeout. The batcher keeps this off the
