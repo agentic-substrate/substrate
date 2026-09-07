@@ -5,24 +5,60 @@ metadata:
   namespace: substrate
 spec:
   schedule: "0 4 * * 0"
+  # Ships SUSPENDED and must stay that way in git. `kubectl apply -k deploy/`
+  # (runbook step 8) would otherwise arm an unattended weekly delete+restore
+  # before a human has ever run the restore by hand; applied on a Saturday it
+  # fires Sunday 04:00 having never been verified. Runbook step 11 unsuspends
+  # it, after step 10 recorded non-zero counts.
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 8
   jobTemplate:
     spec:
       backoffLimit: 0
+      # The script's own waits total 40 min (1800s cluster + 600s pod). Without
+      # a deadline a hung restore stays Active forever and `Forbid` then
+      # silently skips every following week — the job would stop testing the
+      # backup and never say so. 3600s > 40 min of legitimate waiting.
+      activeDeadlineSeconds: 3600
       template:
         spec:
           serviceAccountName: substrate-restore
           restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: restore-test
-              # Image must provide kubectl and a POSIX shell. Substitute a digest.
-              image: "<kubectl-image>"
+              # Must provide kubectl and a POSIX shell at /bin/sh, and must be
+              # pinned by digest (`repo/name@sha256:...`), not by a tag. The
+              # scripts are POSIX sh on purpose so a busybox-only kubectl image
+              # (rancher/kubectl, alpine/k8s) works. scripts/check-deploy-
+              # placeholders.sh enforces the digest form after substitution.
+              image: "<kubectl-image-digest>"
               command: ["/bin/sh", "/restore/restore-test.sh"]
               env:
                 - name: NAMESPACE
                   value: substrate
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  # This container only shells out to the API server; the heavy
+                  # lifting (barman-cloud-restore) happens in the scratch
+                  # cluster's own pod, which is bounded by scratch-cluster.yaml.
+                  cpu: 500m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
               volumeMounts:
                 - name: restore
                   mountPath: /restore

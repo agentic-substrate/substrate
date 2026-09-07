@@ -10,15 +10,41 @@ metadata:
   name: substrate-restore
   namespace: substrate
 rules:
+  # `create` cannot be name-scoped: RBAC evaluates resourceNames against an
+  # existing object's name, and a create request has no name yet, so a rule with
+  # resourceNames never matches a create. The bound on create is therefore the
+  # manifest this job applies (deploy/cnpg/scratch-cluster.yaml, mounted
+  # read-only from a ConfigMap), not RBAC.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["create"]
+  # Everything destructive is pinned to the scratch cluster by name. Without
+  # resourceNames a typo, an edited ConfigMap, or a compromised job image could
+  # issue `delete cluster substrate-pg` and CNPG would take the 20Gi Longhorn
+  # PVC with it.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "update", "patch", "delete"]
+    resourceNames: ["substrate-pg-scratch"]
+  # list/watch cannot be name-scoped either (they are collection verbs). They
+  # are read-only, and `kubectl wait` needs watch.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["list", "watch"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+    resourceNames: ["substrate-pg-scratch-1"]
+  # exec is `psql -U postgres` inside the target pod — a full RLS and audit
+  # bypass. Scoped to the scratch pod so this weekly cron container cannot open
+  # a superuser shell on production.
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+    resourceNames: ["substrate-pg-scratch-1"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
