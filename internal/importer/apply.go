@@ -103,13 +103,15 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		return nil, fmt.Errorf("import apply: receipt: %w", err)
 	}
 
-	trustedID := machineClientID(req.TrustedMachine, req.Scope)
-	_, trustedErr := q.GetIngestReceipt(ctx, pgUUID(trustedID))
-	trustedImported := trustedErr == nil
-	if trustedErr != nil && !errors.Is(trustedErr, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("import apply: trusted receipt: %w", trustedErr)
+	storedHost, err := loadTrustedHost(ctx, q, req.Scope)
+	if err != nil {
+		return nil, err
 	}
-	if req.Machine != req.TrustedMachine && !trustedImported {
+	if storedHost != "" {
+		if req.TrustedMachine != storedHost {
+			return nil, fmt.Errorf("import apply: trusted machine is %q, not %q", storedHost, req.TrustedMachine)
+		}
+	} else if req.Machine != req.TrustedMachine {
 		return nil, fmt.Errorf("import apply: trusted machine %q must be imported first", req.TrustedMachine)
 	}
 
@@ -137,7 +139,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		}
 	}
 
-	canActivate := req.Machine == req.TrustedMachine
+	canActivate := req.Machine == req.TrustedMachine && (storedHost == "" || storedHost == req.Machine)
 	res := &ApplyResult{}
 	conflictHash := map[string]Conflict{}
 	for _, c := range req.Plan.Conflicts {
@@ -364,6 +366,52 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 		}
 	} else if err != nil {
 		return fmt.Errorf("import apply: machine receipt: %w", err)
+	}
+	if req.Machine == req.TrustedMachine {
+		if err := storeTrustedHost(ctx, q, p, req, leafID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const trustedSubjectPrefix = "import_trusted:"
+
+func trustedMarkerID(scope string) uuid.UUID {
+	return uuid.NewSHA1(importNS, []byte("substrate-import-trusted/"+scope))
+}
+
+func loadTrustedHost(ctx context.Context, q *store.Queries, scope string) (string, error) {
+	row, err := q.GetIngestReceipt(ctx, pgUUID(trustedMarkerID(scope)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("import apply: trusted receipt: %w", err)
+	}
+	host, ok := strings.CutPrefix(row.SubjectType, trustedSubjectPrefix)
+	if !ok || host == "" {
+		return "", fmt.Errorf("import apply: trusted receipt: malformed subject_type %q", row.SubjectType)
+	}
+	return host, nil
+}
+
+func storeTrustedHost(ctx context.Context, q *store.Queries, p *identity.Principal, req ApplyRequest, leafID uuid.UUID) error {
+	id := trustedMarkerID(req.Scope)
+	_, err := q.GetIngestReceipt(ctx, pgUUID(id))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("import apply: trusted receipt: %w", err)
+	}
+	if err := q.InsertIngestReceipt(ctx, store.InsertIngestReceiptParams{
+		ClientID:    pgUUID(id),
+		PrincipalID: pgUUID(p.ID),
+		SubjectType: trustedSubjectPrefix + req.Machine,
+		SubjectID:   pgUUID(leafID),
+	}); err != nil {
+		return fmt.Errorf("import apply: trusted receipt: %w", err)
 	}
 	return nil
 }

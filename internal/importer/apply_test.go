@@ -502,6 +502,36 @@ func TestApplySecondMachineDoesNotMutateTrustedRow(t *testing.T) {
 	}
 }
 
+func TestApplyFlippedTrustedDoesNotActivateLaterHost(t *testing.T) {
+	// canActivate := req.Machine == req.TrustedMachine (ignoring a stored
+	// per-scope trusted host) is the one-line change that makes this red.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	if _, err := Apply(ctx, st, applyReq(w, "mac", true)); err != nil {
+		t.Fatal(err)
+	}
+	req := applyReq(w, "wsl", true)
+	req.TrustedMachine = "wsl"
+	_, err := Apply(ctx, st, req)
+	got := countByBodyStatus(t, conn, "instruction", w.project)
+	if got["Use modules."] == "active" {
+		t.Fatalf("flipped -trusted made the later host's block active; row map %#v", got)
+	}
+	if err == nil {
+		t.Fatal("flipped -trusted succeeded; a stored trusted host must reject a later -trusted")
+	}
+	if !strings.Contains(err.Error(), "trusted") {
+		t.Fatalf("flipped -trusted error %v, want it to name trusted", err)
+	}
+	prefs := countByBodyStatus(t, conn, "preference", w.team)
+	if prefs["Prefer tabs."] == "active" {
+		t.Fatalf("flipped -trusted activated a later-host conflict side: %#v", prefs)
+	}
+}
+
 func drySet(r *ApplyResult) string {
 	type item struct{ H, K, S, Hash string }
 	var items []item
