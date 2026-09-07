@@ -521,7 +521,7 @@ func dbWriteSet(t *testing.T, conn *pgx.Conn, w importWorld) string {
 	q(`SELECT 'instruction' || E'\t' || body, status::text FROM instruction WHERE scope_id = $1 AND key <> 'ci.required'`, w.project)
 	q(`SELECT 'preference' || E'\t' || body, status::text FROM preference WHERE scope_id = $1`, w.team)
 	q(`SELECT 'memory' || E'\t' || body, status::text FROM memory WHERE scope_id = $1`, w.project)
-	q(`SELECT 'review_item' || E'\t' || COALESCE(payload->>'slot', ''), status::text FROM review_item WHERE kind = 'import_conflict'`)
+	q(`SELECT 'review_item' || E'\t' || COALESCE(payload->>'slot', ''), status::text FROM review_item WHERE kind = 'import_conflict' AND team_id = $1`, w.teamID)
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
@@ -708,14 +708,14 @@ func TestApplyDiscoversSlotConflictAcrossSeparatePlans(t *testing.T) {
 		t.Fatalf("conflicting later-machine slot status %q, want proposed; %#v", got["Use emacs."], got)
 	}
 	var n int
-	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM review_item WHERE kind = 'import_conflict'`).Scan(&n); err != nil {
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM review_item WHERE kind = 'import_conflict' AND scope_id = $1`, w.project).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n == 0 {
 		t.Fatal("separately-planned slot conflict left the review queue empty")
 	}
 	var raw []byte
-	if err := conn.QueryRow(t.Context(), `SELECT payload FROM review_item WHERE kind = 'import_conflict' LIMIT 1`).Scan(&raw); err != nil {
+	if err := conn.QueryRow(t.Context(), `SELECT payload FROM review_item WHERE kind = 'import_conflict' AND scope_id = $1`, w.project).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), "mac") || !strings.Contains(string(raw), "wsl") {
