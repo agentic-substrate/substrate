@@ -81,6 +81,18 @@ type Write struct {
 	WouldDr    string
 }
 
+// WithMountRoot appends DefaultMountRoot so Discover and confineToRoots
+// see /work/<project>/<repo> even when the operator only passed -root $HOME.
+func WithMountRoot(roots []string) []string {
+	out := append([]string(nil), roots...)
+	for _, r := range roots {
+		if r == DefaultMountRoot {
+			return out
+		}
+	}
+	return append(out, DefaultMountRoot)
+}
+
 func validateRoots(roots []string) error {
 	if len(roots) == 0 {
 		return fmt.Errorf("cutover: -root is required (refuses to guess $HOME)")

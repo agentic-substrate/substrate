@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,5 +129,82 @@ func TestImportCutoverCommitThenRestoreRoundTrip(t *testing.T) {
 	}
 	if hex.EncodeToString(sum[:]) != sha256HexCLI(restored) {
 		t.Fatal("restore did not return original hash")
+	}
+}
+
+func TestImportCutoverDisplacesMountRootAgents(t *testing.T) {
+	// Discovering only the first -root, or omitting /work from Request.Roots
+	// so confineToRoots rejects checkout dests, is the change that makes this
+	// red. A fake /work/<project>/<repo>/AGENTS.md must be renamed, not left
+	// for the adapter to clobber.
+	home := t.TempDir()
+	work := t.TempDir()
+	repo := filepath.Join(work, "acme", "api")
+	initGitRepo(t, repo)
+	live := filepath.Join(repo, "AGENTS.md")
+	original := "# repo agents\n"
+	mustWriteCLI(t, live, original)
+	rendered := "# generated\ndo not edit\n\n<!-- sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa generated-at:2026-09-07T00:00:00Z -->\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"targets": []map[string]string{{
+				"path":    "AGENTS.md",
+				"content": rendered,
+				"sha256":  render.DriftHash(rendered),
+			}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	fake := &cutover.FakeInstaller{}
+	if err := importCutover([]string{
+		"-root", home, "-root", work, "-server", srv.URL, "-token", "t", "-machine", "wsl", "-commit",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, fake); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(live + cutover.BackupSuffix) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatalf("mount-root AGENTS.md was not renamed to *.pre-substrate: %v", err)
+	}
+	if string(backup) != original {
+		t.Fatalf("backup %q, want original", backup)
+	}
+	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != rendered {
+		t.Fatalf("live body %q, want rendered (adapter would have clobbered the original)", got)
+	}
+}
+
+func TestScanRootsIncludesDefaultMountRoot(t *testing.T) {
+	// Returning operator -root without appending DefaultMountRoot is the
+	// one-line change that makes this red. confineToRoots must permit /work
+	// destinations and Discover must see CONT-4 checkouts.
+	got := scanRoots([]string{"/tmp/fake-home"})
+	if len(got) != 2 || got[0] != "/tmp/fake-home" || got[1] != cutover.DefaultMountRoot {
+		t.Fatalf("scanRoots = %v, want [home %s]", got, cutover.DefaultMountRoot)
+	}
+	dup := scanRoots([]string{"/tmp/fake-home", cutover.DefaultMountRoot})
+	if len(dup) != 2 {
+		t.Fatalf("scanRoots duplicated mount root: %v", dup)
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
 	}
 }

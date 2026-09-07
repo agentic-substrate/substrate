@@ -79,7 +79,7 @@ func plannedLivePaths(req Request) ([]string, error) {
 	if home == "" && len(req.Roots) > 0 {
 		home = req.Roots[0]
 	}
-	checkouts, err := adapter.Discover(req.Roots)
+	checkouts, err := adapter.Discover(WithMountRoot(req.Roots))
 	if err != nil {
 		return nil, err
 	}

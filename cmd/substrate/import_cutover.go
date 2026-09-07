@@ -64,7 +64,8 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 		return err
 	}
 	home := roots[0]
-	checkouts, err := adapter.Discover(roots)
+	scan := scanRoots(roots)
+	checkouts, err := adapter.Discover(scan)
 	if err != nil {
 		return err
 	}
@@ -87,7 +88,7 @@ func importCutover(args []string, stdout, stderr io.Writer, inst cutover.UnitIns
 	}
 
 	rep, err := cutover.Cutover(cutover.Request{
-		Roots:     roots,
+		Roots:     scan,
 		Home:      home,
 		Commit:    *commit && !*dryRun,
 		Installer: inst,
@@ -149,4 +150,11 @@ func fetchRenderTargets(ctx context.Context, server, token, machine string) ([]c
 		return nil, fmt.Errorf("import cutover: decode render: %w", err)
 	}
 	return parsed.Targets, nil
+}
+
+// scanRoots is the Discover and confine set: every operator -root, plus
+// DefaultMountRoot so /work/<project>/<repo> files are displaced even when
+// the operator only passed -root $HOME.
+func scanRoots(roots []string) []string {
+	return cutover.WithMountRoot(roots)
 }
