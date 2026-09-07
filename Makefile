@@ -1,11 +1,12 @@
-# Every target here is also what CI runs. If you change a command, change the
-# workflow in the same commit — AGENTS.md names these as the verification set.
+# check/build/smoke/sqlc are also what CI runs. ko-build is operator-side
+# (needs a local daemon and must not push). If you change a CI command, change
+# the workflow in the same commit — AGENTS.md names these as the verification set.
 GO      ?= go
 BIN     ?= bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/agentic-substrate/substrate/internal/version.Version=$(VERSION)
 
-.PHONY: all build test lint vet fmt-check vuln smoke clean check sqlc
+.PHONY: all build test lint vet fmt-check vuln smoke clean check sqlc ko-build
 
 all: check
 
@@ -34,6 +35,12 @@ vuln:
 ## sqlc: regenerate internal/store from migrations/ and queries.sql.
 sqlc:
 	sqlc generate
+
+## ko-build: distroless substrate-server image into the local daemon. Does not push.
+KO_DOCKER_REPO ?= ko.local
+ko-build:
+	@command -v ko >/dev/null || { echo "ko-build: ko not installed. Fix: go install github.com/ko-build/ko@latest"; exit 1; }
+	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build --local ./cmd/substrate-server
 
 ## smoke: boot the real server with no database; /healthz 200, /readyz 503.
 smoke: build

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substrate-server
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: substrate-server
+    spec:
+      containers:
+        - name: substrate-server
+          # ko build --local ./cmd/substrate-server (see .ko.yaml). Substitute.
+          image: ko.local/substrate-server:latest
+          args:
+            - -addr=:8080
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: substrate-server
+            - secretRef:
+                name: substrate
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20

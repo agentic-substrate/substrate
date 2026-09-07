@@ -1,0 +1,35 @@
+# Applied by the weekly restore CronJob (and once by hand before that job is
+# armed). Not in deploy/kustomization.yaml resources — a default apply must
+# not create a second Longhorn volume.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: substrate-pg-scratch
+  namespace: substrate
+spec:
+  instances: 1
+  imageName: substrate-pg:16-pgvector
+  enableSuperuserAccess: true
+  bootstrap:
+    recovery:
+      source: substrate-pg
+  externalClusters:
+    - name: substrate-pg
+      barmanObjectStore:
+        destinationPath: s3://substrate-backups/
+        endpointURL: "http://<minio-service>.<minio-namespace>.svc.cluster.local:9000"
+        serverName: substrate-pg
+        s3Credentials:
+          accessKeyId:
+            name: substrate
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: substrate
+            key: ACCESS_SECRET_KEY
+        wal:
+          encryption: AES256
+        data:
+          encryption: AES256
+  storage:
+    storageClass: longhorn
+    size: 20Gi

@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: substrate-restore-test
+  namespace: substrate
+spec:
+  schedule: "0 4 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 8
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: substrate-restore
+          restartPolicy: Never
+          containers:
+            - name: restore-test
+              # Image must provide kubectl and a POSIX shell. Substitute a digest.
+              image: "<kubectl-image>"
+              command: ["/bin/sh", "/restore/restore-test.sh"]
+              env:
+                - name: NAMESPACE
+                  value: substrate
+              volumeMounts:
+                - name: restore
+                  mountPath: /restore
+                  readOnly: true
+          volumes:
+            - name: restore
+              configMap:
+                name: substrate-restore
+                defaultMode: 0555

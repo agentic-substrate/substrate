@@ -15,7 +15,8 @@ is the availability story.
 | Ollama (`nomic-embed-text`) | Existing T4 node, `nodeSelector: gpu=t4` | Called directly from Go in Phase 1 |
 | OTel collector | Existing; endpoint still open (EDD §19 item 5) | Empty `-otlp` disables export. Phase 1 rules: `deploy/alerts.yaml` |
 | MinIO | Existing | Buckets `substrate-sessions` (SSE, owner-only), `substrate-backups` |
-| Ingress | Traefik v3 + cert-manager, `IngressRoute` for `substrate.<tailnet>` | Per-token rate limit on `/mcp` |
+| Ingress | Traefik v3 + cert-manager, `IngressRoute` for `substrate.<tailnet>` | Per-token rate limit on `/mcp`; Tailscale-only entrypoint |
+| Manifests | [`deploy/`](../../deploy/) | Kustomize overlay. Secret is a template with empty values. Postgres PVC is **20Gi** on Longhorn, set explicitly — never omit it |
 
 ## Migrations
 
@@ -62,14 +63,47 @@ are the review-decide status write (team lead of that item, one row, no request-
 ## Backups and restore
 
 Continuous WAL archiving plus a daily 03:00 base backup via CloudNativePG barman-cloud to
-`substrate-backups`, SSE-encrypted, 30-day retention, PITR enabled.
+`substrate-backups`, SSE-encrypted, 30-day retention, PITR enabled. Manifests live in
+[`deploy/cnpg/`](../../deploy/cnpg/).
 
-**Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the object store and the
-target timestamp, then repoint `substrate-server` at the new cluster.
+**Restore (PITR):** apply [`deploy/cnpg/scratch-cluster.yaml`](../../deploy/cnpg/scratch-cluster.yaml)
+(or a copy with `bootstrap.recovery.recoveryTarget.targetTime` set), wait until the Cluster
+is Ready, then repoint `substrate-server` at the restored service. For a production failover
+the restored cluster is renamed/repointed; the weekly job uses a scratch name
+(`substrate-pg-scratch`) and deletes it afterwards so the extra 20Gi PVC does not linger.
 
-**The restore is tested, not assumed:** a weekly CronJob restores to a scratch cluster and
-asserts row counts on `memory`, `instruction`, and `audit`. A backup that has never been
-restored is not a backup.
+**The restore is tested, not assumed:** CronJob `substrate-restore-test` (Sunday 04:00) restores
+into that scratch cluster and runs [`scripts/restore-assert.sh`](../../scripts/restore-assert.sh)
+on `memory`, `instruction`, and `audit`. A restore that produces **zero rows fails the job** —
+that is not a silent success. A backup that has never been restored is not a backup.
+
+Do not arm the CronJob until the operator has performed step 10 below and recorded the counts.
+
+## Operator checklist
+
+**Requires the operator.** Nothing in this list is performed by an automated worker against
+the homelab. Substitute every `<placeholder>` on the operator machine; never commit filled
+values. `kubectl kustomize` is offline. `kubectl apply --dry-run=client` still performs
+API discovery and must not use the homelab kubeconfig. `--dry-run=server` talks to
+the API and is a human step.
+
+| # | Step | Blast radius |
+|---|---|---|
+| 1 | Fill [`deploy/server/secret.yaml`](../../deploy/server/secret.yaml) and [`deploy/cnpg/superuser-secret.yaml`](../../deploy/cnpg/superuser-secret.yaml) (`SUBSTRATE_DSN`, MinIO keys, postgres password). Keep the filled copies off git. | None until apply. A filled file committed to the repo is a credential leak. |
+| 2 | Substitute `<minio-service>`, `<minio-namespace>`, `<tailnet>`, `<cluster-issuer>`, `<tailscale-entrypoint>`, `<kubectl-image>`, and the two image names (`substrate-pg:16-pgvector`, `ko.local/substrate-server:latest`). | None until apply. A public Traefik entrypoint here would expose `/mcp` and `/v1` off-tailnet. |
+| 3 | Create MinIO buckets using [`deploy/minio/buckets.sh`](../../deploy/minio/buckets.sh) (printed `mc` commands, not a script to pipe blindly). Confirm `mc ls` shows no collision first. | New buckets `substrate-backups` and `substrate-sessions` only. A colliding name can hide or encrypt someone else's prefix. |
+| 4 | Build the CNPG image: `docker build -t substrate-pg:16-pgvector deploy/cnpg/` and load it where the cluster can pull. | Image store only. |
+| 5 | `make ko-build` (`ko build --local ./cmd/substrate-server`). Do not push unless the operator's registry is the intended destination. Tag/load so the Deployment image matches. | Image store only. `ko` without `--local` would push. |
+| 6 | Offline check: `kubectl kustomize deploy/` and `scripts/check-deploy-secrets.sh`. `kubectl apply --dry-run=client` still performs API discovery; do not point it at the homelab kubeconfig. | None. |
+| 7 | `kubectl apply --dry-run=server -k deploy/` against the real API. | None (no objects persist) but it **does** contact the cluster. |
+| 8 | `kubectl apply -k deploy/` — Namespace, `substrate-pg` (20Gi Longhorn), server, IngressRoute, CronJob RBAC. **Do not** apply `scratch-cluster.yaml` at this step. | One 20Gi Longhorn volume. A default-sized PVC or a colliding hostname can take a neighbouring workload down. Traefik route is inert unless the entrypoint is already public (see step 2). |
+| 9 | Wait for `substrate-pg` Ready. Confirm extensions `vector`, `pg_trgm`, `ltree` and roles `substrate_migrate` / `substrate_app` with `rolbypassrls = false` on `substrate_app`. Let the server migrate on boot. | Process of record: first goose Up against this database. There is no `goose down` after this (see Migrations). |
+| 10 | **First restore, by hand, before the CronJob is trusted.** Apply [`deploy/cnpg/scratch-cluster.yaml`](../../deploy/cnpg/scratch-cluster.yaml), wait Ready, exec `SELECT count(*) FROM memory`, `instruction`, `audit`, run `scripts/restore-assert.sh` with those three numbers, record the counts, then `kubectl delete cluster substrate-pg-scratch`. Zero rows is a failed restore, not an all-clear. | A second 20Gi Longhorn volume until deleted. Deletes only the scratch Cluster, never `substrate-pg`. |
+| 11 | After step 10 has non-zero counts recorded, leave the CronJob enabled. Sunday 04:00 repeats the scratch restore and fails the Job on zero rows. | Same as step 10, unattended, once a week. A leftover scratch PVC is the failure mode if delete fails — check Longhorn. |
+
+`kubectl apply --dry-run=server`, executing the restore on the scratch cluster, and anything
+that needs the real tailnet name or credentials are **Requires the operator**. They are not
+done in CI and they are not performed against the live cluster except by the operator.
 
 ## Alerts (Phase 1 minimum)
 

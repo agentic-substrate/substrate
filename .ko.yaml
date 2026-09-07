@@ -1,0 +1,2 @@
+# Distroless nonroot for substrate-server. ko build --local must not push.
+defaultBaseImage: gcr.io/distroless/static-debian12:nonroot

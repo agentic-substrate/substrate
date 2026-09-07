@@ -1,0 +1,61 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: substrate-pg
+  namespace: substrate
+spec:
+  instances: 1
+  # Built from deploy/cnpg/Dockerfile. Substitute the image the operator loaded.
+  imageName: substrate-pg:16-pgvector
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: substrate-pg-superuser
+  bootstrap:
+    initdb:
+      database: substrate
+      owner: app
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        - CREATE EXTENSION IF NOT EXISTS ltree;
+  managed:
+    roles:
+      - name: substrate_migrate
+        ensure: present
+        login: false
+        superuser: false
+        createdb: false
+        createrole: false
+        inherit: true
+        bypassrls: false
+      - name: substrate_app
+        ensure: present
+        login: false
+        superuser: false
+        createdb: false
+        createrole: false
+        inherit: true
+        bypassrls: false
+  storage:
+    storageClass: longhorn
+    size: 20Gi
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://substrate-backups/
+      endpointURL: "http://<minio-service>.<minio-namespace>.svc.cluster.local:9000"
+      s3Credentials:
+        accessKeyId:
+          name: substrate
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: substrate
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+        encryption: AES256
+      data:
+        compression: gzip
+        encryption: AES256
+        jobs: 1
+        immediateCheckpoint: false

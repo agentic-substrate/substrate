@@ -1,0 +1,12 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: substrate-pg-daily
+  namespace: substrate
+spec:
+  # Six-field cron (seconds first). Daily 03:00.
+  schedule: "0 0 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: substrate-pg
+  method: barmanObjectStore

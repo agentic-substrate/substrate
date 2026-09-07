@@ -21,6 +21,7 @@ make build     # static binaries into ./bin
 make smoke     # boots the real server with no database; /healthz 200 and /readyz 503
 make test      # tests alone (`-p 1`); coverage is printed, never gated
 sqlc generate  # or `make sqlc` — regenerate internal/store after changing migrations/ or queries.sql
+make ko-build  # distroless substrate-server via ko --local; does not push
 
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
 scripts/check-deploy-secrets.sh     # grep-based: no credential, token, or tailnet name under deploy/
