@@ -20,11 +20,11 @@ import (
 )
 
 type reviewWorld struct {
-	alice, bob, lead                    string
-	orgID, teamAID, teamBID             string
-	global, org, teamA, teamB, projectA string
-	pathStr                             string
-	aliceP, bobP, leadP                 *identity.Principal
+	alice, bob, lead                              string
+	orgID, teamAID, teamBID                       string
+	global, org, teamA, teamB, projectA, projectB string
+	pathStr, pathStrB                             string
+	aliceP, bobP, leadP                           *identity.Principal
 }
 
 type nopGit struct{}
@@ -58,10 +58,12 @@ func seedReviewWorld(t *testing.T, conn *pgx.Conn) reviewWorld {
 		teamA:    id(),
 		teamB:    id(),
 		projectA: id(),
+		projectB: id(),
 	}
 	w.global = ensureGlobal(t, conn)
 	orgName := "rev-" + w.orgID[:8]
 	w.pathStr = "global:/org:" + orgName + "/team:core/project:plotlens"
+	w.pathStrB = "global:/org:" + orgName + "/team:other/project:otherapp"
 	exec(`INSERT INTO principal (id, kind, display_name, trust) VALUES
 		($1, 'user', 'alice', 'human'), ($2, 'user', 'bob', 'human'), ($3, 'user', 'lead', 'human')`,
 		w.alice, w.bob, w.lead)
@@ -77,7 +79,9 @@ func seedReviewWorld(t *testing.T, conn *pgx.Conn) reviewWorld {
 		($4, 'team', $2, 'other', 0, 'placeholder', $5)`,
 		w.teamA, w.org, w.teamAID, w.teamB, w.teamBID)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
-		($1, 'project', $2, 'plotlens', 0, 'placeholder', $3)`, w.projectA, w.teamA, w.teamAID)
+		($1, 'project', $2, 'plotlens', 0, 'placeholder', $3),
+		($4, 'project', $5, 'otherapp', 0, 'placeholder', $6)`,
+		w.projectA, w.teamA, w.teamAID, w.projectB, w.teamB, w.teamBID)
 	// Team-visible seed: a global-only fixture would pass with or without session GUCs.
 	exec(`INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
 		VALUES (gen_random_uuid(), $1, 'team', $2, 'constraint', 'ci.required', 'true', 'active', $2)`, w.projectA, w.alice)
@@ -162,7 +166,7 @@ const (
 		"Use the production cluster.\n"
 )
 
-func importBothMachines(t *testing.T, srv *httptest.Server, w reviewWorld) {
+func importBothMachines(t *testing.T, srv *httptest.Server, token, pathStr string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
@@ -187,10 +191,10 @@ func importBothMachines(t *testing.T, srv *httptest.Server, w reviewWorld) {
 		t.Helper()
 		if err := importCmd([]string{
 			"apply", "-machine", machine, "-trusted", "mac", "-commit",
-			"-server", srv.URL, "-token", "alice", "-scope", w.pathStr,
+			"-server", srv.URL, "-token", token, "-scope", pathStr,
 			planPath,
 		}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-			t.Fatalf("apply %s: %v", machine, err)
+			t.Fatalf("apply %s as %s: %v", machine, token, err)
 		}
 	}
 	apply("mac")
@@ -208,15 +212,20 @@ func listReview(t *testing.T, srv *httptest.Server, token string) string {
 
 func decideReview(t *testing.T, srv *httptest.Server, id string, extra ...string) string {
 	t.Helper()
+	stdout := &bytes.Buffer{}
+	if err := decideReviewCmd(t, srv, id, stdout, extra...); err != nil {
+		t.Fatalf("review decide %s: %v\n%s", id, err, stdout.String())
+	}
+	return stdout.String()
+}
+
+func decideReviewCmd(t *testing.T, srv *httptest.Server, id string, stdout *bytes.Buffer, extra ...string) error {
+	t.Helper()
 	args := append([]string{
 		"decide", id,
 		"-server", srv.URL, "-token", "lead",
 	}, extra...)
-	stdout := &bytes.Buffer{}
-	if err := reviewCmd(args, stdout, &bytes.Buffer{}); err != nil {
-		t.Fatalf("review decide %s: %v\n%s", id, err, stdout.String())
-	}
-	return stdout.String()
+	return reviewCmd(args, stdout, &bytes.Buffer{})
 }
 
 func itemsBySlot(out string) map[string]string {
@@ -284,13 +293,52 @@ func countBodyStatus(t *testing.T, conn *pgx.Conn, table, body, scopeID string) 
 	return out
 }
 
+func countBodyStatusAs(t *testing.T, dsn string, p *identity.Principal, table, body, scopeID string) map[string]int {
+	t.Helper()
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	var q string
+	switch table {
+	case "instruction":
+		q = `SELECT status::text, count(*) FROM instruction WHERE body = $1 AND scope_id = $2 GROUP BY status`
+	case "preference":
+		q = `SELECT status::text, count(*) FROM preference WHERE body = $1 AND scope_id = $2 GROUP BY status`
+	default:
+		t.Fatalf("unknown table %s", table)
+	}
+	out := map[string]int{}
+	ctx := identity.WithPrincipal(t.Context(), p)
+	if err := st.Tx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), q, body, scopeID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var n int
+			if err := rows.Scan(&status, &n); err != nil {
+				return err
+			}
+			out[status] = n
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("count %s as principal: %v", table, err)
+	}
+	return out
+}
+
 func TestReviewTwoMachineImportResolvableViaCLI(t *testing.T) {
 	// Closing the review_item without activating the chosen body is the
 	// one-line change that makes this red.
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
-	importBothMachines(t, srv, w)
+	importBothMachines(t, srv, "alice", w.pathStr)
 
 	listed := listReview(t, srv, "lead")
 	if strings.Contains(listed, "0 open review items") || !strings.Contains(listed, "id:") {
@@ -354,7 +402,7 @@ func TestReviewKindFlipChangesStoredRow(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
-	importBothMachines(t, srv, w)
+	importBothMachines(t, srv, "alice", w.pathStr)
 
 	listed := listReview(t, srv, "lead")
 	indentID := itemsBySlot(listed)[".claude/CLAUDE.md#Indent"]
@@ -385,7 +433,7 @@ func TestReviewDecideDryRunPlanEqualsCommit(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
-	importBothMachines(t, srv, w)
+	importBothMachines(t, srv, "alice", w.pathStr)
 
 	listed := listReview(t, srv, "lead")
 	deployID := itemsBySlot(listed)[".claude/CLAUDE.md#Deploy"]
@@ -416,5 +464,85 @@ func TestReviewDecideDryRunPlanEqualsCommit(t *testing.T) {
 	commitPlan := decidePlanLines(committed)
 	if dryPlan == "" || dryPlan != commitPlan {
 		t.Fatalf("dry-run plan %q != commit plan %q\ndry:\n%s\ncommit:\n%s", dryPlan, commitPlan, dry, committed)
+	}
+}
+
+func TestReviewDecideDoesNotActivateAnotherTeamsIdenticalBody(t *testing.T) {
+	// Looking up instruction/preference rows by body alone is the one-line
+	// production change that makes this red: team B imported the same
+	// "Prefer spaces." block, and last-wins can activate B while A's item
+	// is marked approved.
+	dsn, conn := startMigrated(t)
+	w := seedReviewWorld(t, conn)
+	srv := serveReview(t, dsn, w)
+	importBothMachines(t, srv, "alice", w.pathStr)
+	importBothMachines(t, srv, "bob", w.pathStrB)
+
+	listed := listReview(t, srv, "lead")
+	indentID := itemsBySlot(listed)[".claude/CLAUDE.md#Indent"]
+	if indentID == "" {
+		t.Fatalf("no Indent conflict in team-A listing:\n%s", listed)
+	}
+	bobListed := listReview(t, srv, "bob")
+	if !strings.Contains(bobListed, ".claude/CLAUDE.md#Indent") {
+		t.Fatalf("bob did not see team-B Indent after import:\n%s", bobListed)
+	}
+
+	decideReview(t, srv, indentID,
+		"-decision", "approved", "-reason", "mac indent", "-hostname", "mac", "-commit")
+
+	aliceSpaces := countBodyStatusAs(t, dsn, w.leadP, "preference", "Prefer spaces.", w.teamA)
+	if aliceSpaces["active"] != 1 {
+		t.Fatalf("team-A lead decide did not activate Prefer spaces. under the owning principal; %#v", aliceSpaces)
+	}
+	bobSpaces := countBodyStatusAs(t, dsn, w.bobP, "preference", "Prefer spaces.", w.teamB)
+	if bobSpaces["proposed"] != 1 {
+		t.Fatalf("team-B identical body was not still proposed under bob; %#v", bobSpaces)
+	}
+	if bobSpaces["active"] != 0 {
+		t.Fatalf("team-A decide activated team-B's Prefer spaces.; %#v", bobSpaces)
+	}
+	bSuper := countBodyStatus(t, conn, "preference", "Prefer spaces.", w.teamB)
+	if bSuper["proposed"] != 1 || bSuper["active"] != 0 {
+		t.Fatalf("team-B Prefer spaces. status counts %#v, want proposed=1 active=0", bSuper)
+	}
+}
+
+func TestReviewDecideMatchingNoRowFails(t *testing.T) {
+	// Inserting a new row when the scoped lookup matches nothing is the
+	// one-line production change that makes this red: the API would return
+	// 200 and close the item even though no imported row was updated.
+	dsn, conn := startMigrated(t)
+	w := seedReviewWorld(t, conn)
+	srv := serveReview(t, dsn, w)
+	importBothMachines(t, srv, "alice", w.pathStr)
+
+	listed := listReview(t, srv, "lead")
+	deployID := itemsBySlot(listed)[".claude/CLAUDE.md#Deploy"]
+	if deployID == "" {
+		t.Fatalf("no Deploy conflict in listing:\n%s", listed)
+	}
+	if _, err := conn.Exec(t.Context(),
+		`UPDATE instruction SET body = body || ' (gone)' WHERE body IN ('Use the production cluster.', 'Use the staging cluster.')`); err != nil {
+		t.Fatalf("rewrite bodies: %v", err)
+	}
+	if _, err := conn.Exec(t.Context(),
+		`UPDATE preference SET body = body || ' (gone)' WHERE body IN ('Use the production cluster.', 'Use the staging cluster.')`); err != nil {
+		t.Fatalf("rewrite preference bodies: %v", err)
+	}
+
+	err := decideReviewCmd(t, srv, deployID, &bytes.Buffer{},
+		"-decision", "approved", "-reason", "wsl deploy", "-hostname", "wsl", "-commit")
+	if err == nil {
+		t.Fatal("decide matching no row returned success")
+	}
+
+	still := listReview(t, srv, "lead")
+	if !strings.Contains(still, deployID) {
+		t.Fatalf("no-row decide closed the item:\n%s", still)
+	}
+	prod := countBodyStatus(t, conn, "instruction", "Use the production cluster.", w.projectA)
+	if prod["active"] != 0 {
+		t.Fatalf("no-row decide inserted an active instruction; %#v", prod)
 	}
 }

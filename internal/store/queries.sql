@@ -115,21 +115,33 @@ FROM review_item
 WHERE id = $1;
 
 -- name: ListInstructionsByBodies :many
-SELECT id, scope_id, key, body, status
-FROM instruction
-WHERE body = ANY(@bodies::text[]);
+SELECT i.id, i.scope_id, i.key, i.body, i.status
+FROM instruction i
+JOIN scope s ON s.id = i.scope_id
+WHERE i.body = ANY(@bodies::text[])
+  AND i.scope_id = ANY(@scope_ids::uuid[])
+  AND s.team_id = @team_id;
 
 -- name: ListPreferencesByBodies :many
-SELECT id, scope_id, key, body, status
-FROM preference
-WHERE body = ANY(@bodies::text[]);
+SELECT p.id, p.scope_id, p.key, p.body, p.status
+FROM preference p
+JOIN scope s ON s.id = p.scope_id
+WHERE p.body = ANY(@bodies::text[])
+  AND p.scope_id = ANY(@scope_ids::uuid[])
+  AND s.team_id = @team_id;
 
--- name: SetInstructionStatus :execrows
-UPDATE instruction
-SET status = $2, updated_at = now()
-WHERE id = $1;
+-- name: ReviewApplyInstructionStatus :one
+SELECT review_apply_instruction_status(
+  @body::text,
+  @status::instruction_status,
+  @scope_ids::uuid[],
+  @team_id::uuid
+) AS n;
 
--- name: SetPreferenceStatus :execrows
-UPDATE preference
-SET status = $2, updated_at = now()
-WHERE id = $1;
+-- name: ReviewApplyPreferenceStatus :one
+SELECT review_apply_preference_status(
+  @body::text,
+  @status::instruction_status,
+  @scope_ids::uuid[],
+  @team_id::uuid
+) AS n;

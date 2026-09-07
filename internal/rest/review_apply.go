@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/importer"
@@ -156,20 +157,20 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 	if len(out.Activate) == 0 && len(out.Retire) == 0 {
 		return nil
 	}
-	// Lead is not human_admin; content_freeze and content_update would
-	// silently no-op. review_decide already authorized this principal.
-	if _, err := tx.Exec(ctx, `SELECT set_config('substrate.is_admin', 'true', true)`); err != nil {
-		return fmt.Errorf("review decide: elevate: %w", err)
-	}
 	item, err := q.GetReviewItem(ctx, pgUUID(id))
 	if err != nil {
 		return err
 	}
+	if !item.TeamID.Valid {
+		return fmt.Errorf("review decide: review_item has no team_id")
+	}
 	leaf := uuid.UUID(item.ScopeID.Bytes)
+	teamID := uuid.UUID(item.TeamID.Bytes)
 	prefScope, err := preferenceScope(ctx, q, leaf)
 	if err != nil {
 		return err
 	}
+	scopeIDs := decideScopeIDs(leaf, prefScope)
 	bodies := make([]string, 0, len(out.Activate)+len(out.Retire))
 	for _, r := range out.Activate {
 		bodies = append(bodies, r.Body)
@@ -177,67 +178,83 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 	for _, r := range out.Retire {
 		bodies = append(bodies, r.Body)
 	}
-	ins, err := q.ListInstructionsByBodies(ctx, bodies)
+	ins, err := q.ListInstructionsByBodies(ctx, store.ListInstructionsByBodiesParams{
+		Bodies:   bodies,
+		ScopeIds: pgUUIDs(scopeIDs),
+		TeamID:   pgUUID(teamID),
+	})
 	if err != nil {
 		return err
 	}
-	prefs, err := q.ListPreferencesByBodies(ctx, bodies)
+	prefs, err := q.ListPreferencesByBodies(ctx, store.ListPreferencesByBodiesParams{
+		Bodies:   bodies,
+		ScopeIds: pgUUIDs(scopeIDs),
+		TeamID:   pgUUID(teamID),
+	})
 	if err != nil {
 		return err
 	}
-	insByBody := map[string]store.ListInstructionsByBodiesRow{}
-	for _, r := range ins {
-		insByBody[r.Body] = r
+	insByBody, err := indexInstructionBodies(ins)
+	if err != nil {
+		return err
 	}
-	prefByBody := map[string]store.ListPreferencesByBodiesRow{}
-	for _, r := range prefs {
-		prefByBody[r.Body] = r
+	prefByBody, err := indexPreferenceBodies(prefs)
+	if err != nil {
+		return err
+	}
+	apply := func(kind, body string, st store.InstructionStatus) (int64, error) {
+		switch kind {
+		case "instruction":
+			return q.ReviewApplyInstructionStatus(ctx, store.ReviewApplyInstructionStatusParams{
+				Body:     body,
+				Status:   st,
+				ScopeIds: pgUUIDs(scopeIDs),
+				TeamID:   pgUUID(teamID),
+			})
+		case "preference":
+			return q.ReviewApplyPreferenceStatus(ctx, store.ReviewApplyPreferenceStatusParams{
+				Body:     body,
+				Status:   st,
+				ScopeIds: pgUUIDs(scopeIDs),
+				TeamID:   pgUUID(teamID),
+			})
+		default:
+			return 0, fmt.Errorf("review decide: unknown kind %q", kind)
+		}
 	}
 	for _, r := range out.Retire {
-		switch r.Kind {
-		case "instruction":
-			row, ok := insByBody[r.Body]
-			if !ok || row.Status == store.InstructionStatusRetired {
-				continue
-			}
-			if _, err := q.SetInstructionStatus(ctx, store.SetInstructionStatusParams{
-				ID:     row.ID,
-				Status: store.InstructionStatusRetired,
-			}); err != nil {
-				return err
-			}
-		case "preference":
-			row, ok := prefByBody[r.Body]
-			if !ok || row.Status == store.InstructionStatusRetired {
-				continue
-			}
-			if _, err := q.SetPreferenceStatus(ctx, store.SetPreferenceStatusParams{
-				ID:     row.ID,
-				Status: store.InstructionStatusRetired,
-			}); err != nil {
-				return err
-			}
+		n, err := apply(r.Kind, r.Body, store.InstructionStatusRetired)
+		if err != nil {
+			return err
+		}
+		if n > 1 {
+			return fmt.Errorf("review decide: matched %d %s rows for body", n, r.Kind)
 		}
 	}
 	for _, r := range out.Activate {
+		n, err := apply(r.Kind, r.Body, store.InstructionStatusActive)
+		if err != nil {
+			return err
+		}
+		if n > 1 {
+			return fmt.Errorf("review decide: matched %d %s rows for body", n, r.Kind)
+		}
+		if n == 1 {
+			continue
+		}
+		_, insOK := insByBody[r.Body]
+		_, prefOK := prefByBody[r.Body]
+		otherExists := (r.Kind == "instruction" && prefOK) || (r.Kind == "preference" && insOK)
+		if !otherExists {
+			return fmt.Errorf("review decide: matched no row")
+		}
+		key := decideKey(keyForBody(r.Body, insByBody, prefByBody), r.Kind, r.Body)
+		nid, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
 		switch r.Kind {
 		case "instruction":
-			if row, ok := insByBody[r.Body]; ok {
-				if row.Status != store.InstructionStatusActive {
-					if _, err := q.SetInstructionStatus(ctx, store.SetInstructionStatusParams{
-						ID:     row.ID,
-						Status: store.InstructionStatusActive,
-					}); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			key := decideKey(keyForBody(r.Body, insByBody, prefByBody), "instruction", r.Body)
-			nid, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
 			if _, err := q.InsertInstruction(ctx, store.InsertInstructionParams{
 				ID:         pgUUID(nid),
 				ScopeID:    pgUUID(leaf),
@@ -252,22 +269,6 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 				return err
 			}
 		case "preference":
-			if row, ok := prefByBody[r.Body]; ok {
-				if row.Status != store.InstructionStatusActive {
-					if _, err := q.SetPreferenceStatus(ctx, store.SetPreferenceStatusParams{
-						ID:     row.ID,
-						Status: store.InstructionStatusActive,
-					}); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			key := decideKey(keyForBody(r.Body, insByBody, prefByBody), "preference", r.Body)
-			nid, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
 			if _, err := q.InsertPreference(ctx, store.InsertPreferenceParams{
 				ID:         pgUUID(nid),
 				ScopeID:    pgUUID(prefScope),
@@ -326,6 +327,51 @@ func keyForBody(body string, ins map[string]store.ListInstructionsByBodiesRow, p
 		return r.Key
 	}
 	return ""
+}
+
+func decideScopeIDs(leaf, pref uuid.UUID) []uuid.UUID {
+	if pref == uuid.Nil || pref == leaf {
+		return []uuid.UUID{leaf}
+	}
+	return []uuid.UUID{leaf, pref}
+}
+
+func pgUUIDs(ids []uuid.UUID) []pgtype.UUID {
+	out := make([]pgtype.UUID, len(ids))
+	for i, id := range ids {
+		out[i] = pgUUID(id)
+	}
+	return out
+}
+
+func indexInstructionBodies(rows []store.ListInstructionsByBodiesRow) (map[string]store.ListInstructionsByBodiesRow, error) {
+	out := map[string]store.ListInstructionsByBodiesRow{}
+	counts := map[string]int{}
+	for _, r := range rows {
+		counts[r.Body]++
+		out[r.Body] = r
+	}
+	for body, n := range counts {
+		if n > 1 {
+			return nil, fmt.Errorf("review decide: matched %d instruction rows for body %q", n, body)
+		}
+	}
+	return out, nil
+}
+
+func indexPreferenceBodies(rows []store.ListPreferencesByBodiesRow) (map[string]store.ListPreferencesByBodiesRow, error) {
+	out := map[string]store.ListPreferencesByBodiesRow{}
+	counts := map[string]int{}
+	for _, r := range rows {
+		counts[r.Body]++
+		out[r.Body] = r
+	}
+	for body, n := range counts {
+		if n > 1 {
+			return nil, fmt.Errorf("review decide: matched %d preference rows for body %q", n, body)
+		}
+	}
+	return out, nil
 }
 
 func decideKey(existing, asKind, body string) string {

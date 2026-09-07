@@ -34,6 +34,7 @@ What has shipped:
 | 5 | `00005_memory_supersede_status.sql` | Replaces `content_freeze_cols` so a non-admin `memory` UPDATE may set `status='superseded'` when `superseded_by` is set in the same statement (system supersession, not a user edit). Visibility, owner_id, scope_id, and every other status change stay frozen. Without this, superseded rows keep `status='confirmed'` and still match `memory_default_read`. |
 | 6 | `00006_skill_active_version_lock.sql` | `skill_active_version_approved` `SELECT ... FOR UPDATE`s the target `skill_version` row; `skill_version_keep_active_approved` locks the parent `skill` row. Without those locks a concurrent activate and reject can both commit under READ COMMITTED and leave `active_version_id` pointing at a rejected version (R6). |
 | 7 | `00007_import_trusted_receipt.sql` | Adds `import_trusted_read` on `ingest_receipt`: rows with `subject_type` `import_trusted:%` and `subject_id` equal to a writable leaf scope are visible to any principal who can write that scope, not only the inserting actor. Tokens are per (principal, machine); without this a later host cannot see the trusted-host marker and "fixes" it by passing `-trusted` itself. |
+| 8 | `00008_review_apply_status.sql` | `review_apply_instruction_status` and `review_apply_preference_status` (`SECURITY DEFINER`, owned by `substrate_migrate`). A team lead/admin of `p_team_id` (or `human_admin`) may set `status` on rows whose `scope.team_id` matches and whose `scope_id` is in the supplied list. Elevation to `substrate.is_admin` lasts only for that UPDATE so `content_freeze_cols` does not no-op it; the function returns `ROW_COUNT` so a 0- or many-row match fails the decide instead of closing the review item. |
 
 The bootstrap DSN must be able to `CREATE EXTENSION` and `CREATE ROLE`. Migrations run on
 that connection; the request pool then `SET SESSION AUTHORIZATION` / `SET ROLE` to
@@ -42,9 +43,10 @@ A Postgres outage must not kill the process: `/healthz` stays 200, `/readyz` is 
 the server retries `store.Open` in the background until the pool pings.
 
 Frozen columns (`visibility`, `owner_id`, `scope_id`, and `status`) stay immutable for
-non-admins. The one exception, from version 5, is a `memory` UPDATE that sets
-`status='superseded'` in the same statement as `superseded_by` — a system transition,
-not a user edit.
+non-admins. Exceptions: version 5, a `memory` UPDATE that sets `status='superseded'` in the
+same statement as `superseded_by`; version 8, the `review_apply_*_status` functions, which
+are the review-decide status write (team lead of that item, one row, no request-wide
+`is_admin`).
 
 - **Forward:** deploy the new image; the server migrates on boot (`-dsn` / `SUBSTRATE_DSN`).
 - **Backward:** every migration ships a `-- +goose Down`. Roll back by deploying the previous
