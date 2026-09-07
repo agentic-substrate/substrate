@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -262,6 +263,89 @@ func decidePlanLines(out string) string {
 	return b.String()
 }
 
+type dbDecideRow struct {
+	Kind, Body, Status, ScopeID string
+}
+
+func listDecideRows(t *testing.T, conn *pgx.Conn, bodies, scopeIDs []string) []dbDecideRow {
+	t.Helper()
+	rows, err := conn.Query(t.Context(), `
+		SELECT 'instruction', body, status::text, scope_id::text FROM instruction
+		WHERE body = ANY($1) AND scope_id = ANY($2)
+		UNION ALL
+		SELECT 'preference', body, status::text, scope_id::text FROM preference
+		WHERE body = ANY($1) AND scope_id = ANY($2)`, bodies, scopeIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []dbDecideRow
+	for rows.Next() {
+		var r dbDecideRow
+		if err := rows.Scan(&r.Kind, &r.Body, &r.Status, &r.ScopeID); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func formatAppliedPlan(rows []dbDecideRow) string {
+	var act, ret []string
+	for _, r := range rows {
+		line := r.Kind + " " + strings.ReplaceAll(r.Body, "\n", " ")
+		switch r.Status {
+		case "active":
+			act = append(act, "activate: "+line)
+		case "retired":
+			ret = append(ret, "retire: "+line)
+		}
+	}
+	sort.Strings(act)
+	sort.Strings(ret)
+	var b strings.Builder
+	for _, line := range act {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	for _, line := range ret {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func filterPlanToExisting(plan string, rows []dbDecideRow) string {
+	exist := map[string]bool{}
+	for _, r := range rows {
+		exist[r.Kind+" "+strings.ReplaceAll(r.Body, "\n", " ")] = true
+	}
+	var act, ret []string
+	for _, line := range strings.Split(plan, "\n") {
+		if v, ok := strings.CutPrefix(line, "activate: "); ok && exist[v] {
+			act = append(act, line)
+		}
+		if v, ok := strings.CutPrefix(line, "retire: "); ok && exist[v] {
+			ret = append(ret, line)
+		}
+	}
+	sort.Strings(act)
+	sort.Strings(ret)
+	var b strings.Builder
+	for _, line := range act {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	for _, line := range ret {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func countBodyStatus(t *testing.T, conn *pgx.Conn, table, body, scopeID string) map[string]int {
 	t.Helper()
 	var q string
@@ -428,8 +512,9 @@ func TestReviewKindFlipChangesStoredRow(t *testing.T) {
 }
 
 func TestReviewDecideDryRunPlanEqualsCommit(t *testing.T) {
-	// Implementing dry-run as a second printer that does not share the
-	// server apply path is the change that makes this red.
+	// Returning from commitReviewDecision after DecideReviewItem without
+	// writing instruction/preference status is the one-line production
+	// change that makes this red. Comparing two HTTP dumps stays green.
 	dsn, conn := startMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
@@ -454,16 +539,23 @@ func TestReviewDecideDryRunPlanEqualsCommit(t *testing.T) {
 	if prod["active"] != 0 {
 		t.Fatalf("dry-run activated a row; %#v", prod)
 	}
+	stage := countBodyStatus(t, conn, "instruction", "Use the staging cluster.", w.projectA)
+	if stage["active"] != 0 {
+		t.Fatalf("dry-run activated the losing Deploy body; %#v", stage)
+	}
 
 	committed := decideReview(t, srv, deployID,
 		"-decision", "approved", "-reason", "wsl deploy", "-hostname", "wsl", "-commit")
 	if strings.Contains(committed, "dry-run") {
 		t.Fatalf("-commit still reported dry-run:\n%s", committed)
 	}
-	dryPlan := decidePlanLines(dry)
-	commitPlan := decidePlanLines(committed)
-	if dryPlan == "" || dryPlan != commitPlan {
-		t.Fatalf("dry-run plan %q != commit plan %q\ndry:\n%s\ncommit:\n%s", dryPlan, commitPlan, dry, committed)
+	bodies := []string{"Use the production cluster.", "Use the staging cluster."}
+	scopes := []string{w.projectA, w.teamA}
+	rows := listDecideRows(t, conn, bodies, scopes)
+	got := formatAppliedPlan(rows)
+	want := filterPlanToExisting(decidePlanLines(dry), rows)
+	if want == "" || got != want {
+		t.Fatalf("post-commit rows %q != dry-run plan %q\ndry:\n%s\ncommit:\n%s\nrows: %#v", got, want, dry, committed, rows)
 	}
 }
 
