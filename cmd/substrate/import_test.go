@@ -30,6 +30,7 @@ func TestImportScanRequiresRoot(t *testing.T) {
 	canary := t.TempDir()
 	mustWriteCLI(t, filepath.Join(canary, ".claude", "CLAUDE.md"), "# Canary\nfrom HOME\n")
 	t.Setenv("HOME", canary)
+	t.Setenv("PATH", t.TempDir())
 	out := filepath.Join(t.TempDir(), "inventory.json")
 	err := importCmd([]string{"scan", "-hostname", "wsl", "-out", out}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "-root") {
