@@ -108,3 +108,40 @@ UPDATE review_item
 SET status = $2, decided_by = $3, decided_at = now(), reason = $4
 WHERE id = $1 AND status = 'open'
 RETURNING id, status, decided_by, decided_at, reason;
+
+-- name: GetReviewItem :one
+SELECT id, kind, scope_id, team_id, payload, status, proposed_by, decided_by, decided_at, reason, created_at
+FROM review_item
+WHERE id = $1;
+
+-- name: ListInstructionsByBodies :many
+SELECT i.id, i.scope_id, i.key, i.body, i.status
+FROM instruction i
+JOIN scope s ON s.id = i.scope_id
+WHERE i.body = ANY(@bodies::text[])
+  AND i.scope_id = ANY(@scope_ids::uuid[])
+  AND s.team_id = @team_id;
+
+-- name: ListPreferencesByBodies :many
+SELECT p.id, p.scope_id, p.key, p.body, p.status
+FROM preference p
+JOIN scope s ON s.id = p.scope_id
+WHERE p.body = ANY(@bodies::text[])
+  AND p.scope_id = ANY(@scope_ids::uuid[])
+  AND s.team_id = @team_id;
+
+-- name: ReviewApplyInstructionStatus :one
+SELECT review_apply_instruction_status(
+  @body::text,
+  @status::instruction_status,
+  @scope_ids::uuid[],
+  @team_id::uuid
+) AS n;
+
+-- name: ReviewApplyPreferenceStatus :one
+SELECT review_apply_preference_status(
+  @body::text,
+  @status::instruction_status,
+  @scope_ids::uuid[],
+  @team_id::uuid
+) AS n;
