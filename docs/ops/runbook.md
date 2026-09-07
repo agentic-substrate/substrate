@@ -136,8 +136,15 @@ are additive and can stay.
 ./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -commit
 ```
 
-`-restore` puts every `*.pre-substrate` path back over the live path (verified
-by hash in tests), removes files cutover created, and uninstalls the unit.
-After a successful restore there must be no `*.pre-substrate` leftovers. If
-restore reports a file/directory mismatch, do not delete: rename the unexpected
-side out of the way and re-run.
+`-restore` puts planned `*.pre-substrate` paths back over the live path (verified
+by hash in tests), removes generated files only when they still match the
+written `DriftHash`, and uninstalls the unit. If a live file was edited after
+cutover, restore refuses and prints `DISCARD live edits`; re-run with `-force`
+to overwrite those edits. After a successful restore there must be no
+`*.pre-substrate` leftovers. If restore reports a file/directory mismatch, do
+not delete: rename the unexpected side out of the way and re-run.
+
+```sh
+./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -force
+./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -force -commit
+```

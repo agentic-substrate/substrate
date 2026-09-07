@@ -160,6 +160,75 @@ func TestRestoreDryRunSurfacesMissingBackupConflict(t *testing.T) {
 	}
 }
 
+func TestRestoreRefusesLiveEditsWithoutForce(t *testing.T) {
+	// Renaming the backup over a live file whose DriftHash != the hash
+	// cutover wrote, without -force, is the change that makes this red.
+	root := t.TempDir()
+	live := filepath.Join(root, ".claude", "CLAUDE.md")
+	mustWrite(t, live, "original\n")
+	rendered := renderedClaude("2026-09-07T00:00:00Z")
+	if _, err := Cutover(Request{
+		Roots:     []string{root},
+		Home:      root,
+		Commit:    true,
+		Installer: &FakeInstaller{},
+		Files:     []Replacement{{Path: live, Content: rendered}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edited := "operator edited after cutover\n"
+	mustWrite(t, live, edited)
+	_, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: &FakeInstaller{}})
+	if err == nil || !strings.Contains(err.Error(), "DISCARD live edits") {
+		t.Fatalf("got %v, want DISCARD live edits without -force", err)
+	}
+	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != edited {
+		t.Fatalf("restore overwrote live edits: %q", got)
+	}
+}
+
+func TestRestoreForceDiscardsLiveEdits(t *testing.T) {
+	// Silently overwriting live edits without printing DISCARD live edits is
+	// the change that makes this red.
+	root := t.TempDir()
+	live := filepath.Join(root, ".claude", "CLAUDE.md")
+	original := "original\n"
+	mustWrite(t, live, original)
+	rendered := renderedClaude("2026-09-07T00:00:00Z")
+	if _, err := Cutover(Request{
+		Roots:     []string{root},
+		Home:      root,
+		Commit:    true,
+		Installer: &FakeInstaller{},
+		Files:     []Replacement{{Path: live, Content: rendered}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, live, "operator edited after cutover\n")
+	rep, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Force: true, Installer: &FakeInstaller{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := rep.Format()
+	if !strings.Contains(out, "DISCARD live edits") {
+		t.Fatalf("force restore omitted DISCARD live edits:\n%s", out)
+	}
+	if !strings.Contains(out, live) {
+		t.Fatalf("DISCARD live edits omitted path:\n%s", out)
+	}
+	got, err := os.ReadFile(live) //nolint:gosec // under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("force restore body %q, want original", got)
+	}
+}
+
 func TestRestoreDoesNotRemoveEditedGeneratedFile(t *testing.T) {
 	// os.Remove of a Created path without checking render.DriftHash is the
 	// change that makes this red. Operator edits to a file cutover created

@@ -186,9 +186,9 @@ func applyCutover(rep *Report, req Request) error {
 		}
 	}
 	hashes := map[string]string{}
-	for _, p := range rep.Created {
-		if body, ok := contents[p]; ok {
-			hashes[p] = render.DriftHash(body)
+	for _, w := range rep.Writes {
+		if body, ok := contents[w.Path]; ok {
+			hashes[w.Path] = render.DriftHash(body)
 		}
 	}
 	if err := writeJournal(req, journal{

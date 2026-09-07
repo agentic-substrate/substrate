@@ -34,6 +34,7 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 	})
 	dryRun := fs.Bool("dry-run", false, "classify and print; write nothing (default unless -commit)")
 	commit := fs.Bool("commit", false, "perform restores; without this, uninstall is a dry-run")
+	force := fs.Bool("force", false, "discard live edits that no longer match the DriftHash cutover wrote")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -58,6 +59,7 @@ func adapterUninstall(args []string, stdout io.Writer, inst cutover.UnitInstalle
 		Roots:     cutover.WithMountRoot(roots),
 		Home:      roots[0],
 		Commit:    *commit && !*dryRun,
+		Force:     *force,
 		Installer: inst,
 	})
 	if err != nil {

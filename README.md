@@ -245,7 +245,9 @@ The dry-run and the real run share one code path.
 `substrate adapter uninstall -restore` is the rollback. It requires `-restore`
 and `-root` (absolute; no `$HOME` default). Pass the same roots cutover used
 (`-root "$HOME" -root /work`). It renames `*.pre-substrate` back
-over the live paths, removes files cutover created, and uninstalls the unit.
+over the live paths, removes generated files that still match the written
+`DriftHash`, and uninstalls the unit. Live edits since cutover are refused
+unless `-force` is set (printed as `DISCARD live edits`).
 Without `-commit` it is a dry-run. `-commit` performs the restores. Run it
 before blaming the server: server data is additive and can be left in place.
 

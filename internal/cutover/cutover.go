@@ -42,6 +42,9 @@ type Request struct {
 	// WriteFile writes one rendered replacement. Tests inject a failing
 	// writer; nil uses atomicWrite. Production never sets this.
 	WriteFile func(path string, body []byte, mode os.FileMode) error
+	// Force allows restore to discard live edits that no longer match the
+	// DriftHash cutover wrote.
+	Force bool
 }
 
 // Replacement is one rendered file cutover would write.
@@ -64,6 +67,7 @@ type Report struct {
 	// Restore only removes a Created path when the live file still matches.
 	CreatedHashes  map[string]string
 	JournalPending bool
+	Discard        []string
 }
 
 // Rename is one *.pre-substrate displacement or its inverse.
@@ -191,6 +195,14 @@ func (r *Report) Format() string {
 	}
 	if r.Install && r.Unit != nil {
 		fmt.Fprintf(&b, "INSTALL adapter unit (roots=%s)\n", strings.Join(r.Unit.Roots, ","))
+	}
+	if r.Uninstall && len(r.Discard) > 0 {
+		b.WriteString("DISCARD live edits\n")
+		disc := append([]string(nil), r.Discard...)
+		sort.Strings(disc)
+		for _, p := range disc {
+			fmt.Fprintf(&b, "  %s\n", p)
+		}
 	}
 	created := append([]string(nil), r.Created...)
 	sort.Strings(created)

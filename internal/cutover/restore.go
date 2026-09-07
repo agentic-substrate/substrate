@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/agentic-substrate/substrate/internal/adapter"
 	"github.com/agentic-substrate/substrate/internal/render"
@@ -22,6 +24,9 @@ func Restore(req Request) (*Report, error) {
 	}
 	rep.DryRun = !req.Commit
 	if err := checkGeneratedRemovals(rep); err != nil {
+		return nil, err
+	}
+	if err := checkLiveEdits(rep, req.Force); err != nil {
 		return nil, err
 	}
 	if !req.Commit {
@@ -289,6 +294,32 @@ func applyRestore(rep *Report, inst UnitInstaller) error {
 		spec = *rep.Unit
 	}
 	return inst.Uninstall(spec)
+}
+
+func checkLiveEdits(rep *Report, force bool) error {
+	if rep == nil {
+		return nil
+	}
+	var discard []string
+	for _, w := range rep.Writes {
+		if w.CurrentSHA == "" || w.CurrentSHA == w.WouldSHA {
+			continue
+		}
+		want, ok := rep.CreatedHashes[w.Path]
+		if !ok {
+			continue
+		}
+		if w.CurrentDr == want {
+			continue
+		}
+		discard = append(discard, w.Path)
+	}
+	sort.Strings(discard)
+	rep.Discard = discard
+	if len(discard) == 0 || force {
+		return nil
+	}
+	return fmt.Errorf("cutover: DISCARD live edits (need -force):\n  %s", strings.Join(discard, "\n  "))
 }
 
 func checkGeneratedRemovals(rep *Report) error {
