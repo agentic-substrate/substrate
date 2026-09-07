@@ -565,3 +565,138 @@ func hostSet(sources []Source) map[string]bool {
 	}
 	return m
 }
+
+func TestScanRecordsUnreadableDirAndKeepsWalking(t *testing.T) {
+	// Returning the WalkDir error instead of recording it is the one-line
+	// change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Shared\nAlways run gofmt.\n")
+
+	locked := filepath.Join(root, "locked")
+	mustWrite(t, filepath.Join(locked, "AGENTS.md"), "# Hidden\n")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) }) //nolint:gosec // restoring a test fixture directory so t.TempDir cleanup can remove it
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("running as root; an unreadable directory cannot be simulated")
+	}
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatalf("scan aborted on an unreadable directory: %v", err)
+	}
+	if len(inv.Files) == 0 {
+		t.Fatal("scan returned no files; it must keep walking past an unreadable directory")
+	}
+	var found bool
+	for _, s := range inv.Skipped {
+		if strings.Contains(s.Source, "locked") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unreadable directory was not recorded in Skipped: %+v", inv.Skipped)
+	}
+}
+
+func TestScanSkipsVendoredAndCachedConfig(t *testing.T) {
+	// Removing any of these names from skipDirs is the one-line change that
+	// makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\nAlways run gofmt.\n")
+	for _, noise := range []string{
+		filepath.Join(".cargo", "registry", "src", "zerocopy-0.8.40", "AGENTS.md"),
+		filepath.Join("plugins", "cache", "somevendor", "AGENTS.md"),
+		filepath.Join("plugins", "marketplaces", "somevendor", "AGENTS.md"),
+		filepath.Join(".local", "share", "containers", "storage", "overlay", "diff", "AGENTS.md"),
+		filepath.Join(".venv", "lib", "site-packages", "pkg", "AGENTS.md"),
+	} {
+		mustWrite(t, filepath.Join(root, noise), "# NotMine\nVendored rules.\n")
+	}
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(inv.Files) != 1 {
+		var got []string
+		for _, f := range inv.Files {
+			got = append(got, f.Rel)
+		}
+		t.Fatalf("scan inventoried %d files, want only the operator's own: %v", len(inv.Files), got)
+	}
+	if inv.Files[0].Rel != ".claude/CLAUDE.md" {
+		t.Fatalf("kept %q, want .claude/CLAUDE.md", inv.Files[0].Rel)
+	}
+}
+
+func TestScanSkipsDependencyCachesByPath(t *testing.T) {
+	// Removing any entry from skipPathContains is the one-line change that
+	// makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\nAlways run gofmt.\n")
+	for _, noise := range []string{
+		filepath.Join("go", "pkg", "mod", "modernc.org", "sqlite@v1.57.0", "CLAUDE.md"),
+		filepath.Join(".codex", ".tmp", "plugins", "zoom", "AGENTS.md"),
+		filepath.Join(".claude", "plugins", "cached", "AGENTS.md"),
+	} {
+		mustWrite(t, filepath.Join(root, noise), "# NotMine\nUpstream rules.\n")
+	}
+
+	inv, err := Scan(Request{Roots: []string{root}, Hostname: "wsl"})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(inv.Files) != 1 || inv.Files[0].Rel != ".claude/CLAUDE.md" {
+		var got []string
+		for _, f := range inv.Files {
+			got = append(got, f.Rel)
+		}
+		t.Fatalf("scan inventoried %v, want only .claude/CLAUDE.md", got)
+	}
+}
+
+func TestScanExcludeGlobsDropMatchingPaths(t *testing.T) {
+	// Ignoring Request.Exclude is the one-line change that makes this red.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\nAlways run gofmt.\n")
+	mustWrite(t, filepath.Join(root, ".claude", "skills", "wk", "fixtures", "a", "AGENTS.md"), "# Fixture\n")
+	mustWrite(t, filepath.Join(root, ".claude", "skills", "wk", "iteration-1", "out", "AGENTS.md"), "# Fixture\n")
+
+	inv, err := Scan(Request{
+		Roots:    []string{root},
+		Hostname: "wsl",
+		Exclude:  []string{".claude/skills/wk/**"},
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(inv.Files) != 1 || inv.Files[0].Rel != ".claude/CLAUDE.md" {
+		var got []string
+		for _, f := range inv.Files {
+			got = append(got, f.Rel)
+		}
+		t.Fatalf("scan inventoried %v, want only .claude/CLAUDE.md", got)
+	}
+}
+
+func TestScanExcludeRejectsBadPattern(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\n")
+
+	_, err := Scan(Request{Roots: []string{root}, Hostname: "wsl", Exclude: []string{"[bad"}})
+	if err == nil || !strings.Contains(err.Error(), "-exclude") {
+		t.Fatalf("got %v, want an error naming -exclude; a silently-ignored bad pattern excludes nothing", err)
+	}
+}

@@ -225,3 +225,30 @@ func mustWriteCLI(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestImportScanExcludeFlagDropsMatches(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	root := t.TempDir()
+	mustWriteCLI(t, filepath.Join(root, ".claude", "CLAUDE.md"), "# Mine\nAlways run gofmt.\n")
+	mustWriteCLI(t, filepath.Join(root, "fixtures", "eval", "AGENTS.md"), "# Fixture\n")
+	out := filepath.Join(t.TempDir(), "inventory.json")
+
+	err := importCmd([]string{
+		"scan", "-root", root, "-hostname", "wsl", "-out", out,
+		"-exclude", "fixtures/**",
+	}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	body, err := os.ReadFile(out) //nolint:gosec // out is a t.TempDir path built by this test
+	if err != nil {
+		t.Fatalf("read inventory: %v", err)
+	}
+	if strings.Contains(string(body), "fixtures/eval/AGENTS.md") {
+		t.Fatal("-exclude did not drop the matching path from inventory.json")
+	}
+	if !strings.Contains(string(body), ".claude/CLAUDE.md") {
+		t.Fatal("-exclude dropped a path it should have kept")
+	}
+}

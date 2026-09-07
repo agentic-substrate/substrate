@@ -9,6 +9,11 @@ type Request struct {
 	Roots       []string
 	Hostname    string
 	MemorixJSON string
+	// Exclude are glob patterns matched against a file's slash-separated path
+	// relative to its root. "**" matches across separators. A pattern that
+	// does not compile is an error, never a silent no-op: a typo that
+	// excluded nothing would be indistinguishable from a working filter.
+	Exclude []string
 }
 
 // Inventory is the scan product written as inventory.json.

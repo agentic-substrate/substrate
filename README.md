@@ -104,7 +104,8 @@ curl localhost:8080/readyz
     --scopes memory:write --dsn "$SUBSTRATE_DSN"
 
 ./bin/substrate import scan -root /abs/machine-root -hostname wsl \
-    -out /abs/path/inventory.json [-memorix-json /abs/path/memorix.json]
+    -out /abs/path/inventory.json [-memorix-json /abs/path/memorix.json] \
+    [-exclude 'some/fixtures/**']
 ./bin/substrate import plan -out /abs/path/plan.json /abs/path/inventory.json
 ```
 
@@ -159,7 +160,13 @@ anything under the scanned roots; it only writes the file named by `-out`. It in
 `CLAUDE.md` found under those roots. Symlinks are not followed. Memorix is read only from
 an operator-exported JSON file passed as `-memorix-json`; scan never execs `memorix`.
 If that flag is omitted the source is skipped with a logged reason and the rest of the
-scan still succeeds. Plan splits markdown into blocks, **dedupes by content hash**, then
+scan still succeeds. An unreadable directory under a root is recorded in `skipped` and the
+walk continues, so one permission error cannot abort a scan of a real home. Dependency and
+plugin caches are never inventoried — a `CLAUDE.md` in the Go module cache or an `AGENTS.md`
+in a vendored crate belongs to its upstream author, not to this machine. `-exclude <glob>`
+(repeatable) drops anything matching a glob against the root-relative path, where `**` spans
+separators; a pattern that is not a valid glob is an error rather than a filter that
+silently matches nothing. Plan splits markdown into blocks, **dedupes by content hash**, then
 classifies each unique block as `instruction` or `preference`. Classification is heuristic
 and will misfile (R15); confidence is never certainty. Identical blocks from two machines
 appear once in `plan.json`; differing blocks at the same heading from distinct hostnames
