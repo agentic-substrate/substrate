@@ -648,6 +648,43 @@ func TestApplyRefusesDistinctHashesSharingSlotWithoutConflict(t *testing.T) {
 	}
 }
 
+func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
+	// Using ClientID as the ingest_receipt primary key instead of
+	// (machine, scope, plan-hash) is the one-line change that makes this red.
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	first := applyReq(w, "mac", true)
+	id1, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.ClientID = id1.String()
+	if _, err := Apply(ctx, st, first); err != nil {
+		t.Fatal(err)
+	}
+	before := tableCounts(t, conn)
+	second := applyReq(w, "mac", true)
+	id2, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.ClientID = id2.String()
+	res, err := Apply(ctx, st, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Duplicate {
+		t.Fatal("retry with a fresh client_id Duplicate=false; the plan-hash receipt must win")
+	}
+	after := tableCounts(t, conn)
+	if after != before {
+		t.Fatalf("fresh client_id duplicated rows\nbefore %s\nafter  %s", before, after)
+	}
+}
+
 func drySet(r *ApplyResult) string {
 	type item struct{ H, K, S, Hash string }
 	var items []item

@@ -102,6 +102,17 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("import apply: receipt: %w", err)
 	}
+	if alias, ok := aliasClientID(req); ok {
+		_, aliasErr := q.GetIngestReceipt(ctx, pgUUID(alias))
+		if aliasErr == nil {
+			res := &ApplyResult{Duplicate: true}
+			res.finalize()
+			return res, nil
+		}
+		if !errors.Is(aliasErr, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("import apply: receipt: %w", aliasErr)
+		}
+	}
 
 	storedHost, err := loadTrustedHost(ctx, q, req.Scope)
 	if err != nil {
@@ -382,6 +393,16 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 	}); err != nil {
 		return fmt.Errorf("import apply: receipt: %w", err)
 	}
+	if alias, ok := aliasClientID(req); ok && alias != applyID {
+		if err := q.InsertIngestReceipt(ctx, store.InsertIngestReceiptParams{
+			ClientID:    pgUUID(alias),
+			PrincipalID: pgUUID(p.ID),
+			SubjectType: "import_alias",
+			SubjectID:   pgUUID(applyID),
+		}); err != nil {
+			return fmt.Errorf("import apply: receipt alias: %w", err)
+		}
+	}
 	macID := machineClientID(req.Machine, req.Scope)
 	_, err = q.GetIngestReceipt(ctx, pgUUID(macID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -563,17 +584,23 @@ func hostIn(hosts []string, machine string) bool {
 }
 
 func applyClientID(req ApplyRequest) uuid.UUID {
-	if req.ClientID != "" {
-		if id, err := uuid.Parse(req.ClientID); err == nil {
-			return id
-		}
-	}
 	raw, err := json.Marshal(req.Plan)
 	if err != nil {
 		raw = []byte(req.Machine)
 	}
 	sum := sha256.Sum256(raw)
 	return uuid.NewSHA1(importNS, []byte("substrate-import/"+req.Machine+"/"+req.Scope+"/"+fmt.Sprintf("%x", sum)))
+}
+
+func aliasClientID(req ApplyRequest) (uuid.UUID, bool) {
+	if req.ClientID == "" {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(req.ClientID)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 func machineClientID(host, scope string) uuid.UUID {
