@@ -30,7 +30,7 @@ func runSecretsScanner(t *testing.T, dir string) (string, error) {
 func TestDeploySecretScannerCatchesSeededPassword(t *testing.T) {
 	dir := t.TempDir()
 	leak := filepath.Join(dir, "leaky.yaml")
-	if err := os.WriteFile(leak, []byte("apiVersion: v1\nkind: Secret\nstringData:\n  password: hunter2\n"), 0o644); err != nil {
+	if err := os.WriteFile(leak, []byte("apiVersion: v1\nkind: Secret\nstringData:\n  password: hunter2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runSecretsScanner(t, dir)
@@ -46,7 +46,7 @@ func TestDeploySecretScannerCatchesSeededPassword(t *testing.T) {
 func TestDeploySecretScannerCatchesTailnetHostname(t *testing.T) {
 	dir := t.TempDir()
 	leak := filepath.Join(dir, "ingress.yaml")
-	if err := os.WriteFile(leak, []byte("host: substrate.example.ts.net\n"), 0o644); err != nil {
+	if err := os.WriteFile(leak, []byte("host: substrate.example.ts.net\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runSecretsScanner(t, dir)
@@ -72,7 +72,7 @@ func TestDeploySecretScannerAllowsEmptyAndPlaceholderValues(t *testing.T) {
 		"  host: substrate.<tailnet>",
 		"",
 	}, "\n")
-	if err := os.WriteFile(ok, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(ok, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runSecretsScanner(t, dir)
