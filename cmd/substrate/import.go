@@ -19,7 +19,7 @@ import (
 
 func importCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("want scan, plan, or apply subcommand")
+		return fmt.Errorf("want scan, plan, apply, or cutover subcommand")
 	}
 	switch args[0] {
 	case "scan":
@@ -28,6 +28,8 @@ func importCmd(args []string, stdout, stderr io.Writer) error {
 		return importPlan(args[1:], stdout, stderr)
 	case "apply":
 		return importApply(args[1:], stdout, stderr)
+	case "cutover":
+		return importCutover(args[1:], stdout, stderr, nil)
 	default:
 		return fmt.Errorf("unknown import command %q", args[0])
 	}

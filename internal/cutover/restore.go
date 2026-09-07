@@ -35,6 +35,7 @@ func planRestore(req Request) (*Report, error) {
 		Unit:      &spec,
 		Uninstall: true,
 	}
+	seenJournal := map[string]struct{}{}
 	for _, root := range req.Roots {
 		backups, err := findBackups(root)
 		if err != nil {
@@ -45,8 +46,31 @@ func planRestore(req Request) (*Report, error) {
 				return nil, err
 			}
 		}
+		if err := loadJournal(root, rep, seenJournal); err != nil {
+			return nil, err
+		}
+	}
+	if req.Home != "" {
+		if err := loadJournal(req.Home, rep, seenJournal); err != nil {
+			return nil, err
+		}
 	}
 	return rep, nil
+}
+
+func loadJournal(home string, rep *Report, seen map[string]struct{}) error {
+	if _, ok := seen[home]; ok {
+		return nil
+	}
+	seen[home] = struct{}{}
+	j, err := readJournal(home)
+	if err != nil {
+		return err
+	}
+	if j != nil {
+		rep.Created = append(rep.Created, j.Created...)
+	}
+	return nil
 }
 
 type backup struct {
@@ -147,6 +171,24 @@ func classifyRestore(b backup, rep *Report) error {
 func applyRestore(rep *Report, inst UnitInstaller) error {
 	if err := applyRenames(rep.Renames); err != nil {
 		return err
+	}
+	seen := map[string]struct{}{}
+	for _, p := range rep.Created {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cutover: remove generated %s: %w", p, err)
+		}
+	}
+	if rep.Unit != nil && rep.Unit.Home != "" {
+		jp := journalPath(rep.Unit.Home)
+		if err := os.Remove(jp); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("cutover: remove journal: %w", err)
+		}
+		dir := filepath.Dir(jp)
+		_ = os.Remove(dir) // only succeeds if empty; leftover adapter state stays
 	}
 	if inst == nil {
 		return fmt.Errorf("cutover: unit installer is required")

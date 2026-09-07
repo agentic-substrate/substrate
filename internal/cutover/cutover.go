@@ -53,6 +53,7 @@ type Report struct {
 	DryRun    bool
 	Renames   []Rename
 	Writes    []Write
+	Created   []string
 	Unit      *UnitSpec
 	Uninstall bool
 	Install   bool
@@ -143,10 +144,14 @@ func (r *Report) Format() string {
 	if r.DryRun {
 		b.WriteString("dry-run\n")
 	}
+	verb := "REPLACE"
+	if r.Uninstall && !r.Install {
+		verb = "RESTORE"
+	}
 	writes := append([]Write(nil), r.Writes...)
 	sort.Slice(writes, func(i, j int) bool { return writes[i].Path < writes[j].Path })
 	for _, w := range writes {
-		fmt.Fprintf(&b, "RESTORE %s\n", w.Path)
+		fmt.Fprintf(&b, "%s %s\n", verb, w.Path)
 		fmt.Fprintf(&b, "  current sha256: %s\n", dash(w.CurrentSHA))
 		fmt.Fprintf(&b, "  would sha256: %s\n", dash(w.WouldSHA))
 		if w.CurrentDr != "" || w.WouldDr != "" {
@@ -167,6 +172,11 @@ func (r *Report) Format() string {
 	}
 	if r.Install && r.Unit != nil {
 		fmt.Fprintf(&b, "INSTALL adapter unit (roots=%s)\n", strings.Join(r.Unit.Roots, ","))
+	}
+	created := append([]string(nil), r.Created...)
+	sort.Strings(created)
+	for _, p := range created {
+		fmt.Fprintf(&b, "CREATE %s\n", p)
 	}
 	return b.String()
 }
