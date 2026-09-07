@@ -13,10 +13,10 @@ import (
 )
 
 type importWorld struct {
-	actor, bob, orgID, teamID, teamBID string
-	global, org, team, teamB, project  string
-	userScope, pathStr                 string
-	aliceP, bobP                       *identity.Principal
+	actor, bob, carol, orgID, teamID, teamBID string
+	global, org, team, teamB, project         string
+	userScope, pathStr                        string
+	aliceP, bobP, carolP                      *identity.Principal
 }
 
 func seedImportWorld(t *testing.T, conn *pgx.Conn) importWorld {
@@ -38,6 +38,7 @@ func seedImportWorld(t *testing.T, conn *pgx.Conn) importWorld {
 	w := importWorld{
 		actor:     id(),
 		bob:       id(),
+		carol:     id(),
 		orgID:     id(),
 		teamID:    id(),
 		teamBID:   id(),
@@ -51,12 +52,14 @@ func seedImportWorld(t *testing.T, conn *pgx.Conn) importWorld {
 	orgName := "imp-" + w.orgID[:8]
 	w.pathStr = "global:/org:" + orgName + "/team:core/project:plotlens"
 	exec(`INSERT INTO principal (id, kind, display_name, trust) VALUES
-		($1, 'user', 'alice', 'human'), ($2, 'user', 'bob', 'human')`, w.actor, w.bob)
+		($1, 'user', 'alice', 'human'), ($2, 'user', 'bob', 'human'), ($3, 'user', 'carol', 'human')`,
+		w.actor, w.bob, w.carol)
 	exec(`INSERT INTO org (id, name) VALUES ($1, $2)`, w.orgID, orgName)
 	exec(`INSERT INTO team (id, org_id, name) VALUES ($1, $2, 'core'), ($3, $2, 'other')`,
 		w.teamID, w.orgID, w.teamBID)
 	exec(`INSERT INTO membership (principal_id, team_id, role) VALUES
-		($1, $2, 'member'), ($3, $4, 'member')`, w.actor, w.teamID, w.bob, w.teamBID)
+		($1, $2, 'member'), ($3, $4, 'member'), ($5, $2, 'member')`,
+		w.actor, w.teamID, w.bob, w.teamBID, w.carol)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'org', $2, $3, 0, 'placeholder')`, w.org, w.global, orgName)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
 		($1, 'team', $2, 'core', 0, 'placeholder', $3),
@@ -84,6 +87,10 @@ func seedImportWorld(t *testing.T, conn *pgx.Conn) importWorld {
 	w.bobP = &identity.Principal{
 		ID: parse(w.bob), Kind: identity.KindUser, Trust: identity.TrustHuman,
 		OrgID: parse(w.orgID), TeamIDs: []uuid.UUID{parse(w.teamBID)},
+	}
+	w.carolP = &identity.Principal{
+		ID: parse(w.carol), Kind: identity.KindUser, Trust: identity.TrustHuman,
+		OrgID: parse(w.orgID), TeamIDs: []uuid.UUID{parse(w.teamID)},
 	}
 	return w
 }
@@ -529,6 +536,35 @@ func TestApplyFlippedTrustedDoesNotActivateLaterHost(t *testing.T) {
 	prefs := countByBodyStatus(t, conn, "preference", w.team)
 	if prefs["Prefer tabs."] == "active" {
 		t.Fatalf("flipped -trusted activated a later-host conflict side: %#v", prefs)
+	}
+}
+
+func TestApplyTrustedMarkerVisibleAcrossPrincipals(t *testing.T) {
+	// SELECT ingest_receipt only where principal_id = actor is the one-line
+	// change that makes this red: Carol's WSL token cannot see Alice's
+	// trusted marker and reports "must be imported first".
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	aliceCtx := identity.WithPrincipal(t.Context(), w.aliceP)
+	carolCtx := identity.WithPrincipal(t.Context(), w.carolP)
+
+	if _, err := Apply(aliceCtx, st, applyReq(w, "mac", true)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Apply(carolCtx, st, applyReq(w, "wsl", true))
+	if err != nil {
+		t.Fatalf("same-team later machine with a different principal: %v", err)
+	}
+	if res.Duplicate {
+		t.Fatal("later machine reported duplicate of the trusted apply")
+	}
+	got := countByBodyStatus(t, conn, "instruction", w.project)
+	if got["Use modules."] != "proposed" {
+		t.Fatalf("cross-principal later machine block status %q, want proposed; %#v", got["Use modules."], got)
+	}
+	if got["Always run gofmt."] != "active" {
+		t.Fatalf("trusted block lost active after cross-principal apply: %#v", got)
 	}
 }
 
