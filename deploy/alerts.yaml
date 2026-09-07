@@ -1,0 +1,45 @@
+# Phase 1 Prometheus rules. Loaded by the homelab collector from this file.
+# Metric names are substrate_* (AGENTS.md translates the EDD's acp_*).
+#
+# substrate_outbox_depth is reported by the adapter, per machine, including
+# zero. A machine that stopped reporting drops the series; do not default
+# missing to 0 or the alert is silent exactly when the adapter is dead.
+groups:
+  - name: substrate.phase1
+    rules:
+      - alert: SubstrateOutboxDepth
+        expr: substrate_outbox_depth > 500
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox depth > 500 on {{ $labels.machine }}
+          description: >
+            Adapter on machine {{ $labels.machine }} has queued more than 500
+            writes for over 30 minutes. The adapter cannot reach the server, or
+            a write is being rejected in a loop. A live adapter with an empty
+            queue reports 0; a machine that stopped reporting drops this series.
+
+      - alert: SubstrateReadyz
+        expr: substrate_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: /readyz failing on {{ $labels.instance }}
+          description: >
+            /readyz has been failing on {{ $labels.instance }} for over 5 minutes.
+            Postgres is down or the pool is exhausted. /healthz stays 200; the
+            process must not be killed (EDD R27).
+
+      - alert: SubstrateDriftProposals
+        expr: increase(substrate_render_drift_total[1d]) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: Drift proposals > 10/day on {{ $labels.machine }}
+          description: >
+            More than 10 drift proposals in 24h for machine {{ $labels.machine }}
+            at scope {{ $labels.scope_path }}. Someone is bypassing the adapter
+            or an instruction key is missing — usually a missing instruction
+            key, not misbehavior. An alert nobody can act on gets muted.

@@ -42,7 +42,7 @@ func TestReadyzIgnoresGitOutage(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
 	h := newHandlerLookup(func() *store.Store { return st }, nil, downGit{}, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
-	})
+	}, nil)
 
 	readyz := get(t, h, "/readyz")
 	defer func() { _ = readyz.Body.Close() }()
@@ -81,7 +81,7 @@ func TestReadyzIgnoresUnreachableSkillsRepo(t *testing.T) {
 	git := rest.SkillsRepo{URL: "file:///no/such/skills-repo.git"}
 	h := newHandlerLookup(func() *store.Store { return st }, nil, git, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
-	})
+	}, nil)
 
 	readyz := get(t, h, "/readyz")
 	defer func() { _ = readyz.Body.Close() }()
@@ -100,7 +100,7 @@ func TestReadyzIgnoresUnreachableSkillsRepo(t *testing.T) {
 }
 
 func TestHealthzWithoutStore(t *testing.T) {
-	h := newHandler(nil, nil, nil)
+	h := newHandler(nil, nil, nil, nil)
 	healthz := get(t, h, "/healthz")
 	defer func() { _ = healthz.Body.Close() }()
 	if healthz.StatusCode != http.StatusOK {
@@ -123,7 +123,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", nil, nil)
+		errc <- serve(ctx, ln, "postgres://postgres:x@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", nil, nil, nil)
 	}()
 
 	url := "http://" + ln.Addr().String()
@@ -161,7 +161,7 @@ func TestServeKeepsListeningWhenPostgresDown(t *testing.T) {
 }
 
 func TestProtectedRouteRequiresBearer(t *testing.T) {
-	h := newHandler(nil, nil, nil)
+	h := newHandler(nil, nil, nil, nil)
 	res := get(t, h, "/v1/review")
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusUnauthorized {
@@ -175,7 +175,7 @@ func TestMCPRequiresBearer(t *testing.T) {
 	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		lookedUp = true
 		return p, nil
-	})
+	}, nil)
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions} {
 		lookedUp = false
 		req := httptest.NewRequest(method, "/mcp", nil)
@@ -212,7 +212,7 @@ func TestProductionSchemaSnapshot(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
 	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
-	})
+	}, nil)
 	httpSrv := httptest.NewServer(h)
 	defer httpSrv.Close()
 
@@ -254,7 +254,7 @@ func TestMCPInitializeAndListTools(t *testing.T) {
 	p := &identity.Principal{ID: uuid.Must(uuid.NewV7()), DisplayName: "test", Trust: identity.TrustHuman}
 	h := newHandlerLookup(nil, nil, nil, func(context.Context, string) (*identity.Principal, error) {
 		return p, nil
-	})
+	}, nil)
 	httpSrv := httptest.NewServer(h)
 	defer httpSrv.Close()
 

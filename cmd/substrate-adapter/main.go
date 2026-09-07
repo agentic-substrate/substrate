@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/agentic-substrate/substrate/internal/adapter"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/version"
 )
 
@@ -36,6 +38,7 @@ func run() error {
 	interval := flag.Duration("interval", adapter.DefaultInterval, "render tick (EDD §7.2)")
 	scope := flag.String("scope", "global:", "scope path posted on drift_proposal review items")
 	skills := flag.String("skills-repo", os.Getenv("SUBSTRATE_SKILLS_REPO"), "skills git remote; cloned under <home>/.substrate/skills.git")
+	otlp := flag.String("otlp", os.Getenv("SUBSTRATE_OTLP_ENDPOINT"), "OTLP HTTP collector endpoint; empty disables export")
 	flag.Parse()
 
 	if *server == "" {
@@ -55,6 +58,21 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	obs, err := observe.Setup(ctx, observe.Config{
+		Endpoint: *otlp,
+		Service:  "substrate-adapter",
+		Instance: *machine,
+		Logger:   slog.Default(),
+	})
+	if err != nil {
+		return fmt.Errorf("otlp: %w", err)
+	}
+	defer func() {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = obs.Shutdown(shutCtx)
+	}()
+
 	return adapter.Run(ctx, adapter.Config{
 		Server:     *server,
 		Token:      *token,
@@ -65,6 +83,7 @@ func run() error {
 		Interval:   *interval,
 		Scope:      *scope,
 		SkillsRepo: *skills,
+		Metrics:    obs,
 	})
 }
 

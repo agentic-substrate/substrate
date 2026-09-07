@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+// Metrics is the adapter's observability sink. *observe.Runtime satisfies it.
+// A machine that stopped reporting must not look like a machine reporting zero.
+type Metrics interface {
+	SetOutboxDepth(ctx context.Context, machine string, depth int64)
+	RecordRenderDrift(ctx context.Context, machine, scopePath string)
+}
+
 const (
 	// DefaultInterval is the render tick from EDD §7.2.
 	DefaultInterval = 5 * time.Minute
@@ -64,6 +71,8 @@ type Config struct {
 	// SkillsRepo is the git remote cloned into <home>/.substrate/skills.git.
 	// Empty skips the skills loop so a machine without a mirror still renders.
 	SkillsRepo string
+	// Metrics reports outbox depth and drift. Nil disables export.
+	Metrics Metrics
 }
 
 func (cfg Config) interval() time.Duration {
@@ -118,6 +127,29 @@ func (cfg Config) validate() error {
 	return nil
 }
 
+// ReportOutbox exports substrate_outbox_depth for this machine, including
+// zero. Skipping zero would make a live empty queue look like a dead adapter.
+func ReportOutbox(ctx context.Context, db *DB, cfg Config) error {
+	if cfg.Metrics == nil || db == nil {
+		return nil
+	}
+	n, err := db.OutboxDepth(ctx)
+	if err != nil {
+		return err
+	}
+	cfg.Metrics.SetOutboxDepth(ctx, cfg.Machine, int64(n))
+	return nil
+}
+
+// OutboxDepth is the number of undrained outbox rows, including those not yet due.
+func (db *DB) OutboxDepth(ctx context.Context) (int, error) {
+	var n int
+	if err := db.sql.QueryRowContext(ctx, `SELECT count(*) FROM outbox`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("adapter: outbox depth: %w", err)
+	}
+	return n, nil
+}
+
 // Run is the daemon: Sync on start, every Interval, and on SSE wake-up.
 // Outbox drains on start and every 60s; the cache refreshes on start and
 // every 15 min. Drain/cache errors are logged, never fatal — a down server
@@ -140,6 +172,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if err := Drain(ctx, db, cfg); err != nil {
 		slog.Error("outbox drain failed", "err", err)
+	}
+	if err := ReportOutbox(ctx, db, cfg); err != nil {
+		slog.Error("outbox depth metric failed", "err", err)
 	}
 	if err := RefreshCache(ctx, db, cfg); err != nil {
 		slog.Error("cache refresh failed", "err", err)
@@ -169,6 +204,9 @@ func Run(ctx context.Context, cfg Config) error {
 		case <-outboxTick.C:
 			if err := Drain(ctx, db, cfg); err != nil {
 				slog.Error("outbox drain failed", "err", err)
+			}
+			if err := ReportOutbox(ctx, db, cfg); err != nil {
+				slog.Error("outbox depth metric failed", "err", err)
 			}
 		case <-cacheTick.C:
 			if err := RefreshCache(ctx, db, cfg); err != nil {

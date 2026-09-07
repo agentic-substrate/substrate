@@ -11,8 +11,9 @@ is the availability story.
 | Component | Where | Notes |
 |---|---|---|
 | PostgreSQL 16 + pgvector, pg_trgm, ltree | CloudNativePG cluster `substrate-pg`, PVC on Longhorn | Roles: `substrate_migrate` (DDL), `substrate_app` (RLS-enforced DML, **no** `BYPASSRLS`) |
-| `substrate-server` | k8s Deployment, 1 replica, image built with `ko` | Config via ConfigMap + Secret; `/readyz` probe |
+| `substrate-server` | k8s Deployment, 1 replica, image built with `ko` | Config via ConfigMap + Secret; `/readyz` probe; `-otlp` / `SUBSTRATE_OTLP_ENDPOINT` |
 | Ollama (`nomic-embed-text`) | Existing T4 node, `nodeSelector: gpu=t4` | Called directly from Go in Phase 1 |
+| OTel collector | Existing; endpoint still open (EDD §19 item 5) | Empty `-otlp` disables export. Phase 1 rules: `deploy/alerts.yaml` |
 | MinIO | Existing | Buckets `substrate-sessions` (SSE, owner-only), `substrate-backups` |
 | Ingress | Traefik v3 + cert-manager, `IngressRoute` for `substrate.<tailnet>` | Per-token rate limit on `/mcp` |
 
@@ -69,11 +70,19 @@ restored is not a backup.
 
 ## Alerts (Phase 1 minimum)
 
+Rules live in [`deploy/alerts.yaml`](../deploy/alerts.yaml). Metric names are `substrate_*`.
+`substrate_outbox_depth` is reported **by the adapter**, per `machine` label, including zero.
+A machine that stopped reporting drops the series; do not default missing to 0.
+
+The collector endpoint is `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`. Empty disables export (supported,
+not degraded). A collector outage must not fail a request; export is best-effort and a failure
+is logged once.
+
 | Alert | Threshold | What it usually means |
 |---|---|---|
-| Outbox depth | > 500 on any machine for > 30 min | Adapter cannot reach the server, or a write is being rejected in a loop |
-| `/readyz` failing | > 5 min | Postgres is down or the pool is exhausted |
-| Drift proposals | > 10/day | Someone is hand-editing generated files — usually a missing instruction key, not misbehavior |
+| Outbox depth (`SubstrateOutboxDepth`) | > 500 on any machine for > 30 min | Adapter cannot reach the server, or a write is being rejected in a loop |
+| `/readyz` failing (`SubstrateReadyz`) | > 5 min | Postgres is down or the pool is exhausted |
+| Drift proposals (`SubstrateDriftProposals`) | > 10/day | Someone is bypassing the adapter or an instruction key is missing — usually a missing key, not misbehavior |
 
 ## Failure modes
 

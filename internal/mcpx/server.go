@@ -6,16 +6,19 @@ package mcpx
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/observe"
 )
 
 const (
 	extraPrincipal = "substrate.principal"
 	extraRequestID = "substrate.request_id"
+	extraSlot      = "substrate.observe_slot"
 )
 
 // Server is an MCP server that domain packages register tools on.
@@ -48,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 			Extra: map[string]any{
 				extraPrincipal: p,
 				extraRequestID: identity.RequestIDFrom(ctx),
+				extraSlot:      observe.SlotFrom(ctx),
 			},
 		}, nil
 	}, &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(inner)
@@ -59,9 +63,19 @@ func (s *Server) Handler() http.Handler {
 // by h become isError results with the machine-readable SUBSTRATE_* code as
 // the first content item; other errors become a generic isError.
 func AddTool[In, Out any](s *Server, t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) {
+	name := t.Name
 	mcp.AddTool(s.inner, t, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		ctx = bindRequest(ctx, req)
+		ctx = observe.NewLogFields(ctx)
+		start := time.Now()
+		ctx, span := observe.Start(ctx, name)
+		defer span.End()
 		res, out, err := h(ctx, req, in)
+		elapsed := time.Since(start)
+		observe.LogTool(ctx, name, elapsed)
+		if r := observe.FromContext(ctx); r != nil {
+			r.RecordToolLatency(ctx, name, elapsed)
+		}
 		if err != nil {
 			return MapError(ctx, err), out, nil
 		}
@@ -82,6 +96,9 @@ func bindRequest(ctx context.Context, req *mcp.CallToolRequest) context.Context 
 	}
 	if rid, ok := extra[extraRequestID].(string); ok && rid != "" {
 		ctx = identity.WithRequestID(ctx, rid)
+	}
+	if s, ok := extra[extraSlot].(*observe.Slot); ok && s != nil {
+		ctx = s.Restore(ctx)
 	}
 	return ctx
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
@@ -19,6 +20,7 @@ import (
 // requested status (Gotcha 4). Missing scope, source, or verification is
 // rejected with a message naming the field (MEM-1).
 func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
+	observe.SetScopePath(ctx, in.Scope)
 	prep, err := prepareWrite(ctx, in)
 	if err != nil {
 		return WriteOut{}, err
@@ -44,6 +46,9 @@ func (s *Service) Write(ctx context.Context, in WriteIn) (WriteOut, error) {
 	// backfill job rather than failing a write that already succeeded — losing
 	// the memory because the GPU is busy would be the worse outcome (EDD §8.4).
 	_ = s.storeEmbedding(ctx, st, id.String(), prep.title, prep.body)
+	if r := observe.FromContext(ctx); r != nil {
+		r.RecordMemoryStatus(ctx, string(stored))
+	}
 	return WriteOut{ID: id.String(), Status: string(stored)}, nil
 }
 

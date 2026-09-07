@@ -129,6 +129,14 @@ write whose embed call fails still succeeds with `embedding NULL` and is picked 
 backfill pass. Semantic similarity is capped below the score of an exact identifier hit, so a
 vector neighbour can never outrank a typed filename or symbol (MEM-3).
 
+`-otlp` (or `SUBSTRATE_OTLP_ENDPOINT`) is the OTLP HTTP collector. Leave it empty and export is
+disabled, which is a supported configuration the same way empty `-ollama` is keyword-only: the
+collector being down, or never configured, must not fail a request. When set, the process pushes
+metrics and traces best-effort; a failure is logged once, not per request. Metric names are
+`substrate_*` (the EDD's `acp_*` translated). The adapter reports `substrate_outbox_depth` per
+machine, including zero — a machine that stopped reporting drops the series rather than looking
+like an empty queue. Phase 1 alert rules live in [`deploy/alerts.yaml`](deploy/alerts.yaml).
+
 `POST /mcp` is the streamable-HTTP MCP endpoint (EDD §4.1). Bearer auth is required;
 unauthenticated requests are rejected before the MCP handler runs. Rate limiting is Traefik's
 job, not the process. `context.get` compiles instructions, preferences, mandatory items,
@@ -200,10 +208,12 @@ linked versions and does not affect `/readyz`.
 ```
 
 **Configuration:** `-addr` (listen address), `-dsn` / `SUBSTRATE_DSN`, `-ollama` /
-`SUBSTRATE_OLLAMA_URL` (empty means keyword-only), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
+`SUBSTRATE_OLLAMA_URL` (empty means keyword-only), `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`
+(OTLP HTTP collector; empty disables export), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
 (skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). Adapter flags:
 `-server`, `-token` / `SUBSTRATE_TOKEN`, `-machine`, `-home`, `-state`, `-roots`, `-interval`
-(default 5m), `-scope` (review items), `-skills-repo` / `SUBSTRATE_SKILLS_REPO` (bare mirror
+(default 5m), `-scope` (review items), `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`, `-skills-repo` /
+`SUBSTRATE_SKILLS_REPO` (bare mirror
 under `<home>/.substrate/skills.git`; empty skips linking). The rest of the
 intended surface is specified in [`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and gets
 documented here as it lands.

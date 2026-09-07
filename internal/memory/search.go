@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/observe"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
@@ -68,6 +69,7 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 	if err != nil {
 		return SearchOut{}, err
 	}
+	observe.SetScopePath(ctx, in.Scope)
 	q := strings.TrimSpace(in.Query)
 	if q == "" {
 		return SearchOut{}, fmt.Errorf("memory.search: missing query")

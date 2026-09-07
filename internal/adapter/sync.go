@@ -132,6 +132,9 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest string, t
 		if err := a.postReview(ctx, cfg.scope(), dest, diff); err != nil {
 			return err
 		}
+		if cfg.Metrics != nil {
+			cfg.Metrics.RecordRenderDrift(ctx, cfg.Machine, cfg.scope())
+		}
 		if err := AtomicWrite(dest, []byte(tgt.Content)); err != nil {
 			return err
 		}
