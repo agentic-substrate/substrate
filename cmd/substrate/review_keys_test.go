@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 )
 
 // rowKeyForBody reads a row's key as the migration role, so an owner-visible
@@ -54,7 +56,7 @@ func rowVisibilityForBody(t *testing.T, conn *pgx.Conn, table, body, scopeID str
 // Restoring decideKey's `"import." + asKind + ".review." + hash` fallback is
 // the one-line production change that makes this red.
 func TestReviewKindFlipKeepsTheImportedSlotKey(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -90,7 +92,7 @@ func TestReviewKindFlipKeepsTheImportedSlotKey(t *testing.T) {
 // Restoring store.VisibilityTeam on commitReviewDecision's InsertPreference is
 // the one-line production change that makes this red.
 func TestReviewConflictPreferenceInsertIsOwnerVisible(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)

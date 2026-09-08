@@ -100,6 +100,12 @@ makes a novel instance of the same trap recognizable.
     SQL policies must spell the same names. *Failure mode:* a typo (`acp.actor_id` in a policy,
     `substrate.actor_id` in Go) makes every policy match nothing — reads come back empty, writes
     are refused, and no error names the cause.
+12. **The shared Postgres test fixture is `internal/pgtest`.** `pgtest.StartMigrated` is a
+    per-process `sync.Once` singleton and `pgtest.EnsureGlobal` seeds the global scope once;
+    both `t.Fatalf` when Docker is missing and never `t.Skip`. Several packages still carry an
+    older private copy — port them to `pgtest` rather than adding a new copy. *Failure mode:* a
+    fixture that starts a container per test multiplies an already slow suite, and one that
+    `t.Skip`s turns a missing Docker daemon into a green run that tested nothing.
 
 ## Conventions
 

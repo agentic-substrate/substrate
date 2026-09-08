@@ -19,6 +19,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
 	"github.com/agentic-substrate/substrate/internal/observe"
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
@@ -59,7 +60,7 @@ func testLogger(w *syncBuffer) *slog.Logger {
 // prints. Logging nothing also fails: the request line must carry principal_id,
 // tool, scope_path, and latency.
 func TestLogsNeverContainTokenOrMemoryBody(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedWorld(t, conn)
 	if _, err := conn.Exec(t.Context(), `INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
 		VALUES (gen_random_uuid(), $1, 'team', $2, 'rule', 'obs.sentinel', $3, 'active', $2)`,

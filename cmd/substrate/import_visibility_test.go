@@ -9,6 +9,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/instruction"
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
@@ -71,7 +72,7 @@ func prefKeyForBody(t *testing.T, conn *pgx.Conn, body, scopeID string) string {
 // Restoring store.VisibilityTeam on the InsertPreference in commitWrites is
 // the one-line production change that makes the lead-cannot-see assertion red.
 func TestImportedPreferenceStaysOwnerVisibleThroughReview(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -130,7 +131,7 @@ func TestImportedPreferenceStaysOwnerVisibleThroughReview(t *testing.T) {
 // actually wrote, read back out of the database, not from a hand-written
 // string, and resolved through the real resolver under alice's session.
 func TestImportedPreferenceStillLosesToAnInstructionOnItsKey(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
