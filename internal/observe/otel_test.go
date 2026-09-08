@@ -21,6 +21,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/mcpx"
 	"github.com/agentic-substrate/substrate/internal/memory"
 	"github.com/agentic-substrate/substrate/internal/observe"
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/scope"
 	"github.com/agentic-substrate/substrate/internal/store"
@@ -59,7 +60,7 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 		projectA: id(),
 		repo:     id(),
 	}
-	w.global = ensureGlobal(t, conn)
+	w.global = pgtest.EnsureGlobal(t, conn)
 	orgName := "acme-" + w.orgID[:8]
 	w.repoKey = "github.com/acme/obs-" + w.repo[:8]
 	w.pathStr = "global:/org:" + orgName + "/team:alpha/project:obs"
@@ -165,7 +166,7 @@ func callContextGet(t *testing.T, sess *mcp.ClientSession, repo string) compiler
 // Goes red if context.get records no substrate_tool_latency_seconds{tool="context.get"}
 // or if the trace is a single span with no compile/database children.
 func TestContextGetEmitsLatencyMetricAndCompileDatabaseSpans(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedWorld(t, conn)
 	rec := newOTLPReceiver(t)
 	rt, err := observe.Setup(t.Context(), observe.Config{
@@ -281,7 +282,7 @@ func TestEmptyOTLPEndpointIsSupported(t *testing.T) {
 // REST /v1/render (adapter traffic) would be untraced while MCP tools are
 // spanned in AddTool. EDD §12 wants one span per request.
 func TestRESTRenderStartsRequestSpan(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedWorld(t, conn)
 	rec := newOTLPReceiver(t)
 	rt, err := observe.Setup(t.Context(), observe.Config{
@@ -322,7 +323,7 @@ func TestRESTRenderStartsRequestSpan(t *testing.T) {
 // stall each context.get for ~timeout. The batcher keeps this off the
 // request path. Also goes red if each failed export logs again.
 func TestUnreachableCollectorDoesNotFailRequestsAndLogsOnce(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedWorld(t, conn)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -461,7 +462,7 @@ func TestShutdownAgainstHangingCollectorHonorsContextAndIsQuiet(t *testing.T) {
 // deciding the last drift_proposal leaves substrate_review_open{kind} stuck
 // at the last GROUP BY count, so the alert stays lit on an empty queue.
 func TestReviewOpenGaugeZerosWhenLastItemDecided(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedWorld(t, conn)
 	leadID := uuid.MustParse(insertLead(t, conn, w))
 	leadP := &identity.Principal{

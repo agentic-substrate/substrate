@@ -1,4 +1,13 @@
-package observe_test
+// Package pgtest provides the shared Postgres testcontainer fixture for
+// DB-backed tests. It lives in a non-test file so packages outside its own
+// directory can import it; a `package main` fixture could not be shared at all,
+// which is why it was lifted out of cmd/substrate.
+//
+// The container is a per-process singleton: every caller in one test binary
+// shares one migrated database. Making it per-test multiplies an already slow
+// suite. When Docker is unavailable the helpers call t.Fatalf naming the fix —
+// they never t.Skip, because CI asserts that nothing skipped.
+package pgtest
 
 import (
 	"context"
@@ -45,7 +54,7 @@ func postgresImage(t *testing.T) string {
 		return officialPGImage
 	}
 	t.Logf("docker pull %s failed: %v\n%s", officialPGImage, err, out)
-	dir := filepath.Join(repoRoot(), "testdata", "pgvector")
+	dir := filepath.Join(repoRoot(), "testdata/pgvector")
 	//nolint:gosec // build context is the repo's testdata/pgvector, not user input
 	build := exec.Command("docker", "build", "-t", localPGImage, dir)
 	out, err = build.CombinedOutput()
@@ -61,7 +70,10 @@ var (
 	pgErr  error
 )
 
-func startMigrated(t *testing.T) (string, *pgx.Conn) {
+// StartMigrated returns the DSN of a migrated Postgres 16 + pgvector container
+// and a connection to it. The container is started once per test binary and
+// shared by every caller; the connection is per-call and closed at test cleanup.
+func StartMigrated(t *testing.T) (string, *pgx.Conn) {
 	t.Helper()
 	pgOnce.Do(func() {
 		ctx := context.Background()
@@ -104,7 +116,9 @@ var (
 	globalErr  error
 )
 
-func ensureGlobal(t *testing.T, conn *pgx.Conn) string {
+// EnsureGlobal seeds the single global-scope row once per test binary and
+// returns its id. Repeated calls return the same id.
+func EnsureGlobal(t *testing.T, conn *pgx.Conn) string {
 	t.Helper()
 	globalOnce.Do(func() {
 		var id string

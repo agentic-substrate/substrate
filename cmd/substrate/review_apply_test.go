@@ -17,6 +17,7 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 	"github.com/agentic-substrate/substrate/internal/instruction"
 	"github.com/agentic-substrate/substrate/internal/memory"
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 	"github.com/agentic-substrate/substrate/internal/preference"
 	"github.com/agentic-substrate/substrate/internal/rest"
 	"github.com/agentic-substrate/substrate/internal/scope"
@@ -64,7 +65,7 @@ func seedReviewWorld(t *testing.T, conn *pgx.Conn) reviewWorld {
 		projectA: id(),
 		projectB: id(),
 	}
-	w.global = ensureGlobal(t, conn)
+	w.global = pgtest.EnsureGlobal(t, conn)
 	orgName := "rev-" + w.orgID[:8]
 	w.pathStr = "global:/org:" + orgName + "/team:core/project:plotlens"
 	w.pathStrB = "global:/org:" + orgName + "/team:other/project:otherapp"
@@ -452,7 +453,7 @@ func TestReviewTwoMachineImportResolvableViaCLI(t *testing.T) {
 	// Skipping the retire loop in commitReviewDecision is the one-line
 	// production change that makes the loser-retired assertions red.
 	// active==0 is already true while the loser is still proposed.
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -518,7 +519,7 @@ func TestReviewKindFlipChangesStoredRow(t *testing.T) {
 	// preference) is the one-line production change that makes the
 	// retired-status assertion red. Resolve must show the flipped body
 	// only as an instruction.
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -580,7 +581,7 @@ func TestReviewDecideDryRunPlanEqualsCommit(t *testing.T) {
 	// Returning from commitReviewDecision after DecideReviewItem without
 	// writing instruction/preference status is the one-line production
 	// change that makes this red. Comparing two HTTP dumps stays green.
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -629,7 +630,7 @@ func TestReviewDecideDoesNotActivateAnotherTeamsIdenticalBody(t *testing.T) {
 	// production change that makes this red: team B imported the same
 	// "Prefer spaces." block, and last-wins can activate B while A's item
 	// is marked approved.
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
@@ -672,7 +673,7 @@ func TestReviewDecideMatchingNoRowFails(t *testing.T) {
 	// Inserting a new row when the scoped lookup matches nothing is the
 	// one-line production change that makes this red: the API would return
 	// 200 and close the item even though no imported row was updated.
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	w := seedReviewWorld(t, conn)
 	srv := serveReview(t, dsn, w)
 	importBothMachines(t, srv, "alice", w.pathStr)
