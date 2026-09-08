@@ -345,10 +345,58 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		})
 	}
 
+	labelTargets(res, sc)
 	sortPlanned(res)
 	_ = teamID
 	_ = leafID
 	return res, nil
+}
+
+// labelTargets stamps every planned row with the scope and visibility the
+// commit will use, so `import apply` without -commit already shows where each
+// row lands (#86). commitWrites reads the same values back, which is what
+// keeps the preview honest.
+func labelTargets(res *ApplyResult, sc scope.Path) {
+	stamp := func(rows []PlannedRow) {
+		for i := range rows {
+			path, vis := plannedTarget(sc, rows[i].Kind)
+			rows[i].Scope = path
+			rows[i].Visibility = string(vis)
+		}
+	}
+	stamp(res.Active)
+	stamp(res.Proposed)
+	stamp(res.Conflict)
+	stamp(res.Memory)
+}
+
+// plannedTarget is the single source of truth for where an imported row is
+// filed. Preferences keep the team scope id — nulling scope.team_id would put
+// them out of reach of review_apply_preference_status and
+// ListPreferencesByBodies, both of which match on it — but they are filed
+// owner-visible: a personal ~/.claude/CLAUDE.md must not become team-readable
+// just because its owner onboarded (#86). A review item carries no
+// visibility of its own, so it gets none here.
+func plannedTarget(sc scope.Path, kind string) (string, store.Visibility) {
+	switch kind {
+	case "preference":
+		return teamPath(sc).String(), store.VisibilityOwner
+	case "import_conflict":
+		return sc.String(), ""
+	default:
+		return sc.String(), store.VisibilityTeam
+	}
+}
+
+// teamPath mirrors lookupPath's teamScopeID choice, including its fallback to
+// the leaf when the path has no team segment.
+func teamPath(sc scope.Path) scope.Path {
+	for i := range sc {
+		if sc[i].Kind == scope.Team {
+			return sc[:i+1]
+		}
+	}
+	return sc
 }
 
 func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req ApplyRequest, sc scope.Path, res *ApplyResult) error {
@@ -367,12 +415,18 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 		if err != nil {
 			return err
 		}
+		// Use the visibility the dry-run already showed the operator; fall
+		// back to the same helper that produced it so the two can never drift.
+		vis := store.Visibility(row.Visibility)
+		if vis == "" {
+			_, vis = plannedTarget(sc, row.Kind)
+		}
 		switch row.Kind {
 		case "preference":
 			_, err = q.InsertPreference(ctx, store.InsertPreferenceParams{
 				ID:         pgUUID(id),
 				ScopeID:    pgUUID(teamScopeID),
-				Visibility: store.VisibilityTeam,
+				Visibility: vis,
 				OwnerID:    pgUUID(p.ID),
 				Key:        row.Key,
 				Body:       row.Body,
@@ -383,7 +437,7 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 			_, err = q.InsertInstruction(ctx, store.InsertInstructionParams{
 				ID:         pgUUID(id),
 				ScopeID:    pgUUID(leafID),
-				Visibility: store.VisibilityTeam,
+				Visibility: vis,
 				OwnerID:    pgUUID(p.ID),
 				Kind:       store.InstructionKindRule,
 				Key:        row.Key,
@@ -920,7 +974,14 @@ func (r *ApplyResult) Format() string {
 	}
 	write := func(rows []PlannedRow) {
 		for _, row := range rows {
-			fmt.Fprintf(&b, "  %s %s %s %s %s\n", row.Hostname, row.Status, row.Kind, row.Key, strings.ReplaceAll(row.Body, "\n", " "))
+			target := ""
+			if row.Scope != "" {
+				target += " scope=" + row.Scope
+			}
+			if row.Visibility != "" {
+				target += " visibility=" + row.Visibility
+			}
+			fmt.Fprintf(&b, "  %s %s %s%s %s %s\n", row.Hostname, row.Status, row.Kind, target, row.Key, strings.ReplaceAll(row.Body, "\n", " "))
 		}
 	}
 	write(r.Active)

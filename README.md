@@ -285,6 +285,11 @@ requires `-machine`, `-trusted` (the most-trusted hostname; apply it first),
 one `plan.json`. Without `-commit` the command is a dry-run: it performs every
 read and decision, prints counts and identities of rows that would become
 active, proposed, conflict, and memory grouped by hostname, and writes nothing.
+Each printed row also carries `scope=` and `visibility=`, so the destination is
+visible before `-commit` rather than after it. Imported instructions are filed
+at the `-scope` leaf and are team-visible; imported preferences are filed at
+the team scope with `visibility=owner`, so a personal `~/.claude/CLAUDE.md`
+does not become readable by the rest of the team on import.
 `-dry-run` is the same path. `-commit` performs the writes. The dry-run and the
 real run share one code path.
 

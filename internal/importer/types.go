@@ -80,6 +80,11 @@ type PlannedRow struct {
 	Title    string         `json:"title,omitempty"`
 	Slot     string         `json:"slot,omitempty"`
 	Pair     []ConflictSide `json:"pair,omitempty"`
+	// Scope and Visibility are what the commit will file this row at. They
+	// are filled during planning so the dry-run preview can show them
+	// before --commit, not only after (#86).
+	Scope      string `json:"scope,omitempty"`
+	Visibility string `json:"visibility,omitempty"`
 }
 
 // HostSummary counts planned writes for one hostname.
