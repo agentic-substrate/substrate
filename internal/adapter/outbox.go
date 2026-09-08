@@ -77,12 +77,16 @@ func EnqueueObservation(db *DB, cfg Config, obs Observation) (string, error) {
 	if obs.Status != 0 {
 		title = fmt.Sprintf("%s (exit %d)", title, obs.Status)
 	}
+	sc, err := cfg.observationScope()
+	if err != nil {
+		return "", err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"kind":         "observation",
 		"title":        title,
 		"body":         body,
 		"identifiers":  obs.Files,
-		"scope":        cfg.scope(),
+		"scope":        sc,
 		"visibility":   "team",
 		"verification": map[string]string{"type": "agent_inference"},
 		"source":       map[string]string{"machine": cfg.Machine},
