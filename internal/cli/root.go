@@ -46,6 +46,10 @@ Then "substrate doctor" tells you whether any of it worked.`,
 		newAdminCmd(d),
 		newContextCmd(d),
 		newDoctorCmd(d),
+		newImportCmd(d),
+		newReviewCmd(d),
+		newAdapterCmd(d),
+		newTokenCmd(d),
 	)
 	return root
 }

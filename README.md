@@ -79,7 +79,7 @@ Reasoning, and what we're deliberately *not* building: [`docs/product/positionin
 | Cursor | `~/.cursor/rules/substrate.mdc` | read-only | checkpoint *(Phase 2)* |
 | Headless workers | context pack over MCP (`context.get`) | `memory.*` MCP tools | lease + checkpoint *(Phase 6)* |
 
-Rendering, skill linking, and `PostToolUse` capture ship today; `SessionStart` context injection and continuity are designed and phased, not shipped. The `PostToolUse` hook is installed by merging an entry into `~/.claude/settings.json` — a user-owned file Substrate merges into rather than owns: the merge is idempotent, unrelated keys are preserved, the pre-existing file is copied once to `settings.json.pre-substrate`, and `substrate adapter uninstall -restore` removes the entry surgically — everything else you have written since stays, and the `.pre-substrate` copy is kept as your archive rather than written back over your edits. The shim (`substrate-adapter hook posttooluse`) reads the hook JSON on stdin, derives its scope from the checkout's git remote, exits within 2 seconds, and always exits 0 — a capture failure never fails the tool call, and a cwd whose remote is not bound is logged and skipped rather than filed anywhere else. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state (`skill_version.git_sha` is the only link). The adapter materializes the active approved `git_sha` into `~/.agents/skills/<name>` and refreshes harness symlinks; a skill whose scope or visibility does not match this machine is omitted from `GET /v1/skills/manifest` and is not linked. `active_version_id` can only point at an approved version (Postgres trigger, R6).
+Rendering, skill linking, and `PostToolUse` capture ship today; `SessionStart` context injection and continuity are designed and phased, not shipped. The `PostToolUse` hook is installed by merging an entry into `~/.claude/settings.json` — a user-owned file Substrate merges into rather than owns: the merge is idempotent, unrelated keys are preserved, the pre-existing file is copied once to `settings.json.pre-substrate`, and `substrate adapter uninstall` removes the entry surgically — everything else you have written since stays, and the `.pre-substrate` copy is kept as your archive rather than written back over your edits. The shim (`substrate-adapter hook posttooluse`) reads the hook JSON on stdin, derives its scope from the checkout's git remote, exits within 2 seconds, and always exits 0 — a capture failure never fails the tool call, and a cwd whose remote is not bound is logged and skipped rather than filed anywhere else. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state (`skill_version.git_sha` is the only link). The adapter materializes the active approved `git_sha` into `~/.agents/skills/<name>` and refreshes harness symlinks; a skill whose scope or visibility does not match this machine is omitted from `GET /v1/skills/manifest` and is not linked. `active_version_id` can only point at an approved version (Postgres trigger, R6).
 
 ## Quickstart
 
@@ -116,33 +116,27 @@ curl localhost:8080/readyz
 ./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl \
     --scopes memory:write --dsn "$SUBSTRATE_DSN"
 
-./bin/substrate import scan -root /abs/machine-root -hostname wsl \
-    -out /abs/path/inventory.json [-memorix-json /abs/path/memorix.json] \
-    [-exclude 'some/fixtures/**']
-./bin/substrate import plan -out /abs/path/plan.json /abs/path/inventory.json
-./bin/substrate import apply -machine mac -trusted mac \
-    -server "$SUBSTRATE_URL" -token "$TOKEN" \
-    -scope 'global:/org:acme/team:core/project:plotlens' \
-    /abs/path/plan.json
-./bin/substrate import apply -machine mac -trusted mac -commit \
-    -server "$SUBSTRATE_URL" -token "$TOKEN" \
-    -scope 'global:/org:acme/team:core/project:plotlens' \
+./bin/substrate import scan --root /abs/machine-root --hostname wsl \
+    --out /abs/path/inventory.json [--memorix-json /abs/path/memorix.json] \
+    [--exclude 'some/fixtures/**']
+./bin/substrate import plan --out /abs/path/plan.json /abs/path/inventory.json
+./bin/substrate import apply --machine mac --trusted mac \
+    --server "$SUBSTRATE_URL" --token "$TOKEN" \
+    --scope 'global:/org:acme/team:core/project:plotlens' \
     /abs/path/plan.json
 
-./bin/substrate review list -server "$SUBSTRATE_URL" -token "$TOKEN"
-./bin/substrate review decide <id> -decision approved -reason 'keep wsl' \
-    -hostname wsl -as-kind instruction \
-    -server "$SUBSTRATE_URL" -token "$TOKEN"
-./bin/substrate review decide <id> -decision approved -reason 'keep wsl' \
-    -hostname wsl -as-kind instruction -commit \
-    -server "$SUBSTRATE_URL" -token "$TOKEN"
+./bin/substrate review list --server "$SUBSTRATE_URL" --token "$TOKEN"
+./bin/substrate review approve <id> --reason 'keep wsl' \
+    --hostname wsl --as-kind instruction \
+    --server "$SUBSTRATE_URL" --token "$TOKEN"
+./bin/substrate review reject <id> --reason 'superseded by the mac copy' \
+    --server "$SUBSTRATE_URL" --token "$TOKEN"
 
-./bin/substrate import cutover -root /abs/home -root /work \
-    -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl
-./bin/substrate import cutover -root /abs/home -root /work \
-    -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl -commit
-./bin/substrate adapter uninstall -restore -root /abs/home -root /work
-./bin/substrate adapter uninstall -restore -root /abs/home -root /work -commit
+./bin/substrate adapter status --root /abs/home --root /work \
+    --server "$SUBSTRATE_URL" --token "$TOKEN" --machine wsl
+./bin/substrate adapter install --root /abs/home --root /work \
+    --server "$SUBSTRATE_URL" --token "$TOKEN" --machine wsl
+./bin/substrate adapter uninstall --root /abs/home --root /work [--force]
 ```
 
 Point any MCP client at `POST /mcp` with that bearer token. Phase 1 exposes `context.get`, `memory.write`, `memory.search`, and `memory.supersede`. Agents always write `unverified`; supersede never deletes.
@@ -210,9 +204,10 @@ verb exits non-zero with a suggestion rather than exiting 0.
 
 ### The command tree
 
-`auth`, `admin`, `context` and `doctor` are cobra commands: `-h` works on each of them and on
-their subcommands. `import`, `review`, `adapter` and `token` are still stdlib `flag` and are
-ported separately.
+Every verb is a cobra command, so `-h` works on the root, on each command and on each
+subcommand. There is no `-dry-run`/`-commit` pair anywhere: a preview is its own verb
+(`import scan`, `import plan`, `adapter status`), and every writing verb echoes the scope it
+resolved, then confirms — off a TTY it refuses without `--yes`.
 
 | Command | What it does |
 |---|---|
@@ -222,6 +217,15 @@ ported separately.
 | `substrate context use` | Saves an org/team/project as the default scope. |
 | `substrate context show` | Prints the resolved scope and the source that won. |
 | `substrate doctor` | Checks config, credential, server reachability and scope; prints a fix per failure. A 401 is a bad credential and says to mint one; a 403 means the token authenticated and the *policy* refused, so it says to fix scope or access, not to mint again. |
+| `substrate import scan` | Inventories harness files under one or more `--root`s into `inventory.json`. Writes nothing to the control plane. |
+| `substrate import plan` | Merges inventories into a reviewable `plan.json`. Writes nothing to the control plane. |
+| `substrate import apply` | Sends a plan to `POST /v1/import` (this commits). Echoes the resolved scope and its source, then confirms. |
+| `substrate review list` | Shows queued review items. |
+| `substrate review approve` / `reject` | Records one decision (this commits). The decision is the verb, so there is no `--decision`; `--reason` is required on `reject`. |
+| `substrate adapter status` | Classifies what `install` would displace. Writes nothing. |
+| `substrate adapter install` | Displaces harness files with rendered context and installs the adapter unit (this commits). |
+| `substrate adapter uninstall` | Restores every displaced `*.pre-substrate` file and removes the unit (this commits). `--force` discards live edits that no longer match the hash `install` wrote — the drift-recovery path in the runbook. |
+| `substrate token mint` / `revoke` | Mints or revokes a principal token straight against Postgres. Requires the DSN. |
 
 Every command takes `--json` for machine-readable output and `--org/--team/--project` to
 override the saved scope for one invocation.
@@ -252,7 +256,7 @@ Note that a **user token does not expire**. `identity.Lookup` TTL-caps agent tok
 
 ### Exclude the corpus that should never be imported
 
-`-exclude` takes a glob matched against each file's path relative to its root; `**` spans
+`--exclude` takes a glob matched against each file's path relative to its root; `**` spans
 separators, and the flag repeats. **Set it before the first import.** A home directory holds far
 more `AGENTS.md`/`CLAUDE.md` files than it has real configuration: git worktree checkouts each
 carry a copy of their repo's file, skill eval fixtures carry deliberately synthetic ones, and a
@@ -312,23 +316,23 @@ jq -r '.files[].path' /abs/path/inventory.json | while read -r f; do
 done
 ```
 
-Do that before `--commit`. Nothing downstream will tell you a worktree copy got imported.
+Do that before `substrate import apply`. Nothing downstream will tell you a worktree copy got imported.
 
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
-requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
-more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
+requires `--root` (repeatable), `--hostname`, and `--out`; plan requires `--out` and one or
+more inventory files. `--root` and `--out` must be absolute paths — there is no `$HOME`
 default, and the command will not guess one. `-out` is rejected if it falls inside any
-`-root` (scan) or equals any inventoried `Path` (plan), and the written file is always
+`--root` (scan) or equals any inventoried `Path` (plan), and the written file is always
 mode `0600`, even when it already existed. Scan never writes, moves, or modifies
-anything under the scanned roots; it only writes the file named by `-out`. It inventories
+anything under the scanned roots; it only writes the file named by `--out`. It inventories
 `.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.cursor/rules/`, and any `AGENTS.md` /
 `CLAUDE.md` found under those roots. Symlinks are not followed. Memorix is read only from
-an operator-exported JSON file passed as `-memorix-json`; scan never execs `memorix`.
+an operator-exported JSON file passed as `--memorix-json`; scan never execs `memorix`.
 If that flag is omitted the source is skipped with a logged reason and the rest of the
 scan still succeeds. An unreadable directory under a root is recorded in `skipped` and the
 walk continues, so one permission error cannot abort a scan of a real home. Dependency and
 plugin caches are never inventoried — a `CLAUDE.md` in the Go module cache or an `AGENTS.md`
-in a vendored crate belongs to its upstream author, not to this machine. `-exclude <glob>`
+in a vendored crate belongs to its upstream author, not to this machine. `--exclude <glob>`
 (repeatable) drops anything matching a glob against the root-relative path, where `**` spans
 separators; a pattern that is not a valid glob is an error rather than a filter that
 silently matches nothing. Plan splits markdown into blocks, **dedupes by content hash**, then
@@ -337,60 +341,78 @@ and will misfile (R15); confidence is never certainty. Identical blocks from two
 appear once in `plan.json`; differing blocks at the same heading from distinct hostnames
 or paths are a conflict pair tagged with hostname. Extra hashes from a single file stay
 in `blocks`. `substrate import apply` POSTs that plan to `/v1/import`. It
-requires `-machine`, `-trusted` (the most-trusted hostname; apply it first),
-`-server` (or `SUBSTRATE_URL`), `-token` (or `SUBSTRATE_TOKEN`), `-scope`, and
-one `plan.json`. Without `-commit` the command is a dry-run: it performs every
-read and decision, prints counts and identities of rows that would become
-active, proposed, conflict, and memory grouped by hostname, and writes nothing.
-Each printed row also carries `scope=` and `visibility=`, so the destination is
-visible before `-commit` rather than after it. Imported instructions are filed
-at the `-scope` leaf and are team-visible; imported preferences are filed at
-the team scope with `visibility=owner`, so a personal `~/.claude/CLAUDE.md`
-does not become readable by the rest of the team on import.
-`-dry-run` is the same path. `-commit` performs the writes. The dry-run and the
-real run share one code path.
+requires `--machine`, `--trusted` (the most-trusted hostname; apply it first),
+`--server` (or `SUBSTRATE_URL`), `--token` (or `SUBSTRATE_TOKEN`), and one
+`plan.json`. **`apply` writes.** The reviewable preview is `plan.json` itself,
+which is why there is no preview flag: `scan` and `plan` are the read-only
+steps.
 
-`substrate import cutover` replaces local harness files with `GET /v1/render`
+Where it writes is resolved in order — `--scope`, then the scope recorded in
+the context file, then the checkout's `origin` remote, which is sent as `repo`
+so the server keeps ownership of the repo-key-to-chain binding (R18). Nothing
+is guessed beyond that: an unbound directory with no `--scope` is an error,
+never `global:`. The resolved target **and the source that won** are printed
+before anything is sent, and `apply` then prompts for confirmation. Off a
+terminal — in a script or CI — it refuses without `--yes`, because the server
+never discloses the resolved chain afterwards, so an unconfirmed apply in the
+wrong checkout is not reviewable in either direction.
+
+Each printed row carries `scope=` and `visibility=`. Imported instructions are
+filed at the resolved leaf and are team-visible; imported preferences are filed
+at the team scope with `visibility=owner`, so a personal `~/.claude/CLAUDE.md`
+does not become readable by the rest of the team on import.
+
+`substrate adapter install` replaces local harness files with `GET /v1/render`
 output, renames displaced files and the `.memorix` store to `*.pre-substrate`,
 and installs the adapter unit (systemd `--user` on Linux/WSL, launchd on macOS)
-with `-roots` set to the roots this cutover displaced, so the daemon never
-renders over a tree that has no `*.pre-substrate` backup; with no `-root` that
-is `/work` (CONT-4). `-root` is repeatable and absolute, with no
-`$HOME` default; omit it to default to `/work`. It also requires `-server`
-(or `SUBSTRATE_URL`), `-token` (or `SUBSTRATE_TOKEN`), and `-machine`. Pass
-`-root "$HOME" -root /work` so home harness files and checkout files under
-the mount root are both displaced. Passing only `-root "$HOME"` does not
-add `/work`. Without `-commit` it is a dry-run: every
-read, classification, and conflict check runs, the plan prints each target's
-current sha256 and the sha256 it would be replaced by, every `*.pre-substrate`
-rename, and the unit that would be installed, and it writes nothing. `-dry-run`
-is the same path. `-commit` performs the writes. An existing `*.pre-substrate`
+with `--root` set to the roots this install displaced, so the daemon never
+renders over a tree that has no `*.pre-substrate` backup; with no `--root` that
+is `/work` (CONT-4). `--root` is repeatable and absolute, with no
+`$HOME` default; omit it to default to `/work`. It also requires `--server`
+(or `SUBSTRATE_URL`), `--token` (or `SUBSTRATE_TOKEN`), and `--machine`. Pass
+`--root "$HOME" --root /work` so home harness files and checkout files under
+the mount root are both displaced. Passing only `--root "$HOME"` does not
+add `/work`. **`install` writes**, and prompts first; off a terminal it
+requires `--yes`.
+
+`substrate adapter status` is the preview, and it is a verb rather than a flag
+so a script cannot mistake it for the real thing: every read, classification,
+and conflict check runs, the plan prints each target's current sha256 and the
+sha256 it would be replaced by, every `*.pre-substrate` rename, and the unit
+that would be installed, and it writes nothing at all — not one installer call.
+`status` and `install` share one code path. An existing `*.pre-substrate`
 path is an error — that file is the one copy of an earlier cutover and is never
 overwritten. Nothing in this flow deletes (Gotcha 6); originals are renamed.
 Rendered replacements are compared with `render.DriftHash` (footer excluded).
 The dry-run and the real run share one code path.
 
-`substrate adapter uninstall -restore` is the rollback. It requires `-restore`;
-`-root` is absolute and defaults to `/work` when omitted, exactly as cutover
-does, so a rollback cannot walk a different tree than the cutover it inverts.
-Pass the same roots cutover used
-(`-root "$HOME" -root /work`); restore does not discover extra trees. It
+`substrate adapter uninstall` is the rollback, and it always restores — there
+was never a non-restore path, so the old `-restore` flag is gone rather than
+required. `--root` is absolute and defaults to `/work` when omitted, exactly as
+`install` does, so a rollback cannot walk a different tree than the install it
+inverts. Pass the same roots install used
+(`--root "$HOME" --root /work`); restore does not discover extra trees. It
 renames `*.pre-substrate` back
 over the live paths, removes generated files that still match the written
-`DriftHash`, and uninstalls the unit. Live edits since cutover are refused
-unless `-force` is set (printed as `DISCARD live edits`).
-Without `-commit` it is a dry-run. `-commit` performs the restores. Run it
+`DriftHash`, and uninstalls the unit. Live edits since install are refused
+unless `--force` is set (printed as `DISCARD live edits`) — that is the
+drift-recovery path, and it survives. Uninstall prompts before restoring and
+requires `--yes` off a terminal. Run it
 before blaming the server: server data is additive and can be left in place.
 
-`substrate review list` and `substrate review decide` are the CLI path through the
+`substrate review list`, `approve`, and `reject` are the CLI path through the
 import queue (SYNC-5, R15). List calls `GET /v1/review` (default `status=open`) and
 prints each item with its id, kind, slot, and both sides tagged by hostname so a
 reviewer can choose from the listing. Long bodies are cut at a fixed rune budget
 with an explicit `truncated` marker; a side whose hostname is missing is not
-decidable in practice. `review decide` POSTs `/v1/review/{id}/decide`. Without
-`-commit` it is a dry-run: the server computes the same activate/retire set as
-the write and stores nothing. `-commit` applies that set. For an
-`import_conflict`, `-hostname` selects the winning machine and `-as-kind
+decidable in practice. `approve` and `reject` POST `/v1/review/{id}/decide`;
+the decision is the verb, so there is no `--decision` to get wrong. **Both
+write.** `--reason` is required on `reject`, because a rejection nobody
+recorded a reason for cannot be explained later (GOV-2). Both prompt for
+confirmation and refuse without `--yes` off a terminal: unlike `import apply`
+there is no prior artifact to review, and the id is a UUID that is trivially
+pasted wrong. For an
+`import_conflict`, `--hostname` selects the winning machine and `--as-kind
 instruction|preference` flips a heuristic misfile before approval (R15). A team
 lead or `human_admin` decides; the proposer cannot self-approve.
 
