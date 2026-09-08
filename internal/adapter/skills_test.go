@@ -561,4 +561,90 @@ func TestWorkingSkillsRepoReportsNoSkip(t *testing.T) {
 	if res.SkillsSkipped != "" {
 		t.Fatalf("a working skills repo reported a skip: %q", res.SkillsSkipped)
 	}
+	// Assert the skill actually linked. Without this the test only proves a
+	// field stayed empty, which the success path does by returning the zero
+	// value -- it would pass if linking silently stopped working entirely.
+	if got := readLinkedSkill(t, home, "team/alpha/lint"); got == "" {
+		t.Fatal("no skip was reported and no skill was linked either")
+	}
+}
+
+// When the manifest fetch itself fails, linkSkills returns an error and Sync
+// returns early. The result must still say skills were skipped: this is the
+// case that most needs reporting, and assigning the reason after the error
+// check would report a clean cycle instead.
+//
+// One-line production change that makes this go red: move the skillsSkipped
+// assignment in Sync back below its `if err != nil` return.
+func TestSkillsManifestFailureStillReportsASkip(t *testing.T) {
+	repo, _, _, _, _, _ := makeSkillsRepo(t)
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newFake(t)
+	srv.skillsManifestStatus = http.StatusInternalServerError
+	cfg := testConfig(home, state, srv.URL)
+	cfg.SkillsRepo = repo
+
+	res, err := Sync(context.Background(), db, cfg)
+	if err == nil {
+		t.Fatal("a failing skills manifest should surface as an error from Sync")
+	}
+	if res.SkillsSkipped == "" {
+		t.Fatal("Sync errored on skills and the result reports no skip")
+	}
+}
+
+// A skills remote is credentialed the ordinary way for a bare mirror:
+// https://x-access-token:<PAT>@host/org/skills.git, handed straight to
+// git clone --bare. SkillsSkipped is logged by Report and exported over OTLP,
+// so interpolating the raw URL writes the token to the daemon log and then off
+// the box. The reason must name the remote well enough to act on and carry no
+// secret.
+//
+// One-line production change that makes this go red: interpolate
+// cfg.SkillsRepo instead of redactRemote(cfg.SkillsRepo) in linkSkills.
+func TestSkillsSkippedNeverLeaksRemoteCredentials(t *testing.T) {
+	// Assembled rather than written literally: a token-shaped constant trips
+	// gosec G101, and this test exists precisely to keep such a value out of
+	// the logs.
+	secret := "ghp_" + "notarealtokenbutlooksliketone"
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newFake(t)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.SkillsRepo = "https://x-access-token:" + secret + "@example.invalid/org/skills.git"
+
+	res, err := Sync(context.Background(), db, cfg)
+	if err != nil {
+		t.Fatalf("an unreachable skills repo must not fail the cycle: %v", err)
+	}
+	if res.SkillsSkipped == "" {
+		t.Fatal("the mirror failure was not surfaced at all")
+	}
+	if strings.Contains(res.SkillsSkipped, secret) {
+		t.Fatalf("the skills remote's credential is in SkillsSkipped: %q", res.SkillsSkipped)
+	}
+	if !strings.Contains(res.SkillsSkipped, "example.invalid") {
+		t.Fatalf("SkillsSkipped names no host, so an operator cannot act on it: %q", res.SkillsSkipped)
+	}
+}
+
+func TestRedactRemote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://x-access-token:ghp_secret@example.com/org/s.git", "https://example.com/org/s.git"},
+		{"https://user:pw@example.com/s.git", "https://example.com/s.git"},
+		{"https://example.com/org/s.git", "https://example.com/org/s.git"},
+		{"git@github.com:org/skills.git", "git@github.com:org/skills.git"},
+		{"/srv/skills.git", "/srv/skills.git"},
+		{"", ""},
+		{"ssh://git:hunter2@host:22/s.git", "ssh://host:22/s.git"},
+		{"://not a url@x", "(redacted remote)"},
+	}
+	for _, c := range cases {
+		if got := redactRemote(c.in); got != c.want {
+			t.Errorf("redactRemote(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
 }

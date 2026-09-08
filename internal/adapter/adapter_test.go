@@ -990,9 +990,12 @@ type fake struct {
 	// rejectPath makes the server 403 a proposal whose target path contains
 	// it, so one target of several can fail while the rest succeed.
 	rejectPath string
-	sseReady   chan struct{}
-	sseWake    <-chan struct{}
-	URL        string
+	// skillsManifestStatus, when non-zero, makes /v1/skills/manifest fail with
+	// that status, so a manifest error can be driven from a test.
+	skillsManifestStatus int
+	sseReady             chan struct{}
+	sseWake              <-chan struct{}
+	URL                  string
 }
 
 func newFake(t *testing.T) *fake {
@@ -1046,6 +1049,13 @@ func (f *fake) note(r *http.Request) {
 
 func (f *fake) handleSkills(w http.ResponseWriter, r *http.Request) {
 	f.note(r)
+	f.mu.Lock()
+	status := f.skillsManifestStatus
+	f.mu.Unlock()
+	if status != 0 {
+		http.Error(w, `{"code":"SUBSTRATE_INTERNAL"}`, status)
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"skills": []any{}})
 }
 

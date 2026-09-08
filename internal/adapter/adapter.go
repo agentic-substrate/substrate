@@ -175,11 +175,14 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer func() { _ = db.Close() }()
 
+	// Report before the error check: Sync returns a populated result alongside
+	// its errors, and UnproposedDrift has no other emitter -- files left as
+	// found in a cycle that later errored would otherwise be named nowhere.
 	res, err := Sync(ctx, db, cfg)
+	res.Report()
 	if err != nil {
 		return err
 	}
-	res.Report()
 	if err := Drain(ctx, db, cfg); err != nil {
 		slog.Error("outbox drain failed", "err", err)
 	}
@@ -204,16 +207,16 @@ func Run(ctx context.Context, cfg Config) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if res, err := Sync(ctx, db, cfg); err != nil {
+			res, err := Sync(ctx, db, cfg)
+			res.Report()
+			if err != nil {
 				slog.Error("render sync failed", "err", err)
-			} else {
-				res.Report()
 			}
 		case <-wake:
-			if res, err := Sync(ctx, db, cfg); err != nil {
+			res, err := Sync(ctx, db, cfg)
+			res.Report()
+			if err != nil {
 				slog.Error("render sync failed", "err", err)
-			} else {
-				res.Report()
 			}
 		case <-outboxTick.C:
 			if err := Drain(ctx, db, cfg); err != nil {

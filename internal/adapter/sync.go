@@ -74,13 +74,6 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{}, err
 	}
-	for _, u := range unknown {
-		slog.Warn("unknown git remote; bind it with substrate repo bind", "remote", u)
-	}
-	for _, u := range unscoped {
-		slog.Warn("no repo key for remote; checkout not managed", "remote", u)
-	}
-
 	applyTo := checkoutsWithRemotes(checkouts, known)
 	var unproposed []string
 	var skillsSkipped string
@@ -107,11 +100,13 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 			}
 		}
 	}
-	skipped, err := linkSkills(ctx, db, a, cfg, known)
+	skillsSkipped, err = linkSkills(ctx, db, a, cfg, known)
 	if err != nil {
+		// Assigned before the check, not after: an error here means skills were
+		// definitively not linked, and a result reporting no skip would be a
+		// lie in exactly the case that most needs reporting.
 		return res(), err
 	}
-	skillsSkipped = skipped
 	return res(), nil
 }
 
