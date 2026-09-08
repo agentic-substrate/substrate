@@ -32,6 +32,10 @@ type WriteOut struct {
 	Status string `json:"status" jsonschema:"status actually stored"`
 }
 
+// MaxSearchLimit is the hard ceiling for SearchIn.Limit. Values above it are
+// clamped silently — callers that need more rows must page or narrow filters.
+const MaxSearchLimit = 100
+
 // SearchIn is the memory.search input (EDD §4.1).
 type SearchIn struct {
 	Query  string   `json:"query" jsonschema:"search text; exact identifier hits outrank keyword"`

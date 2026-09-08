@@ -78,8 +78,11 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	// Contract: Limit is capped at MaxSearchLimit with no error (EDD §4.1
+	// leaves the ceiling unspecified). Callers that pass a higher value get
+	// MaxSearchLimit rows; the compiler asks for MaxSearchLimit explicitly.
+	if limit > MaxSearchLimit {
+		limit = MaxSearchLimit
 	}
 
 	var scopeID any

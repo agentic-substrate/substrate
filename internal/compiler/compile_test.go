@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -671,6 +672,169 @@ func TestOmittedBudgetUsesDefault(t *testing.T) {
 	}
 	if !strings.Contains(pack.Markdown, "python.version") {
 		t.Fatal("omitted budget dropped instructions")
+	}
+}
+
+// TestCompileKeepsTargetScopeMemoriesWhenUnrelatedFillSearchCap reproduces #82:
+// Search ranks across every visible scope, clamps to 100, then filterHits runs.
+// Unrelated sibling-project memories that outrank the target fill the cap and
+// the target-scope rows never reach the pack.
+func TestCompileKeepsTargetScopeMemoriesWhenUnrelatedFillSearchCap(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, st := openCompiler(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	mem := memory.New(func() *store.Store { return st })
+
+	const ident = "crowding-token"
+	targets := []struct {
+		title, vis string
+	}{
+		{"target-scope-memory-a", "global"},
+		{"target-scope-memory-b", "global"},
+		{"target-team-visible-memory", "team"},
+	}
+	for _, tg := range targets {
+		writeCompileMemory(ctx, t, mem, w.pathStr, tg.title, ident, tg.vis)
+	}
+
+	orgName := w.path[1].Name
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := conn.Exec(t.Context(), q, args...); err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+	}
+	// More than the silent search clamp (100) on sibling projects under the same
+	// team. Written after the targets so equal scores lose on created_at DESC.
+	const unrelated = 105
+	for i := 0; i < unrelated; i++ {
+		projID := uuid.Must(uuid.NewV7()).String()
+		key := fmt.Sprintf("crowd-%d", i)
+		exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
+			($1, 'project', $2, $3, 0, 'placeholder', $4)`, projID, w.teamA, key, w.teamAID)
+		otherPath := scope.Path{
+			{Kind: scope.Global},
+			{Kind: scope.Org, Name: orgName},
+			{Kind: scope.Team, Name: "alpha"},
+			{Kind: scope.Project, Name: key},
+		}.String()
+		writeCompileMemory(ctx, t, mem, otherPath, fmt.Sprintf("unrelated-crowd-%d", i), ident, "global")
+	}
+
+	pack, err := svc.Compile(ctx, Request{Scope: w.path, Files: []string{ident}, Budget: tok(12000)})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	memSec := sectionBody(pack.Markdown, "Memories")
+	for _, tg := range targets {
+		if !strings.Contains(memSec, tg.title) {
+			t.Fatalf("target memory %q missing from pack after unrelated scopes filled the search cap (#82):\n%s", tg.title, memSec)
+		}
+	}
+}
+
+// TestSearchScopeFilterAgreesWithFilterHits asserts the query-time scope filter
+// and filterHits keep the same set: every scoped Search hit survives filterHits,
+// and an out-of-chain hit does not. Seeds a team-visible row so a missing
+// substrate.* session cannot false-green on global-only fixtures.
+func TestSearchScopeFilterAgreesWithFilterHits(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	st, err := store.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	mem := memory.New(func() *store.Store { return st })
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	const ident = "agree-token"
+	writeCompileMemory(ctx, t, mem, w.pathStr, "agree-target-global", ident, "global")
+	writeCompileMemory(ctx, t, mem, w.pathStr, "agree-target-team", ident, "team")
+
+	orgName := w.path[1].Name
+	otherID := uuid.Must(uuid.NewV7()).String()
+	if _, err := conn.Exec(t.Context(),
+		`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
+			($1, 'project', $2, 'agree-other', 0, 'placeholder', $3)`,
+		otherID, w.teamA, w.teamAID); err != nil {
+		t.Fatalf("insert other project: %v", err)
+	}
+	otherPath := scope.Path{
+		{Kind: scope.Global},
+		{Kind: scope.Org, Name: orgName},
+		{Kind: scope.Team, Name: "alpha"},
+		{Kind: scope.Project, Name: "agree-other"},
+	}.String()
+	writeCompileMemory(ctx, t, mem, otherPath, "agree-unrelated", ident, "global")
+
+	out, err := mem.Search(ctx, memory.SearchIn{Query: ident, Scope: w.pathStr, Limit: 100})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("scoped Search returned no hits; cannot assert agreement with filterHits")
+	}
+	foundTeam := false
+	for _, h := range out.Results {
+		if strings.Contains(h.Title, "agree-target-team") || h.Title == "agree-target-team" {
+			foundTeam = true
+		}
+		if h.Title == "agree-unrelated" {
+			t.Fatal("scoped Search returned a sibling-project hit; query filter and filterHits cannot agree")
+		}
+	}
+	if !foundTeam {
+		t.Fatal("team-visible target missing from scoped Search; global-only fixtures false-green when RLS session settings are absent")
+	}
+
+	var chain []uuid.UUID
+	if err := st.TxChecked(ctx, "context.get", w.path, func(tx pgx.Tx) error {
+		var err error
+		chain, err = chainIDs(ctx, store.New(tx), w.path)
+		return err
+	}); err != nil {
+		t.Fatalf("chainIDs: %v", err)
+	}
+	if len(chain) == 0 {
+		t.Fatal("empty scope chain")
+	}
+
+	kept := filterHits(out.Results, chain)
+	if len(kept) != len(out.Results) {
+		t.Fatalf("filterHits dropped %d of %d scoped Search hits; query filter and filterHits disagree",
+			len(out.Results)-len(kept), len(out.Results))
+	}
+
+	foreign := append([]memory.SearchHit{}, out.Results...)
+	foreign = append(foreign, memory.SearchHit{
+		ID: uuid.Must(uuid.NewV7()).String(), Title: "injected-out-of-chain",
+		Scope: otherID, Score: 999,
+	})
+	if got := filterHits(foreign, chain); len(got) != len(out.Results) {
+		t.Fatalf("filterHits kept %d hits after injecting an out-of-chain row, want %d (defence in depth)",
+			len(got), len(out.Results))
+	}
+	for _, h := range filterHits(foreign, chain) {
+		if h.Title == "injected-out-of-chain" {
+			t.Fatal("filterHits kept an out-of-chain hit")
+		}
+	}
+}
+
+func writeCompileMemory(ctx context.Context, t *testing.T, mem *memory.Service, scopePath, title, ident, vis string) {
+	t.Helper()
+	in := memory.WriteIn{
+		Kind: "fact", Title: title,
+		Body:  title + " body about " + ident,
+		Scope: scopePath, Visibility: vis, Tier: "semantic", Status: "confirmed",
+		Identifiers: []string{ident},
+	}
+	in.Verification.Type = "human"
+	in.Source = &memory.SourceIn{Machine: "wsl"}
+	if _, err := mem.Write(ctx, in); err != nil {
+		t.Fatalf("write %q: %v", title, err)
 	}
 }
 

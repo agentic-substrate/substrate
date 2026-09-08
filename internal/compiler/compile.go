@@ -61,7 +61,11 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 
 	if s.mem != nil && len(req.Files) > 0 {
 		q := strings.Join(req.Files, " ")
-		out, err := s.mem.Search(ctx, memory.SearchIn{Query: q, Limit: 200})
+		// Scope must be set before the search clamp (MEM-3): ranking without it
+		// lets unrelated projects fill the cap and crowd out applicable hits (#82).
+		out, err := s.mem.Search(ctx, memory.SearchIn{
+			Query: q, Scope: req.Scope.String(), Limit: memory.MaxSearchLimit,
+		})
 		if err != nil {
 			return Pack{}, err
 		}
