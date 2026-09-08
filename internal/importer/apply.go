@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -198,7 +199,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		row := PlannedRow{
 			Hostname: machine,
 			Kind:     kind,
-			Key:      rowKey(kind, rel, heading, b.Hash),
+			Key:      rowKey(kind, rel, heading, b.Ordinal),
 			Hash:     b.Hash,
 			Body:     body,
 		}
@@ -286,7 +287,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				Hostname: machine,
 				Kind:     kind,
 				Status:   string(store.InstructionStatusProposed),
-				Key:      rowKey(kind, rel, heading, side.Hash),
+				Key:      rowKey(kind, rel, heading, side.Ordinal),
 				Hash:     side.Hash,
 				Body:     body,
 				Slot:     slot,
@@ -772,12 +773,11 @@ func machineClientID(host, scope string) uuid.UUID {
 	return uuid.NewSHA1(importNS, []byte("substrate-import-machine/"+host+"/"+scope))
 }
 
-func rowKey(kind, rel, heading, hash string) string {
-	h := hash
-	if len(h) > 12 {
-		h = h[:12]
-	}
-	return strings.Join([]string{"import", slug(kind), slug(rel), slug(heading), h}, ".")
+// rowKey keys an imported row by where it came from, not by what it says: a
+// content hash made every edit a brand-new rule that could override nothing
+// (#80). The ordinal is the bullet's position in its slot.
+func rowKey(kind, rel, heading string, ordinal int) string {
+	return strings.Join([]string{"import", slug(kind), slug(rel), slug(heading), strconv.Itoa(ordinal)}, ".")
 }
 
 func slug(s string) string {
