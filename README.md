@@ -93,12 +93,25 @@ make smoke     # boots the real server against empty state and hits it
 make check     # everything CI runs: fmt, vet, lint, race tests, govulncheck
 ```
 
-Run the server and mint a token:
+Run the server, then get from clone to an authenticated, scope-aware command in three steps:
 
 ```sh
 ./bin/substrate-server -addr :8080 -dsn 'postgres://…'
 curl localhost:8080/healthz
 curl localhost:8080/readyz
+
+# 1. create the first user principal (database-gated; prints its token once)
+./bin/substrate admin create-user --dsn "$SUBSTRATE_DSN" \
+    --name ada --org acme --team platform --admin
+
+# 2. store it. The token is read from stdin, never argv, and written 0600.
+./bin/substrate auth login --server http://localhost:8080 < token.txt
+
+# 3. say where you work; `context show` prints the winning source
+./bin/substrate context use --org acme --team platform
+./bin/substrate context show
+
+./bin/substrate doctor        # config, credential, server, scope
 
 ./bin/substrate token mint --for agent --parent <user-uuid> --machine wsl \
     --scopes memory:write --dsn "$SUBSTRATE_DSN"
@@ -189,9 +202,52 @@ alias of that key, never a second write. `dry_run` is the default: the server cl
 grouped by hostname without opening a write transaction. Writes require `"commit": true`.
 
 Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire in 24 hours
-(EDD R3). `--for agent` is the only accepted kind today. Revoke with
-`./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
-arguments reports the version.
+(EDD R3). `token mint --for agent` is the only accepted kind: user principals come from
+`substrate admin create-user`, which is the only path in the codebase that creates one. Revoke
+with `./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
+arguments now prints help; `./bin/substrate --version` reports the version, and an unrecognised
+verb exits non-zero with a suggestion rather than exiting 0.
+
+### The command tree
+
+`auth`, `admin`, `context` and `doctor` are cobra commands: `-h` works on each of them and on
+their subcommands. `import`, `review`, `adapter` and `token` are still stdlib `flag` and are
+ported separately.
+
+| Command | What it does |
+|---|---|
+| `substrate admin create-user` | Creates org, team, user principal, membership and token in one transaction. Requires the DSN. Prints the token once. |
+| `substrate auth login` | Reads a token from **stdin**, validates it against the server, writes `config.json` 0600. |
+| `substrate auth status` | Reports the stored server and whether a token is present. Never prints the token. |
+| `substrate context use` | Saves an org/team/project as the default scope. |
+| `substrate context show` | Prints the resolved scope and the source that won. |
+| `substrate doctor` | Checks config, credential, server reachability and scope; prints a fix per failure. |
+
+Every command takes `--json` for machine-readable output and `--org/--team/--project` to
+override the saved scope for one invocation.
+
+### Scope resolution
+
+First hit wins, and `context show` names the winner:
+
+1. explicit `--org` / `--team` / `--project` flags (partial is allowed);
+2. `${XDG_CONFIG_HOME:-~/.config}/substrate/context.json`, written by `context use`;
+3. this checkout's `origin` remote, sent as a **repo key** in the `repo` field — never as a
+   scope string, because binding a remote to a chain is the server's job (R18);
+4. otherwise an error naming the next command. There is no global default: guessing `global:`
+   would file work at a scope the caller may not write.
+
+### Config files
+
+`${XDG_CONFIG_HOME:-~/.config}/substrate/` holds `config.json` (server plus token) and
+`context.json`. Both are written mode 0600 via a temp file plus rename, so a crash mid-write
+leaves the previous file intact. `config.json` is **refused on load** if any group or other bit
+is set — `chmod 600` it, the way ssh requires of a private key. Substrate never guesses `$HOME`:
+if `os.UserConfigDir()` fails, the error is propagated and the command stops.
+
+Note that a **user token does not expire**. `identity.Lookup` TTL-caps agent tokens only, so
+`config.json` is a long-lived credential on disk. Keep its mode 0600 and revoke the token with
+`substrate token revoke` when a machine is retired.
 
 ### Exclude the corpus that should never be imported
 

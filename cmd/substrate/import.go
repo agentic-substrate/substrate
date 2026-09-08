@@ -12,8 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/agentic-substrate/substrate/internal/cli"
 	"github.com/agentic-substrate/substrate/internal/importer"
 )
 
@@ -201,7 +201,7 @@ func importApply(args []string, stdout, stderr io.Writer) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+*token)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := cli.NewHTTPClient()
 	res, err := client.Do(req) //nolint:gosec // G704: -server is the operator's control plane
 	if err != nil {
 		return fmt.Errorf("import apply: %w", err)
