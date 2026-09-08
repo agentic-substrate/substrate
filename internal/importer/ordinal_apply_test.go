@@ -122,3 +122,78 @@ func TestApplyStoresOrdinalDerivedKey(t *testing.T) {
 		}
 	}
 }
+
+// #93 broke the CLI on the shape no test carried: ONE plan holding N bullets
+// from ONE machine. The other cases here apply single-block plans in sequence,
+// and the guard's own unit tests never reach Apply, so the whole real path —
+// BuildPlan → validatePlanSlots → planWrites → commit — went unexercised.
+func TestApplyMultiBulletSingleMachineFileLandsEveryBullet(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	content := "## Gotchas\n\n- alpha rule.\n- beta rule.\n- gamma rule.\n"
+	plan, err := BuildPlan([]Inventory{{
+		Hostname: "mac",
+		Files: []File{{
+			Rel: ".claude/CLAUDE.md", Path: "/work/x/.claude/CLAUDE.md",
+			DetectedType: "claude", Content: content,
+		}},
+	}}, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if len(plan.Blocks) != 3 {
+		t.Fatalf("BuildPlan produced %d blocks, want 3", len(plan.Blocks))
+	}
+
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: *plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatalf("apply a single-machine multi-bullet plan: %v", err)
+	}
+	if len(res.Active) != 3 {
+		t.Fatalf("apply reported %d active rows, want 3: %#v", len(res.Active), res.Active)
+	}
+	if len(res.Conflict) != 0 {
+		t.Fatalf("single-machine bullets produced %d conflicts, want 0: %#v", len(res.Conflict), res.Conflict)
+	}
+
+	got := countByBodyStatus(t, conn, "instruction", w.project)
+	for _, body := range []string{"alpha rule.", "beta rule.", "gamma rule."} {
+		if got[body] != "active" {
+			t.Fatalf("bullet %q status %q, want active; %#v", body, got[body], got)
+		}
+	}
+	keys := map[string]string{}
+	rows, err := conn.Query(t.Context(),
+		`SELECT key, body FROM instruction WHERE scope_id = $1 AND key LIKE 'import.%'`, w.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, body string
+		if err := rows.Scan(&key, &body); err != nil {
+			t.Fatal(err)
+		}
+		if prev, dup := keys[key]; dup {
+			t.Fatalf("bullets %q and %q collided on key %q", prev, body, key)
+		}
+		keys[key] = body
+	}
+	if len(keys) != 3 {
+		t.Fatalf("stored %d imported rows, want 3: %#v", len(keys), keys)
+	}
+
+	var n int
+	if err := conn.QueryRow(t.Context(),
+		`SELECT count(*) FROM review_item WHERE kind = 'import_conflict' AND scope_id = $1`, w.project).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a multi-bullet single-machine import opened %d conflict reviews, want 0", n)
+	}
+}

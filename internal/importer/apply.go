@@ -180,12 +180,14 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			continue
 		}
 		body := sanitizeStored(b.Body)
-		if identicalActive(body, activeIns, activePref) {
-			continue
-		}
 		kind := b.Kind
 		if kind == "" {
 			kind = Classify(b).Kind
+		}
+		if match, ok := identicalActive(body, activeIns, activePref); ok {
+			// Hash-only source: rel/heading have not been secret-scanned yet.
+			identicalSkip(res, skipSourceHashOnly(kind, b.Hash), match)
+			continue
 		}
 		// Location fields first: if they are the secret, Source must omit them.
 		if secretSkip(res, skipSourceHashOnly(kind, b.Hash), rel, heading) {
@@ -251,10 +253,11 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				continue
 			}
 			body := sanitizeStored(side.Body)
-			if identicalActive(body, activeIns, activePref) {
+			kind := Classify(Block{Heading: heading, Body: body, Rel: rel}).Kind
+			if match, ok := identicalActive(body, activeIns, activePref); ok {
+				identicalSkip(res, skipSourceHashOnly(kind, side.Hash), match)
 				continue
 			}
-			kind := Classify(Block{Heading: heading, Body: body, Rel: rel}).Kind
 			if secretSkip(res, skipSourceHashOnly(kind, side.Hash), rel, heading) {
 				continue
 			}
@@ -763,6 +766,16 @@ func skipSourceHashOnly(kind, hash string) string {
 	return kind + ":" + truncHash(hash)
 }
 
+// identicalSkip records a block dropped because its body already sits active in
+// scope. Same shape as secretSkip: the drop has to leave a trace naming both the
+// block and what it matched, or an operator sees only a smaller result.
+func identicalSkip(res *ApplyResult, source, match string) {
+	res.Skipped = append(res.Skipped, Skipped{
+		Source: source,
+		Reason: "identical to active " + match,
+	})
+}
+
 func secretSkip(res *ApplyResult, source string, parts ...string) bool {
 	for _, p := range parts {
 		if err := policy.ScanSecrets(p); err != nil {
@@ -804,18 +817,23 @@ func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgty
 	return ids, teamScopeID, leaf, leafTeam, nil
 }
 
-func identicalActive(body string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) bool {
+// identicalActive reports whether this body already sits active anywhere in the
+// scope chain, and names the row it matched. The match is on body text alone,
+// deliberately: narrowing it to the key would change which blocks are admitted.
+// The name is what makes the resulting drop auditable — a skipped block with no
+// record of what displaced it is Gotcha 6's silent shrink.
+func identicalActive(body string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) (string, bool) {
 	for _, r := range ins {
 		if r.Body == body {
-			return true
+			return "instruction " + r.Key, true
 		}
 	}
 	for _, r := range pref {
 		if r.Body == body {
-			return true
+			return "preference " + r.Key, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func blockOnMachine(b Block, machine string) bool {
