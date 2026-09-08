@@ -648,7 +648,10 @@ func TestReviewDecideDoesNotActivateAnotherTeamsIdenticalBody(t *testing.T) {
 	decideReview(t, srv, indentID,
 		"-decision", "approved", "-reason", "mac indent", "-hostname", "mac", "-commit")
 
-	aliceSpaces := countBodyStatusAs(t, dsn, w.leadP, "preference", "Prefer spaces.", w.teamA)
+	// Read back as alice, not as the deciding lead: an imported preference is
+	// owner-visible (#86), so the lead's own session cannot see the row it
+	// just activated.
+	aliceSpaces := countBodyStatusAs(t, dsn, w.aliceP, "preference", "Prefer spaces.", w.teamA)
 	if aliceSpaces["active"] != 1 {
 		t.Fatalf("team-A lead decide did not activate Prefer spaces. under the owning principal; %#v", aliceSpaces)
 	}

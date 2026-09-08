@@ -222,6 +222,15 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 			return 0, fmt.Errorf("review decide: unknown kind %q", kind)
 		}
 	}
+	// A kind flip needs to know the row it is flipping exists. The
+	// ListBodies lookups above run under the decider's RLS session, and an
+	// imported preference is owner-visible (#86), so a lead flipping someone
+	// else's row sees nothing there. The retire pass just above runs through
+	// the SECURITY DEFINER review_apply_* functions, which do see it, so its
+	// row counts are the authoritative existence signal. The flipped row's
+	// key still falls back to decideKey's hash form in that case, because the
+	// original key is only readable through the same blocked lookup.
+	retired := map[string]bool{}
 	for _, r := range out.Retire {
 		n, err := apply(r.Kind, r.Body, store.InstructionStatusRetired)
 		if err != nil {
@@ -229,6 +238,9 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 		}
 		if n > 1 {
 			return fmt.Errorf("review decide: matched %d %s rows for body", n, r.Kind)
+		}
+		if n == 1 {
+			retired[r.Kind+"\x00"+r.Body] = true
 		}
 	}
 	for _, r := range out.Activate {
@@ -242,8 +254,8 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 		if n == 1 {
 			continue
 		}
-		_, insOK := insByBody[r.Body]
-		_, prefOK := prefByBody[r.Body]
+		insOK := hasBody(insByBody, r.Body) || retired["instruction\x00"+r.Body]
+		prefOK := hasBody(prefByBody, r.Body) || retired["preference\x00"+r.Body]
 		otherExists := (r.Kind == "instruction" && prefOK) || (r.Kind == "preference" && insOK)
 		if !otherExists {
 			return fmt.Errorf("review decide: matched no row")
@@ -317,6 +329,11 @@ func preferenceScope(ctx context.Context, q *store.Queries, leaf uuid.UUID) (uui
 		id = uuid.UUID(row.ParentID.Bytes)
 	}
 	return uuid.Nil, fmt.Errorf("review decide: no team/org/user ancestor of %s", leaf)
+}
+
+func hasBody[T any](m map[string]T, body string) bool {
+	_, ok := m[body]
+	return ok
 }
 
 func keyForBody(body string, ins map[string]store.ListInstructionsByBodiesRow, pref map[string]store.ListPreferencesByBodiesRow) string {
