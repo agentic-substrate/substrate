@@ -411,6 +411,55 @@ func TestIdentifierHitOutranksKeyword(t *testing.T) {
 	}
 }
 
+// TestSearchScopeRemainsExactMatch locks the MCP memory.search wire contract:
+// Scope filters to one scope_id. Chain filtering is ScopeIDs only (#82).
+func TestSearchScopeRemainsExactMatch(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	admin := *w.aliceP
+	admin.Trust = identity.TrustHumanAdmin
+	adminCtx := identity.WithPrincipal(t.Context(), &admin)
+
+	globalIn := aliceWrite(w)
+	globalIn.Scope = "global:"
+	globalIn.Visibility = "global"
+	globalIn.Title = "exact-scope-ancestor"
+	globalIn.Identifiers = []string{"exact-scope-token"}
+	if _, err := svc.Write(adminCtx, globalIn); err != nil {
+		t.Fatalf("global write: %v", err)
+	}
+	leaf := aliceWrite(w)
+	leaf.Title = "exact-scope-leaf"
+	leaf.Identifiers = []string{"exact-scope-token"}
+	leaf.Visibility = "global"
+	if _, err := svc.Write(ctx, leaf); err != nil {
+		t.Fatalf("leaf write: %v", err)
+	}
+
+	out, err := svc.Search(ctx, SearchIn{Query: "exact-scope-token", Scope: w.path, Limit: 20})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	foundLeaf, foundAncestor := false, false
+	for _, h := range out.Results {
+		switch h.Title {
+		case "exact-scope-leaf":
+			foundLeaf = true
+		case "exact-scope-ancestor":
+			foundAncestor = true
+		}
+	}
+	if !foundLeaf {
+		t.Fatal("exact Scope search missing the leaf memory")
+	}
+	if foundAncestor {
+		t.Fatal("exact Scope search returned an ancestor; MCP single-scope filter must stay exact (#82)")
+	}
+}
+
 func TestSearchReturnsWithinTwoSecondsWithoutEmbeddings(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)

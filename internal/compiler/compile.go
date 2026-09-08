@@ -61,10 +61,11 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 
 	if s.mem != nil && len(req.Files) > 0 {
 		q := strings.Join(req.Files, " ")
-		// Scope must be set before the search clamp (MEM-3): ranking without it
-		// lets unrelated projects fill the cap and crowd out applicable hits (#82).
+		// Pass the same chain filterHits will see (SCOPE-1 / #82). Ranking
+		// without it lets unrelated projects fill the clamp; an exact leaf
+		// scope drops ancestors that filterHits would keep.
 		out, err := s.mem.Search(ctx, memory.SearchIn{
-			Query: q, Scope: req.Scope.String(), Limit: memory.MaxSearchLimit,
+			Query: q, Scope: req.Scope.String(), ScopeIDs: chain, Limit: memory.MaxSearchLimit,
 		})
 		if err != nil {
 			return Pack{}, err

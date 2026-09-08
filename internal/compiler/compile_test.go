@@ -734,10 +734,40 @@ func TestCompileKeepsTargetScopeMemoriesWhenUnrelatedFillSearchCap(t *testing.T)
 	}
 }
 
-// TestSearchScopeFilterAgreesWithFilterHits asserts the query-time scope filter
-// and filterHits keep the same set: every scoped Search hit survives filterHits,
-// and an out-of-chain hit does not. Seeds a team-visible row so a missing
-// substrate.* session cannot false-green on global-only fixtures.
+// TestCompileIncludesAncestorScopedMemories guards SCOPE-1 inheritance: a
+// memory at global: must remain a candidate when compiling for a leaf beneath
+// it. Passing only the leaf scope_id into Search would drop ancestors (#82).
+func TestCompileIncludesAncestorScopedMemories(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, st := openCompiler(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	mem := memory.New(func() *store.Store { return st })
+
+	const ident = "inherit-token"
+	admin := *w.aliceP
+	admin.Trust = identity.TrustHumanAdmin
+	adminCtx := identity.WithPrincipal(t.Context(), &admin)
+	writeCompileMemory(adminCtx, t, mem, "global:", "ancestor-global-memory", ident, "global")
+	writeCompileMemory(ctx, t, mem, w.pathStr, "leaf-scope-memory", ident, "global")
+	writeCompileMemory(ctx, t, mem, w.pathStr, "leaf-team-visible-memory", ident, "team")
+
+	pack, err := svc.Compile(ctx, Request{Scope: w.path, Files: []string{ident}, Budget: tok(12000)})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	memSec := sectionBody(pack.Markdown, "Memories")
+	for _, title := range []string{"ancestor-global-memory", "leaf-scope-memory", "leaf-team-visible-memory"} {
+		if !strings.Contains(memSec, title) {
+			t.Fatalf("memory %q missing from pack; ancestor-chain search must keep global: and leaf (#82 / SCOPE-1):\n%s", title, memSec)
+		}
+	}
+}
+
+// TestSearchScopeFilterAgreesWithFilterHits asserts the query-time chain filter
+// and filterHits keep the same set: every ScopeIDs Search hit survives
+// filterHits, and an out-of-chain hit does not. Seeds a team-visible row so a
+// missing substrate.* session cannot false-green on global-only fixtures.
 func TestSearchScopeFilterAgreesWithFilterHits(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
@@ -750,6 +780,10 @@ func TestSearchScopeFilterAgreesWithFilterHits(t *testing.T) {
 	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
 
 	const ident = "agree-token"
+	admin := *w.aliceP
+	admin.Trust = identity.TrustHumanAdmin
+	adminCtx := identity.WithPrincipal(t.Context(), &admin)
+	writeCompileMemory(adminCtx, t, mem, "global:", "agree-ancestor-global", ident, "global")
 	writeCompileMemory(ctx, t, mem, w.pathStr, "agree-target-global", ident, "global")
 	writeCompileMemory(ctx, t, mem, w.pathStr, "agree-target-team", ident, "team")
 
@@ -769,26 +803,6 @@ func TestSearchScopeFilterAgreesWithFilterHits(t *testing.T) {
 	}.String()
 	writeCompileMemory(ctx, t, mem, otherPath, "agree-unrelated", ident, "global")
 
-	out, err := mem.Search(ctx, memory.SearchIn{Query: ident, Scope: w.pathStr, Limit: 100})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(out.Results) == 0 {
-		t.Fatal("scoped Search returned no hits; cannot assert agreement with filterHits")
-	}
-	foundTeam := false
-	for _, h := range out.Results {
-		if strings.Contains(h.Title, "agree-target-team") || h.Title == "agree-target-team" {
-			foundTeam = true
-		}
-		if h.Title == "agree-unrelated" {
-			t.Fatal("scoped Search returned a sibling-project hit; query filter and filterHits cannot agree")
-		}
-	}
-	if !foundTeam {
-		t.Fatal("team-visible target missing from scoped Search; global-only fixtures false-green when RLS session settings are absent")
-	}
-
 	var chain []uuid.UUID
 	if err := st.TxChecked(ctx, "context.get", w.path, func(tx pgx.Tx) error {
 		var err error
@@ -801,9 +815,34 @@ func TestSearchScopeFilterAgreesWithFilterHits(t *testing.T) {
 		t.Fatal("empty scope chain")
 	}
 
+	out, err := mem.Search(ctx, memory.SearchIn{Query: ident, ScopeIDs: chain, Limit: 100})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(out.Results) == 0 {
+		t.Fatal("chain Search returned no hits; cannot assert agreement with filterHits")
+	}
+	foundTeam, foundAncestor := false, false
+	for _, h := range out.Results {
+		switch h.Title {
+		case "agree-target-team":
+			foundTeam = true
+		case "agree-ancestor-global":
+			foundAncestor = true
+		case "agree-unrelated":
+			t.Fatal("chain Search returned a sibling-project hit; query filter and filterHits cannot agree")
+		}
+	}
+	if !foundTeam {
+		t.Fatal("team-visible target missing from chain Search; global-only fixtures false-green when RLS session settings are absent")
+	}
+	if !foundAncestor {
+		t.Fatal("ancestor global memory missing from chain Search; ScopeIDs must use ANY(chain) not exact leaf")
+	}
+
 	kept := filterHits(out.Results, chain)
 	if len(kept) != len(out.Results) {
-		t.Fatalf("filterHits dropped %d of %d scoped Search hits; query filter and filterHits disagree",
+		t.Fatalf("filterHits dropped %d of %d chain Search hits; query filter and filterHits disagree",
 			len(out.Results)-len(kept), len(out.Results))
 	}
 
