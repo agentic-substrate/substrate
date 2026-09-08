@@ -3,39 +3,28 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/agentic-substrate/substrate/internal/cutover"
 )
 
-// splitHookCommand splits a command string on spaces, honouring the single
-// quoting hookCommand uses. Only as clever as that quoting is.
+// splitHookCommand splits the command string the way the harness does: with a
+// real shell. A hand-rolled splitter here would encode the same quoting
+// assumption the production shellQuote does, so a bug in one would be hidden
+// by the matching bug in the other -- and a naive one is measurably wrong on
+// the `'\”` escape shellQuote emits for an apostrophe.
 func splitHookCommand(t *testing.T, cmd string) []string {
 	t.Helper()
-	var args []string
-	var cur strings.Builder
-	inQuote, pending := false, false
-	for _, r := range cmd {
-		switch {
-		case r == '\'':
-			inQuote = !inQuote
-			pending = true
-		case r == ' ' && !inQuote:
-			if pending {
-				args = append(args, cur.String())
-				cur.Reset()
-				pending = false
-			}
-		default:
-			cur.WriteRune(r)
-			pending = true
-		}
+	//nolint:gosec // cmd is the command this test just had the installer write
+	out, err := exec.Command("sh", "-c", "printf '%s\\0' "+cmd).Output()
+	if err != nil {
+		t.Fatalf("splitting %q with sh: %v", cmd, err)
 	}
-	if pending {
-		args = append(args, cur.String())
-	}
-	return args
+	fields := strings.Split(string(out), "\x00")
+	return fields[:len(fields)-1] // trailing empty after the final NUL
 }
 
 // installedHookArgv returns the argv the installer actually wrote, minus the
@@ -121,6 +110,33 @@ func TestInstalledHookCommandSurvivesAwkwardHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv := installedHookArgv(t, home)
+
+	var stderr strings.Builder
+	if code := hookCmd(argv, strings.NewReader(hookJSON(t, cwd)), &stderr); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if n := outboxDepth(t, home); n != 1 {
+		t.Fatalf("argv %q enqueued %d, want 1; stderr: %s", argv, n, stderr.String())
+	}
+}
+
+// The quoting case a hand-rolled splitter gets wrong: an apostrophe in the home
+// path. shellQuote emits the four-character `'\”` escape for it, and only a
+// real shell reassembles that into a single argument.
+func TestInstalledHookCommandSurvivesAnApostropheHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "o'brien")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := checkout(t, "git@github.com:unrounded/api.git")
+
+	if err := cutover.InstallClaudeHooks(home, "/opt/substrate-adapter"); err != nil {
+		t.Fatal(err)
+	}
+	argv := installedHookArgv(t, home)
+	if argv[len(argv)-1] != home {
+		t.Fatalf("home reached the shim as %q, want %q", argv[len(argv)-1], home)
+	}
 
 	var stderr strings.Builder
 	if code := hookCmd(argv, strings.NewReader(hookJSON(t, cwd)), &stderr); code != 0 {

@@ -15,7 +15,7 @@ func writeSettingsFile(t *testing.T, home, body string) string {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil { //nolint:gosec // path is ClaudeSettingsPath under t.TempDir()
 		t.Fatal(err)
 	}
 	return path
@@ -206,8 +206,8 @@ func TestRemoveClaudeHooksRestoresOriginal(t *testing.T) {
 	if ClaudeHooksInstalled(home) {
 		t.Fatal("ClaudeHooksInstalled is true after restore")
 	}
-	if _, err := os.Lstat(path + BackupSuffix); !os.IsNotExist(err) {
-		t.Fatalf("the backup was left behind after restore: %v", err)
+	if _, err := os.Lstat(path + BackupSuffix); err != nil {
+		t.Fatalf("the pre-Substrate archive was deleted on restore: %v", err)
 	}
 }
 
@@ -385,9 +385,11 @@ func TestRemoveClaudeHooksKeepsEditsMadeSinceInstall(t *testing.T) {
 	}
 }
 
-// When the user changed nothing, the backup carries no information and is
-// cleaned up, so uninstall leaves no litter behind in the common case.
-func TestRemoveClaudeHooksDropsARedundantBackup(t *testing.T) {
+// The pre-Substrate copy is kept even when the user changed nothing, because
+// install rewrites the document (writeSettings sorts and reindents), so the
+// copy is the only record of their original formatting and key order. Deleting
+// it on a semantic "these match" check would discard that in the common case.
+func TestRemoveClaudeHooksKeepsThePreSubstrateArchive(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFile(t, home, "{\n  \"model\": \"sonnet\"\n}\n")
 
@@ -400,7 +402,82 @@ func TestRemoveClaudeHooksDropsARedundantBackup(t *testing.T) {
 	if got := readJSON(t, ClaudeSettingsPath(home)); got["model"] != "sonnet" {
 		t.Fatalf("model is %v, want sonnet", got["model"])
 	}
-	if _, err := os.Lstat(ClaudeSettingsPath(home) + BackupSuffix); !os.IsNotExist(err) {
-		t.Fatalf("a redundant backup was left behind: %v", err)
+	if _, err := os.Lstat(ClaudeSettingsPath(home) + BackupSuffix); err != nil {
+		t.Fatalf("the pre-Substrate archive was deleted: %v", err)
+	}
+}
+
+// Idempotency must not mean "never repair". isOurs matches on the subcommand
+// alone, so an entry installed by an older build -- one that wrote the command
+// with no -home and captured nothing -- is recognised as ours and, before this
+// fix, left exactly as it was. Re-installing reported success and the hook
+// stayed inert forever, so the fix reached nobody who already had the bug. The
+// same holds when home or the binary path changes: the entry then names a
+// binary that does not exist and every tool call pays a failed exec.
+//
+// One-line production change that makes this go red: set found = true on any
+// isOurs entry in mergeHookEntry, rather than only on one that already matches
+// the command we would write.
+func TestInstallRepairsAStaleHookEntry(t *testing.T) {
+	home := t.TempDir()
+	stale := `{
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "/old/substrate-adapter hook posttooluse", "timeout": 2}]}
+    ]
+  }
+}
+`
+	path := writeSettingsFile(t, home, stale)
+
+	if err := InstallClaudeHooks(home, "/opt/substrate-adapter"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := hookCommand("/opt/substrate-adapter", home)
+	body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), want) {
+		t.Fatalf("a stale hook entry was not repaired; settings.json is:\n%s\nwant a command %q", body, want)
+	}
+	if strings.Contains(string(body), "/old/substrate-adapter") {
+		t.Fatalf("the stale command survived alongside the repaired one:\n%s", body)
+	}
+	if n := countOurEntries(t, path)["PostToolUse"]; n != 1 {
+		t.Fatalf("PostToolUse has %d entries naming the shim, want exactly 1:\n%s", n, body)
+	}
+}
+
+// The same repair when only home moves, which is the upgrade path for a
+// machine whose layout changed. Installing twice at the same home must still
+// be a byte-identical no-op -- that is asserted by
+// TestInstallClaudeHooksIsIdempotentAndPreservesUnrelatedKeys.
+func TestInstallRewritesTheEntryWhenHomeChanges(t *testing.T) {
+	first := t.TempDir()
+	if err := InstallClaudeHooks(first, "adapter"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the same settings.json arriving at a new home path.
+	body, err := os.ReadFile(ClaudeSettingsPath(first)) //nolint:gosec // path is under t.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := t.TempDir()
+	path := writeSettingsFile(t, second, string(body))
+
+	if err := InstallClaudeHooks(second, "adapter"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), shellQuote(first)) {
+		t.Fatalf("the entry still names the old home %q:\n%s", first, got)
+	}
+	if !strings.Contains(string(got), shellQuote(second)) {
+		t.Fatalf("the entry does not name the new home %q:\n%s", second, got)
 	}
 }

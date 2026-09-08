@@ -1,12 +1,11 @@
 package cutover
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -121,45 +120,35 @@ func RemoveClaudeHooks(home string) error {
 		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
 			return fmt.Errorf("cutover: remove %s: %w", path, rmErr)
 		}
-		return dropBackupIfRedundant(path, nil)
+		reportRetainedBackup(path)
+		return nil
 	}
 	if err := writeSettings(path, doc); err != nil {
 		return err
 	}
-	live, rerr := os.ReadFile(path) //nolint:gosec // path is <home>/.claude/settings.json
-	if rerr != nil {
-		return fmt.Errorf("cutover: read %s: %w", path, rerr)
-	}
-	return dropBackupIfRedundant(path, live)
+	reportRetainedBackup(path)
+	return nil
 }
 
-// dropBackupIfRedundant removes the *.pre-substrate copy only when the live
-// file now says the same thing it does -- i.e. the user changed nothing while
-// Substrate was installed, so the backup carries no information. The comparison
-// is semantic: surgical removal reserialises the document, so the bytes differ
-// even when the settings do not.
+// reportRetainedBackup tells the operator the pre-Substrate copy is still on
+// disk. The backup is never deleted and never written back over the live file.
 //
-// It is never used to *overwrite* the live file. settings.json is the only
-// user-owned mutable file Substrate touches, and restoring a backup verbatim
-// would silently discard every edit made since install. Removal is surgical:
-// our entry goes, everything else the user wrote stays. When the two differ the
-// backup is deliberately left behind as the user's pre-Substrate archive.
-func dropBackupIfRedundant(path string, live []byte) error {
+// Not deleted, because install rewrites the document -- writeSettings sorts the
+// top-level keys and reindents -- so the copy is the only record of the user's
+// own formatting and key order, and of any duplicate key JSON decoding
+// collapsed. A semantic "they match, so drop it" check would throw that away in
+// the common case while looking correct.
+//
+// Not written back, because the user may have edited settings.json since
+// install and a verbatim restore would discard that silently. Removal is
+// surgical instead: our entry goes, everything else the user wrote stays.
+func reportRetainedBackup(path string) {
 	backup := path + BackupSuffix
-	body, err := os.ReadFile(backup) //nolint:gosec // path is <home>/.claude/settings.json.pre-substrate
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("cutover: read %s: %w", backup, err)
+	if _, err := os.Lstat(backup); err != nil {
+		return
 	}
-	if !sameSettings(body, live) {
-		return nil
-	}
-	if rmErr := os.Remove(backup); rmErr != nil && !os.IsNotExist(rmErr) {
-		return fmt.Errorf("cutover: remove %s: %w", backup, rmErr)
-	}
-	return nil
+	slog.Info("your pre-Substrate settings were left in place; delete it when you no longer want it",
+		"backup", backup)
 }
 
 // ClaudeHooksInstalled reports whether settings.json currently names the shim.
@@ -292,13 +281,37 @@ func mergeHookEntry(doc settings, command string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		found := false
+		// An entry of ours that does not match the command we would write is
+		// repaired in place, not left alone. isOurs matches the subcommand
+		// only, so a stale entry -- one written by a build that omitted -home
+		// and captured nothing, or one naming a home or binary that has since
+		// moved -- would otherwise be treated as already installed and stay
+		// broken forever, with install reporting success. An entry that
+		// already matches is left byte-identical, so installing twice is still
+		// a no-op.
+		found, repaired := false, false
 		for _, g := range groups {
-			for _, e := range g.Hooks {
-				if isOurs(e.Command) {
-					found = true
+			for i, e := range g.Hooks {
+				if !isOurs(e.Command) {
+					continue
+				}
+				found = true
+				if e.Command != command {
+					g.Hooks[i].Command = command
+					g.Hooks[i].Type = "command"
+					g.Hooks[i].Timeout = HookTimeoutSeconds
+					repaired = true
 				}
 			}
+		}
+		if repaired {
+			raw, err := json.Marshal(groups)
+			if err != nil {
+				return false, err
+			}
+			byEvent[ev] = raw
+			changed = true
+			continue
 		}
 		if found {
 			continue
@@ -428,20 +441,4 @@ func jsonIndent(b *strings.Builder, raw json.RawMessage) error {
 	}
 	b.Write(out)
 	return nil
-}
-
-// sameSettings reports whether two settings.json bodies carry the same
-// document. A live file that is gone (nil) matches only an empty backup.
-func sameSettings(backup, live []byte) bool {
-	if len(bytes.TrimSpace(live)) == 0 {
-		return len(bytes.TrimSpace(backup)) == 0
-	}
-	var a, b any
-	if err := json.Unmarshal(backup, &a); err != nil {
-		return false
-	}
-	if err := json.Unmarshal(live, &b); err != nil {
-		return false
-	}
-	return reflect.DeepEqual(a, b)
 }
