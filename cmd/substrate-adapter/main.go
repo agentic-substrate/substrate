@@ -22,6 +22,11 @@ import (
 )
 
 func main() {
+	// The hook shim is dispatched before flag parsing: it has its own flags,
+	// its own 2s deadline, and it always exits 0.
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		os.Exit(hookCmd(os.Args[2:], os.Stdin, os.Stderr))
+	}
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("adapter exited", "err", err)
 		os.Exit(1)

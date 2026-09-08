@@ -17,6 +17,11 @@ import (
 // that makes the drain idempotent (EDD R7/R17, Gotcha 10).
 type BatchItem struct {
 	ClientID string `json:"client_id"`
+	// Repo is a repo scope key offered instead of Scope. The transport layer
+	// resolves it to the chain the server bound it to and clears it before
+	// Batch runs; a Repo still set here would mean an unresolved item, so the
+	// service rejects it rather than silently writing at Scope.
+	Repo string `json:"repo"`
 	WriteIn
 }
 
@@ -56,6 +61,9 @@ func (s *Service) batchOne(ctx context.Context, st *store.Store, p *identity.Pri
 	cid, err := uuid.Parse(item.ClientID)
 	if err != nil {
 		return BatchResult{}, fmt.Errorf("memory.batch: client_id: %w", err)
+	}
+	if item.Repo != "" {
+		return BatchResult{}, fmt.Errorf("memory.batch: repo was not resolved to a scope")
 	}
 	prep, err := prepareWrite(ctx, item.WriteIn)
 	if err != nil {

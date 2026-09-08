@@ -44,6 +44,9 @@ func planRestore(req Request) (*Report, error) {
 		Unit:      &spec,
 		Uninstall: true,
 	}
+	if spec.Home != "" {
+		rep.HookSettings = ClaudeSettingsPath(spec.Home)
+	}
 	seenJournal := map[string]struct{}{}
 	var journaled []string
 	for _, root := range req.Roots {
@@ -285,6 +288,14 @@ func applyRestore(rep *Report, inst UnitInstaller) error {
 		}
 		dir := filepath.Dir(jp)
 		_ = os.Remove(dir) // only succeeds if empty; leftover adapter state stays
+	}
+	// Before the unit goes away, not after: a settings.json left naming the
+	// shim would make every tool call in every session exec a binary that is
+	// no longer installed.
+	if rep.HookSettings != "" && rep.Unit != nil {
+		if err := RemoveClaudeHooks(rep.Unit.Home); err != nil {
+			return err
+		}
 	}
 	if inst == nil {
 		return fmt.Errorf("cutover: unit installer is required")

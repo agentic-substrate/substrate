@@ -47,6 +47,9 @@ func planCutover(req Request) (*Report, error) {
 		Unit:    &spec,
 		Install: true,
 	}
+	if spec.Home != "" {
+		rep.HookSettings = ClaudeSettingsPath(spec.Home)
+	}
 	for _, f := range req.Files {
 		if err := classifyReplacement(req.Roots, f, rep); err != nil {
 			return nil, err
@@ -202,6 +205,11 @@ func applyCutover(rep *Report, req Request) error {
 	spec := UnitSpec{}
 	if rep.Unit != nil {
 		spec = *rep.Unit
+	}
+	if rep.HookSettings != "" {
+		if err := InstallClaudeHooks(spec.Home, spec.Binary); err != nil {
+			return errWithPlan(rep, err)
+		}
 	}
 	if err := req.Installer.Install(spec); err != nil {
 		return errWithPlan(rep, err)

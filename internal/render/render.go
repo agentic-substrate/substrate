@@ -57,7 +57,13 @@ type EffectiveConfig struct {
 }
 
 // ClaudeBlock is the hooks reminder under ## Claude-specific (EDD §6).
-const ClaudeBlock = "SessionStart and PostToolUse hooks are installed by the Substrate adapter. They must exit in under 2 seconds; if the server is unreachable, continue from the local cache. Do not skip them."
+//
+// It may name only hooks the adapter actually installs. A generated file that
+// claims a capability absent from the machine reading it is worse than a
+// missing feature: absent, an agent would not depend on it (#61). The
+// agreement is enforced by a test that derives the installed set from the
+// installer, so the sentence and the installer cannot drift apart.
+const ClaudeBlock = "A PostToolUse hook installed by the Substrate adapter records each tool call — tool, files, exit status — to a local outbox. It exits in under 2 seconds and, when the server is unreachable, leaves the observation queued locally rather than failing the tool call. Do not disable it."
 
 // Spec is one target and the paths the adapter writes it to.
 type Spec struct {
