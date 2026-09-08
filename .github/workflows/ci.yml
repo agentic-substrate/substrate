@@ -35,6 +35,23 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # The committed manifests must still be fully un-substituted. A
+      # tag-shaped literal (`ko.local/substrate-server:latest`) is
+      # indistinguishable from an already-substituted value, so neither the
+      # secret scanner nor a YAML test catches it — it applies cleanly and
+      # lands in ImagePullBackOff. Cheap, and it runs before the Go tests so
+      # the signal is unambiguous.
+      - name: deploy placeholders (committed state)
+        run: scripts/check-deploy-placeholders.sh --committed deploy
+
+      # The sibling gate. This scanner was added by the same PR as the one
+      # above, was referenced by CONTRIBUTING.md, the runbook and a Go test —
+      # and was never wired in as a gate, so a PR committing a filled
+      # SUBSTRATE_DSN or a MinIO access key passed CI. A scanner that does not
+      # run is a scanner that does not exist.
+      - name: deploy secrets
+        run: scripts/check-deploy-secrets.sh deploy
+
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2

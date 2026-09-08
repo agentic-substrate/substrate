@@ -1,0 +1,161 @@
+# OTel collector for Phase 1. Stood up as part of issue #27 after this PR's
+# work began: deploy/alerts.yaml describes rules over substrate_* metrics, and
+# without something that receives OTLP and exposes those series to Prometheus
+# the alert rules reference metrics nothing exports.
+#
+# substrate-server exports OTLP/HTTP (see cmd/substrate-server -otlp). Export is
+# best-effort: a collector outage must not fail a request, and an empty
+# SUBSTRATE_OTLP_ENDPOINT disables export entirely (supported, not degraded).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+data:
+  collector.yaml: |
+    # Metrics only. The prometheus exporter is a metrics-only component: a
+    # `traces` pipeline that names it fails config validation at startup
+    # ("telemetry type is not supported"), the process exits non-zero, and the
+    # Deployment sits in CrashLoopBackOff forever. There is no trace backend in
+    # the homelab yet, so traces are NOT exported: the OTLP receiver only
+    # registers /v1/metrics, and substrate-server's trace export gets a 404.
+    # That is best-effort and logged once (it never fails a request). When a
+    # trace backend exists, add it as an exporter and add a traces pipeline
+    # here — do not point traces at `prometheus`.
+    extensions:
+      # Liveness target. The prometheus exporter's HTTP server serves /metrics
+      # and 404s on /, and kubelet treats >=400 as a probe failure, so probing
+      # the exporter's port at / kills the pod every period.
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      # Bounded queue. An unbounded batcher turns a Prometheus outage into an
+      # OOMKill of the collector.
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+    exporters:
+      # Prometheus scrapes :8889/metrics. substrate_* names arrive already
+      # prefixed (AGENTS.md translates the EDD's acp_*), so no namespace is
+      # added here — adding one would rename every series out from under
+      # deploy/alerts.yaml.
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        # Off on purpose, and load-bearing. The instrument names in
+        # internal/observe already carry their suffixes
+        # (substrate_render_drift_total is an Int64Counter,
+        # substrate_tool_latency_seconds carries WithUnit("s")). With the
+        # default `true` the exporter appends type and unit suffixes, and
+        # whether it de-duplicates an already-present suffix has changed
+        # between collector releases — `substrate_render_drift_total_total`
+        # would silently break SubstrateDriftProposals in deploy/alerts.yaml.
+        # False means the scraped name is exactly the instrument name.
+        add_metric_suffixes: false
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheus]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: substrate-otel-collector
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          # otel/opentelemetry-collector-contrib, pinned by digest. Substitute.
+          image: "<otel-collector-image-digest>"
+          args: ["--config=/conf/collector.yaml"]
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+            - name: prom
+              containerPort: 8889
+            - name: healthz
+              containerPort: 13133
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # health_check extension, not the exporter: / on the prometheus
+          # port is a 404 and would restart this pod every period.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: healthz
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: healthz
+            periodSeconds: 10
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: conf
+          configMap:
+            name: substrate-otel-collector
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: substrate-otel-collector
+  namespace: substrate
+  labels:
+    app.kubernetes.io/name: substrate-otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: substrate-otel-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: prom
+      port: 8889
+      targetPort: prom

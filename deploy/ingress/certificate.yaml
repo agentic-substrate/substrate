@@ -1,0 +1,46 @@
+# NOT applied by default — deploy/kustomization.yaml deliberately omits this
+# file, because cert-manager cannot issue for a tailnet name.
+#
+# `substrate.<tailnet>` is a MagicDNS tailnet host. It is not publicly reachable, so
+# the HTTP-01 challenge can never be answered, and Tailscale DNS is not one of
+# cert-manager's DNS-01 providers. Point this at a normal Let's Encrypt
+# ClusterIssuer and the Certificate sits Ready=False forever, the substrate-tls
+# Secret is never created, and Traefik silently falls back to its self-signed
+# default certificate — TLS "works" in the browser-warning sense and nothing
+# alerts.
+#
+# Use one of the two mechanisms in the runbook ("TLS for the tailnet host")
+# instead:
+#
+#   1. `tailscale cert` (what a tailnet host is for). Tailscale issues a real
+#      Let's Encrypt certificate for the node's MagicDNS name over its own
+#      challenge path, and the operator loads it into the Secret Traefik
+#      already references:
+#        tailscale cert --cert-file tls.crt --key-file tls.key substrate.<tailnet>
+#        kubectl create secret tls substrate-tls -n substrate \
+#          --cert=tls.crt --key=tls.key --dry-run=client -o yaml | kubectl apply -f -
+#      Renewal is manual unless the operator scripts it; certificates are
+#      90-day, so alert on days-to-expiry (< 14d) or this becomes a 00:00 UTC
+#      outage.
+#
+#   2. An internal CA. Create a cert-manager Issuer of kind CA (or a Vault /
+#      step-ca issuer) whose root is distributed to the clients that call
+#      /mcp and /v1, then this manifest works as written — substitute the
+#      issuer name and add it to kustomization.yaml resources.
+#
+# Left in the tree, unapplied, because option 2 makes it correct as-is and the
+# secretName must match ingressroute.yaml either way.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: substrate-tls
+  namespace: substrate
+spec:
+  secretName: substrate-tls
+  dnsNames:
+    - substrate.<tailnet>
+  issuerRef:
+    # Must be an internal CA issuer. A public ACME issuer cannot validate a
+    # tailnet name; see the header.
+    name: "<internal-ca-cluster-issuer>"
+    kind: ClusterIssuer

@@ -1,0 +1,75 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: substrate-pg
+  namespace: substrate
+spec:
+  instances: 1
+  # Built from deploy/cnpg/Dockerfile. Substitute the image the operator loaded.
+  imageName: "<substrate-pg-image>"
+  # enableSuperuserAccess is deliberately absent. CNPG defaults it to false and
+  # that default is the right one: nothing at runtime connects as `postgres`.
+  # The application DSN uses the CNPG-generated `substrate-pg-app` secret (user
+  # `app`, the initdb owner); the migrate/app roles are SET ROLE targets. A
+  # superuser password that exists is a superuser password that ends up in a
+  # DSN. Local `psql -U postgres` via `kubectl exec` still works (peer auth on
+  # the unix socket), which is all the restore job needs.
+  # Resource floor for the database. Memory request == limit: Postgres cannot
+  # be squeezed, and BestEffort QoS would make the database the kubelet's first
+  # eviction victim on this single node. No CPU limit — CFS throttling on a
+  # checkpoint is a latency incident, and the request is what reserves capacity.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      memory: 1Gi
+  bootstrap:
+    initdb:
+      database: substrate
+      owner: app
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        - CREATE EXTENSION IF NOT EXISTS ltree;
+  managed:
+    roles:
+      - name: substrate_migrate
+        ensure: present
+        login: false
+        superuser: false
+        createdb: false
+        createrole: false
+        inherit: true
+        bypassrls: false
+      - name: substrate_app
+        ensure: present
+        login: false
+        superuser: false
+        createdb: false
+        createrole: false
+        inherit: true
+        bypassrls: false
+  storage:
+    storageClass: longhorn
+    size: 20Gi
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://substrate-backups/
+      endpointURL: "http://<minio-service>.<minio-namespace>.svc.cluster.local:9000"
+      s3Credentials:
+        accessKeyId:
+          name: substrate-backups-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: substrate-backups-s3
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+        encryption: AES256
+      data:
+        compression: gzip
+        encryption: AES256
+        jobs: 1
+        immediateCheckpoint: false

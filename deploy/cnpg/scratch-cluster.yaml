@@ -1,0 +1,43 @@
+# Applied by the weekly restore CronJob (and once by hand before that job is
+# armed). Not in deploy/kustomization.yaml resources — a default apply must
+# not create a second Longhorn volume.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: substrate-pg-scratch
+  namespace: substrate
+spec:
+  instances: 1
+  imageName: "<substrate-pg-image>"
+  # Bounded so a weekly barman-cloud-restore cannot starve the neighbouring
+  # workloads on this node. Smaller than production: this cluster only has to
+  # come up far enough to be counted, then it is deleted.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    recovery:
+      source: substrate-pg
+  externalClusters:
+    - name: substrate-pg
+      barmanObjectStore:
+        destinationPath: s3://substrate-backups/
+        endpointURL: "http://<minio-service>.<minio-namespace>.svc.cluster.local:9000"
+        serverName: substrate-pg
+        s3Credentials:
+          accessKeyId:
+            name: substrate-backups-s3
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: substrate-backups-s3
+            key: ACCESS_SECRET_KEY
+        wal:
+          encryption: AES256
+        data:
+          encryption: AES256
+  storage:
+    storageClass: longhorn
+    size: 20Gi

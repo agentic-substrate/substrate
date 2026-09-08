@@ -209,3 +209,51 @@ func mustAlert(t *testing.T, groups []AlertGroup, name string) AlertRule {
 	t.Fatalf("alert %q not in deploy/alerts.yaml", name)
 	return AlertRule{}
 }
+
+// The weekly restore CronJob ships `suspend: true` so it cannot fire before
+// the operator has verified a restore by hand — and any routine
+// `kubectl apply -k deploy/` silently sets it back to true. That was
+// documented in two places and observed by nothing: alerts.yaml had no rule on
+// suspension, on last-success staleness, or on job failure, so the guardrail
+// could be disarmed by an unrelated apply and nobody would know. A backup
+// verification nobody is watching is not verification.
+//
+// Red when: any of these three rules is removed or stops naming the CronJob.
+func TestBackupVerificationIsObserved(t *testing.T) {
+	path := filepath.Join(alertsRepoRoot(), "deploy", "alerts.yaml")
+	raw, err := os.ReadFile(path) //nolint:gosec // repo fixture
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	groups, err := ParseAlertGroups(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	for _, tc := range []struct {
+		alert string
+		want  []string
+	}{
+		{"SubstrateRestoreTestSuspended", []string{"kube_cronjob_spec_suspend", "substrate-restore-test", "== 1"}},
+		{"SubstrateRestoreTestStale", []string{"kube_cronjob_status_last_successful_time", "substrate-restore-test", "8 * 24 * 3600"}},
+		{"SubstrateRestoreTestFailed", []string{"kube_job_status_failed", "substrate-restore-test"}},
+	} {
+		r := mustAlert(t, groups, tc.alert)
+		for _, w := range tc.want {
+			if !strings.Contains(r.Expr, w) {
+				t.Errorf("%s expr does not contain %q:\n%s", tc.alert, w, r.Expr)
+			}
+		}
+		msg := r.Annotations["summary"] + " " + r.Annotations["description"]
+		if strings.TrimSpace(msg) == "" {
+			t.Errorf("%s has no summary or description; an unactionable page gets muted", tc.alert)
+		}
+	}
+
+	// Absent series must not read as healthy. A CronJob that has never
+	// succeeded is the case this whole group exists for.
+	stale := mustAlert(t, groups, "SubstrateRestoreTestStale")
+	if !strings.Contains(stale.Expr, "absent(") {
+		t.Error("SubstrateRestoreTestStale must fire when the series is absent: a CronJob that never succeeded produces no last-success timestamp, and no-data must not look like all-clear")
+	}
+}

@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OwnerFullAccess",
+      "Effect": "Allow",
+      "Action": ["s3:*"],
+      "Resource": [
+        "arn:aws:s3:::substrate-sessions",
+        "arn:aws:s3:::substrate-sessions/*"
+      ]
+    },
+    {
+      "Sid": "DenyEveryoneElse",
+      "Effect": "Deny",
+      "Action": ["s3:*"],
+      "NotPrincipal": {
+        "AWS": ["arn:aws:iam::*:user/<bucket-owner>"]
+      },
+      "Resource": [
+        "arn:aws:s3:::substrate-sessions",
+        "arn:aws:s3:::substrate-sessions/*"
+      ]
+    }
+  ]
+}

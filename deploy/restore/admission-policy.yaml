@@ -1,0 +1,102 @@
+# The bound on what the weekly restore job may CREATE.
+#
+# RBAC cannot do this. `resourceNames` is evaluated against an existing
+# object's name, and a create request has no name yet, so a rule with
+# `resourceNames` never matches a create — see deploy/restore/rbac.yaml. Every
+# destructive verb there is name-scoped, but `create` is not, and an
+# unconstrained `create clusters` in this namespace is not a small hole:
+#
+#   * a Cluster with an attacker-chosen `imageName` is arbitrary code
+#     execution inside the substrate namespace, laundered through the CNPG
+#     operator;
+#   * a Cluster whose `superuserSecret` or `externalClusters[].s3Credentials`
+#     point at any Secret in the namespace reads SUBSTRATE_DSN and the MinIO
+#     backup keys — which would undo the whole point of keeping those two
+#     Secrets separate;
+#   * `instances: 5, storage: 100Gi` fills Longhorn and takes production
+#     Postgres's PVC down with it.
+#
+# Why not simply drop `create` and have the job `patch` a permanently-existing
+# scratch Cluster: CNPG runs `bootstrap.recovery` exactly once, when the
+# Cluster is created. Patching an existing Cluster does not re-bootstrap it, so
+# a weekly restore *test* cannot be expressed as a patch. Creation is inherent
+# to the check; constraining the creation is the available control.
+#
+# ValidatingAdmissionPolicy is GA in Kubernetes 1.30+. If this cluster is
+# older, the fallback is to remove the `create` rule from rbac.yaml entirely
+# and run the restore test as a human step — do not run the CronJob with an
+# unconstrained create.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: substrate-restore-scratch-only
+spec:
+  # Fail closed. A policy that fails open is a policy that is not a control.
+  # The blast radius of failing closed is bounded: matchConditions restricts
+  # this to one ServiceAccount, so a broken policy blocks the weekly restore
+  # test and nothing else.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["postgresql.cnpg.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusters"]
+  matchConditions:
+    # Only the restore job's credential. Humans and the GitOps identity are
+    # unaffected; this is a bound on a robot, not on the operator.
+    - name: only-the-restore-serviceaccount
+      expression: >-
+        request.userInfo.username ==
+        "system:serviceaccount:substrate:substrate-restore"
+  variables:
+    - name: spec
+      expression: "object.spec"
+  validations:
+    - expression: 'object.metadata.name == "substrate-pg-scratch"'
+      message: "substrate-restore may only create the Cluster named substrate-pg-scratch"
+      reason: Forbidden
+    - expression: '!has(variables.spec.instances) || variables.spec.instances == 1'
+      message: "substrate-restore may only create a single-instance Cluster"
+      reason: Forbidden
+    - expression: '!has(variables.spec.storage) || !has(variables.spec.storage.size) || variables.spec.storage.size == "20Gi"'
+      message: "substrate-restore may only request 20Gi; a larger claim fills Longhorn and takes production Postgres down with it"
+      reason: Forbidden
+    # The image is the code that runs. Pinning it to the same digest
+    # production uses is what stops `create` from being arbitrary execution.
+    - expression: 'has(variables.spec.imageName) && variables.spec.imageName == "<substrate-pg-image>"'
+      message: "substrate-restore may only create a Cluster running the production substrate-pg image"
+      reason: Forbidden
+    - expression: '!has(variables.spec.superuserSecret)'
+      message: "substrate-restore may not mount a superuserSecret"
+      reason: Forbidden
+    - expression: '!has(variables.spec.enableSuperuserAccess) || variables.spec.enableSuperuserAccess == false'
+      message: "substrate-restore may not enable superuser access"
+      reason: Forbidden
+    # Every Secret this Cluster may reference, named. Without this an
+    # externalCluster can be pointed at substrate-server-env and the CNPG
+    # operator will read SUBSTRATE_DSN on the job's behalf.
+    - expression: >-
+        !has(variables.spec.externalClusters) ||
+        variables.spec.externalClusters.all(c,
+          !has(c.barmanObjectStore) || !has(c.barmanObjectStore.s3Credentials) ||
+          (
+            (!has(c.barmanObjectStore.s3Credentials.accessKeyId) ||
+              c.barmanObjectStore.s3Credentials.accessKeyId.name == "substrate-backups-s3") &&
+            (!has(c.barmanObjectStore.s3Credentials.secretAccessKey) ||
+              c.barmanObjectStore.s3Credentials.secretAccessKey.name == "substrate-backups-s3")
+          ))
+      message: "substrate-restore may only reference the substrate-backups-s3 Secret"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: substrate-restore-scratch-only
+spec:
+  policyName: substrate-restore-scratch-only
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: substrate

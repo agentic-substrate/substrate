@@ -1,0 +1,40 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: substrate
+namespace: substrate
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml
+  - cnpg/cluster.yaml
+  - cnpg/scheduled-backup.yaml
+  - cnpg/backups-secret.yaml
+  - server/deployment.yaml
+  - server/service.yaml
+  - server/configmap.yaml
+  - server/secret.yaml
+  - server/pdb.yaml
+  - otel/collector.yaml
+  - ingress/middleware.yaml
+  - ingress/ingressroute.yaml
+  # Deliberately NOT in resources:
+  #   cnpg/scratch-cluster.yaml   — a default apply must not create a second
+  #                                 20Gi Longhorn volume; the restore job and
+  #                                 runbook step 10 apply it explicitly.
+  #   ingress/certificate.yaml    — cert-manager cannot issue for a tailnet
+  #                                 name. See that file's header; the operator
+  #                                 loads substrate-tls with `tailscale cert`,
+  #                                 or adds this back with an internal CA
+  #                                 issuer.
+  - restore/cronjob.yaml
+  - restore/rbac.yaml
+  # The bound on the restore SA's un-name-scopeable `create clusters`.
+  - restore/admission-policy.yaml
+configMapGenerator:
+  - name: substrate-restore
+    files:
+      - restore-test.sh=restore/restore-test.sh
+      - restore-assert.sh=restore/restore-assert.sh
+      - scratch-cluster.yaml=cnpg/scratch-cluster.yaml
+generatorOptions:
+  disableNameSuffixHash: true

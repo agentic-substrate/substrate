@@ -44,3 +44,62 @@ groups:
             bypassing the adapter or an instruction key is missing — usually a
             missing instruction key, not misbehavior. An alert nobody can act
             on gets muted.
+
+  # The restore CronJob is the only proof that the backup is a backup, and it
+  # ships `suspend: true` so it cannot fire before the operator has verified a
+  # restore by hand. That safety default is also a silent-disarm footgun: any
+  # routine `kubectl apply -k deploy/` sets suspend back to true, and until
+  # these rules existed nothing anywhere noticed. Documentation is not a
+  # guardrail. A backup verification nobody is watching is not verification.
+  #
+  # These need kube-state-metrics scraped by the same Prometheus.
+  - name: substrate.backup-verification
+    rules:
+      - alert: SubstrateRestoreTestSuspended
+        expr: kube_cronjob_spec_suspend{namespace="substrate",cronjob="substrate-restore-test"} == 1
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: Weekly restore test is suspended
+          description: >
+            substrate-restore-test has been suspended for over 24h. It ships
+            suspended on purpose and a re-apply of deploy/ re-suspends it, so
+            this fires after a routine apply as well as after a deliberate
+            disarm. Nothing is verifying that the MinIO backup can actually be
+            restored until it is re-armed: kubectl patch cronjob
+            substrate-restore-test -n substrate -p
+            '{"spec":{"suspend":false}}' (runbook step 11).
+
+      - alert: SubstrateRestoreTestStale
+        # Runs Sunday 04:00. Eight days means a run was missed entirely, or the
+        # job has been failing — either way the last known-good restore is
+        # older than one cycle. Absent series means the CronJob has never
+        # succeeded, which is also not an all-clear.
+        expr: >
+          (time() - kube_cronjob_status_last_successful_time{namespace="substrate",cronjob="substrate-restore-test"}) > 8 * 24 * 3600
+          or absent(kube_cronjob_status_last_successful_time{namespace="substrate",cronjob="substrate-restore-test"})
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: No successful restore test in over 8 days
+          description: >
+            The weekly restore into substrate-pg-scratch has not succeeded
+            within its cycle. The backup is unverified. Check for a leftover
+            cluster/substrate-pg-scratch — a failed run leaves it behind on
+            purpose, holding a second 20Gi Longhorn volume.
+
+      - alert: SubstrateRestoreTestFailed
+        expr: kube_job_status_failed{namespace="substrate",job_name=~"substrate-restore-test-.*"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Weekly restore test job failed
+          description: >
+            A substrate-restore-test Job failed. Either the restore did not
+            complete or restore-assert.sh counted zero rows in memory,
+            instruction or audit — a silent empty restore is a failed backup,
+            not an all-clear. The scratch cluster is deliberately NOT cleaned
+            up on failure; inspect it before deleting.

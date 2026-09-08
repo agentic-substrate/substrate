@@ -1,0 +1,169 @@
+# Issue #27 constraint 6 — "Tailscale is the only path" — was previously only
+# true north-south: the IngressRoute binds a tailnet-only entrypoint, but any
+# pod in the cluster could still dial substrate-server:8080 directly and skip
+# Traefik, the tailnet, and the /mcp rate limit entirely, or open a raw
+# connection to substrate-pg-rw:5432.
+#
+# Default-deny ingress for the whole namespace, then name the flows that are
+# allowed — including the one that is easy to forget.
+#
+# Kubelet probe traffic originates on the NODE, in the host network namespace.
+# It is not a pod, so no podSelector or namespaceSelector can match it; the
+# only rule shape that admits it is an ipBlock covering the node addresses.
+# Cilium admits host->pod traffic implicitly (`allow-localhost: auto`), so on
+# Cilium omitting this is harmless. On Calico and on k3s's default kube-router
+# NetworkPolicy controller it is NOT: liveness and readiness probes are
+# dropped, substrate-server's single replica CrashLoops, and CNPG marks its
+# only instance unhealthy — from a policy applied in the same `kubectl apply
+# -k` as everything else, with a maxUnavailable: 0 PDB making recovery manual.
+#
+# Substitute <node-cidr> with the CIDR of the cluster's node addresses (a
+# single-node homelab can use that node's /32). Runbook step 8 has the
+# post-apply check that proves probes still pass on your CNI. Egress is intentionally not restricted: the server must reach
+# Ollama, MinIO, and the skills git remote, and an egress policy here would be
+# a lockout waiting to happen without buying much on a single-node homelab.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: substrate
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-server-from-traefik
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-server
+  policyTypes:
+    - Ingress
+  ingress:
+    # Traefik is the only thing that may reach the app port, so the tailnet
+    # entrypoint and the /mcp rate limit cannot be bypassed from inside the
+    # cluster. Substitute the label that actually selects the Traefik
+    # namespace; `kubernetes.io/metadata.name` is set automatically by the
+    # apiserver on every namespace, so this works without labelling anything
+    # by hand — only the value needs substituting.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<traefik-namespace>"
+      ports:
+        - protocol: TCP
+          port: 8080
+    # kubelet: /healthz and /readyz on the same container port. Without this,
+    # a NetworkPolicy-enforcing CNI that does not auto-allow the host drops the
+    # liveness probe and restarts this pod forever.
+    - from:
+        - ipBlock:
+            cidr: "<node-cidr>"
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-pg-from-app-and-operator
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: substrate-pg
+  policyTypes:
+    - Ingress
+  ingress:
+    # The application, and the CNPG instances of this same cluster (streaming
+    # replication / the operator's instance manager traffic).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: substrate-server
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: substrate-pg
+      ports:
+        - protocol: TCP
+          port: 5432
+    # cnpg-system reconciles and scrapes the instance manager on 8000.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<cnpg-namespace>"
+    # kubelet: CNPG's startup/liveness/readiness probes hit the instance
+    # manager on 8000. Dropped probes make CNPG fence the only instance.
+    - from:
+        - ipBlock:
+            cidr: "<node-cidr>"
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-pg-scratch-from-operator
+  namespace: substrate
+spec:
+  # The weekly restore target. Only the operator and the restore job's exec
+  # (which goes through the apiserver, not the pod network) touch it.
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: substrate-pg-scratch
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<cnpg-namespace>"
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: substrate-pg-scratch
+    - from:
+        - ipBlock:
+            cidr: "<node-cidr>"
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-from-namespace
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-otel-collector
+  policyTypes:
+    - Ingress
+  ingress:
+    # OTLP in from substrate-server; /metrics scraped by the homelab Prometheus.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: substrate-server
+      ports:
+        - protocol: TCP
+          port: 4318
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "<prometheus-namespace>"
+      ports:
+        - protocol: TCP
+          port: 8889
+    # kubelet: the health_check extension on 13133 backs both probes.
+    - from:
+        - ipBlock:
+            cidr: "<node-cidr>"
+      ports:
+        - protocol: TCP
+          port: 13133
