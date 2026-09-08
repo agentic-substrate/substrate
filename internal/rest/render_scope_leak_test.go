@@ -146,3 +146,72 @@ func readBody(t *testing.T, res *http.Response) string {
 	_ = res.Body.Close()
 	return string(b)
 }
+
+// A repo key that does not exist and one that exists but belongs to another
+// team must be told apart by nobody. Distinguishable bodies make the endpoint
+// an oracle: the `scope` table has no RLS and any key resolves for anyone, so
+// a caller could POST guessed keys in a loop and learn which repos this control
+// plane binds. Returning either the raw "repo not found" or the driver's
+// "new row violates row-level security policy for table ..." is the one-line
+// production change that makes this red.
+func TestRepoDenialIsIndistinguishableFromRepoNotFound(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, _, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	post := func(repo string) (int, string) {
+		res := doJSON(t, srv, http.MethodPost, "/v1/review", "bob", map[string]any{
+			"kind":    "drift_proposal",
+			"repo":    repo,
+			"payload": map[string]string{"path": "/w/AGENTS.md", "diff": "@@", "title": "drift"},
+		})
+		return res.StatusCode, readBody(t, res)
+	}
+
+	// Bound, but to a repo under team alpha, which bob is not a member of.
+	foreignCode, foreignBody := post(w.repoKey)
+	// Not bound at all.
+	missingCode, missingBody := post("github.com/acme/does-not-exist")
+
+	if foreignCode != http.StatusForbidden || missingCode != http.StatusForbidden {
+		t.Fatalf("codes = %d (foreign) and %d (missing), want 403 for both", foreignCode, missingCode)
+	}
+	if foreignBody != missingBody {
+		t.Fatalf("a foreign repo and a missing repo are distinguishable:\n foreign: %s\n missing: %s", foreignBody, missingBody)
+	}
+	// Anti-vacuity: if both were empty or both a generic 500 the comparison
+	// above would pass while telling us nothing.
+	if !strings.Contains(foreignBody, "not available to this principal") {
+		t.Fatalf("expected the uniform denial body, got %s", foreignBody)
+	}
+}
+
+// The repo path masks its own denials, so this covers every other write: an RLS
+// refusal must not echo the driver's "new row violates row-level security policy
+// for table review_item", which names the table and tells an RLS refusal apart
+// from every other kind of denial. Removing `err = errRLSRefused` from
+// writePolicy is the one-line production change that makes this red.
+func TestRLSRefusalDoesNotEchoTheDriverText(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, _, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	// bob names team alpha's scope explicitly. policy.Check lets a repo leaf
+	// past on team membership alone, so the refusal comes from RLS itself.
+	res := doJSON(t, srv, http.MethodPost, "/v1/review", "bob", map[string]any{
+		"kind":    "drift_proposal",
+		"scope":   w.pathStr,
+		"payload": map[string]string{"path": "/w/AGENTS.md", "diff": "@@", "title": "drift"},
+	})
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("bob write at team alpha's scope = %d, want 403: %s", res.StatusCode, body)
+	}
+	for _, leak := range []string{"row-level security policy for table", "review_item", "SQLSTATE"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("response leaks driver detail %q: %s", leak, body)
+		}
+	}
+}

@@ -468,6 +468,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 	var sc scope.Path
 	if in.Repo != "" {
 		sc, err = h.repoScope(r.Context(), st, in.Repo)
+		err = maskRepoDenial(err, true)
 	} else {
 		sc, err = scope.Parse(in.Scope)
 	}
@@ -523,7 +524,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, in.Repo != ""))
 		return
 	}
 	h.recordReviewOpen(r.Context())
@@ -841,6 +842,36 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
 
+// errRLSRefused is the single body every row-level-security refusal returns.
+var errRLSRefused = fmt.Errorf("%w: row-level security refused this write", policy.ErrDeniedScope)
+
+// maskRepoDenial collapses "no such repo" and "bound to a scope you may not
+// write" into one indistinguishable 403. Told apart, they are an oracle: the
+// `scope` table has no RLS and resolveRepoPaths resolves any key for anyone, so
+// a caller could POST guessed repo keys in a loop and learn exactly which repos
+// this control plane binds -- private repo names, which is the same class of
+// disclosure the chain naming was removed to prevent.
+//
+// Only denials are masked. A genuine server fault must still surface as a 500
+// rather than being reported to the caller as a permission problem.
+func maskRepoDenial(err error, repoPath bool) error {
+	if err == nil || !repoPath {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	isDenial := errors.Is(err, policy.ErrDeniedScope) ||
+		errors.Is(err, policy.ErrDeniedVisibility) ||
+		errors.Is(err, policy.ErrNeedsReview) ||
+		(errors.As(err, &pgErr) && pgErr.Code == "42501")
+	if !isDenial {
+		return err
+	}
+	// The key is deliberately not echoed. The caller supplied it, so repeating
+	// it adds nothing, and leaving it out makes the two outcomes byte-identical
+	// instead of merely similarly-shaped.
+	return fmt.Errorf("%w: repo is not available to this principal", policy.ErrDeniedScope)
+}
+
 func writePolicy(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
 	var pgErr *pgconn.PgError
@@ -854,7 +885,11 @@ func writePolicy(w http.ResponseWriter, err error) {
 	case errors.Is(err, policy.ErrSecretDetected):
 		code = http.StatusBadRequest
 	case errors.As(err, &pgErr) && pgErr.Code == "42501":
+		// Never echo the raw driver text. "new row violates row-level security
+		// policy for table X" names the table and distinguishes an RLS refusal
+		// from every other denial, which is enough to probe with.
 		code = http.StatusForbidden
+		err = errRLSRefused
 	default:
 		slog.Error("v1 handler failed", "err", err)
 	}
