@@ -112,6 +112,14 @@ jobs:
           git fetch --no-tags origin "$BASE"
           scripts/check-docs.sh "origin/$BASE"
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: cli command map
+        run: scripts/check-cli-commands.sh
+
       - name: link check
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
