@@ -108,23 +108,31 @@ func TestImportRepoDenialIsIndistinguishable(t *testing.T) {
 	srv := serveREST(t, h, w)
 
 	commit := true
-	post := func(repo string) (int, string) {
-		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", importBody(repo, "", &commit))
+	post := func(repo string, commit *bool) (int, string) {
+		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", importBody(repo, "", commit))
 		return res.StatusCode, readBody(t, res)
 	}
-	foreignCode, foreignBody := post(w.repoKey)
-	missingCode, missingBody := post("github.com/acme/does-not-exist")
-
-	if foreignCode != http.StatusForbidden || missingCode != http.StatusForbidden {
-		t.Fatalf("codes = %d (foreign) and %d (missing), want 403 for both:\n%s\n%s",
-			foreignCode, missingCode, foreignBody, missingBody)
+	// Both legs matter. The commit leg is denied by RLS at the write; the
+	// dry-run leg writes nothing, so RLS never fires and only an explicit
+	// writability check on the resolved chain keeps the two indistinguishable.
+	indistinguishable := func(leg string, commit *bool) {
+		t.Helper()
+		foreignCode, foreignBody := post(w.repoKey, commit)
+		missingCode, missingBody := post("github.com/acme/does-not-exist", commit)
+		if foreignCode != http.StatusForbidden || missingCode != http.StatusForbidden {
+			t.Fatalf("%s: codes = %d (foreign) and %d (missing), want 403 for both:\n%s\n%s",
+				leg, foreignCode, missingCode, foreignBody, missingBody)
+		}
+		if foreignBody != missingBody {
+			t.Fatalf("%s: a foreign repo and a missing repo are distinguishable:\n foreign: %s\n missing: %s",
+				leg, foreignBody, missingBody)
+		}
+		if !strings.Contains(foreignBody, "not available to this principal") {
+			t.Fatalf("%s: expected the uniform denial body, got %s", leg, foreignBody)
+		}
 	}
-	if foreignBody != missingBody {
-		t.Fatalf("a foreign repo and a missing repo are distinguishable:\n foreign: %s\n missing: %s", foreignBody, missingBody)
-	}
-	if !strings.Contains(foreignBody, "not available to this principal") {
-		t.Fatalf("expected the uniform denial body, got %s", foreignBody)
-	}
+	indistinguishable("commit", &commit)
+	indistinguishable("dry-run", nil)
 
 	// Anti-vacuity: nothing was written for bob at team alpha's repo.
 	var n int
@@ -181,5 +189,21 @@ func TestImportNilCommitIsDryRun(t *testing.T) {
 	}
 	if n := count(); n != 1 {
 		t.Fatalf("import with commit wrote %d instruction rows, want 1", n)
+	}
+}
+
+// A body with neither `scope` nor `repo` is a client mistake, not a server
+// fault. Dropping the guard turns this 400 into the 500 that scope.Parse's
+// failure produces from inside importer.Apply.
+func TestImportWithoutScopeOrRepoIsBadRequest(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	h, _, _ := openREST(t, dsn, fakeGit{})
+	srv := serveREST(t, h, w)
+
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody("", "", nil))
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("import with neither scope nor repo = %d, want 400: %s", res.StatusCode, body)
 	}
 }

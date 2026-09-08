@@ -43,6 +43,14 @@ func (h *Handler) importApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("scope and repo are mutually exclusive"))
 		return
 	}
+	if in.Repo == "" && in.Scope == "" {
+		// Without either, scope.Parse fails deep inside importer.Apply and the
+		// wrapped error falls through writePolicy's default as a 500 -- a
+		// client mistake reported as a server fault, which also pollutes any
+		// 5xx error budget. POST /v1/review answers 400 here; so does this.
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("scope: empty path"))
+		return
+	}
 	scopePath := in.Scope
 	if in.Repo != "" {
 		sc, err := h.repoScope(r.Context(), st, in.Repo)
