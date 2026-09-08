@@ -88,3 +88,59 @@ func TestDeployTreeContainsNoCredentialOrTailnet(t *testing.T) {
 		t.Fatalf("deploy/ failed the secret scan: %v\n%s", err, out)
 	}
 }
+
+// The literal shape both scanners were blind to. `- name: POSTGRES_PASSWORD`
+// carries no value and `value: hunter2` carries a key that matched nothing, so
+// a credential committed in a container env: block was invisible.
+func TestDeploySecretScannerCatchesEnvBlockLiteral(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Join([]string{
+		"apiVersion: apps/v1",
+		"kind: Deployment",
+		"spec:",
+		"  template:",
+		"    spec:",
+		"      containers:",
+		"        - name: app",
+		"          env:",
+		"            - name: POSTGRES_PASSWORD",
+		"              value: hunter2",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "dep.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runSecretsScanner(t, dir)
+	if err == nil {
+		t.Fatalf("scanner accepted a committed credential in an env: block:\n%s", out)
+	}
+	if !strings.Contains(out, "non-empty secret value") {
+		t.Fatalf("failure did not name the literal:\n%s", out)
+	}
+}
+
+// secretKeyRef is the shape we actually ship; it must not be flagged.
+func TestDeploySecretScannerAllowsEnvFromSecretRef(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Join([]string{
+		"kind: Deployment",
+		"spec:",
+		"  template:",
+		"    spec:",
+		"      containers:",
+		"        - name: app",
+		"          env:",
+		"            - name: SUBSTRATE_DSN",
+		"              valueFrom:",
+		"                secretKeyRef:",
+		"                  name: substrate-server",
+		"                  key: SUBSTRATE_DSN",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "dep.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runSecretsScanner(t, dir); err != nil {
+		t.Fatalf("scanner rejected the correct secretKeyRef shape:\n%s", out)
+	}
+}

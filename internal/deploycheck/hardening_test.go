@@ -696,3 +696,243 @@ func TestPlaceholderScannerCatchesEmptySecretAfterSubstitution(t *testing.T) {
 		t.Fatalf("failure did not name the empty value:\n%s", out)
 	}
 }
+
+// The sensitive-key regex was anchored `^\s*KEY:` with no allowance for a list
+// item, so it could never match a container `env:` entry: the key on the line
+// carrying the value is `value`, not `POSTGRES_PASSWORD`. A committed literal
+// in that shape passed both scanners silently. This is the shape.
+func TestPlaceholderScannerCatchesEnvBlockLiteral(t *testing.T) {
+	dir := t.TempDir()
+	body := "kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n            - name: POSTGRES_PASSWORD\n              value: hunter2\n"
+	if err := os.WriteFile(filepath.Join(dir, "dep.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runPlaceholders(t, "--committed", dir)
+	if err == nil {
+		t.Fatalf("scanner accepted a literal POSTGRES_PASSWORD in an env: block:\n%s", out)
+	}
+	if !strings.Contains(out, "sensitive value is a literal") {
+		t.Fatalf("failure did not name the literal:\n%s", out)
+	}
+}
+
+// valueFrom/secretKeyRef is the correct shape and must not trip the pair
+// tracking — a checker that cries wolf on the right answer gets disabled.
+func TestPlaceholderScannerAllowsEnvFromSecretRef(t *testing.T) {
+	dir := t.TempDir()
+	body := "kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n            - name: SUBSTRATE_DSN\n              valueFrom:\n                secretKeyRef:\n                  name: substrate-server\n                  key: SUBSTRATE_DSN\n"
+	if err := os.WriteFile(filepath.Join(dir, "dep.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runPlaceholders(t, "--committed", dir); err != nil {
+		t.Fatalf("secretKeyRef is the correct shape and must pass:\n%s", out)
+	}
+}
+
+// deploy/cnpg/Dockerfile is the one image this repo actually builds, and it
+// was the one image the digest gate could not see: the scanner only ever
+// matched `image:`/`imageName:` YAML keys, so `FROM ...:16-standard-trixie`
+// sat there while every manifest was held to a sha256.
+func TestPlaceholderScannerPinsDockerfileBases(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ghcr.io/example/postgresql:16-standard-trixie\nUSER 26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runPlaceholders(t, "--committed", dir)
+	if err == nil {
+		t.Fatalf("scanner accepted a mutable tag in a Dockerfile FROM:\n%s", out)
+	}
+	if !strings.Contains(out, "16-standard-trixie") {
+		t.Fatalf("failure did not name the unpinned base:\n%s", out)
+	}
+}
+
+// And the committed Dockerfile must itself be a placeholder, like every other
+// image reference in the tree.
+func TestCNPGDockerfileBaseIsAPlaceholder(t *testing.T) {
+	raw := string(readFile(t, "deploy/cnpg/Dockerfile"))
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(line)), "FROM ") {
+			continue
+		}
+		if !strings.Contains(line, "<") || !strings.Contains(line, ">") {
+			t.Fatalf("Dockerfile base is not a <placeholder>: %q", strings.TrimSpace(line))
+		}
+	}
+	rb := string(readFile(t, "docs/ops/runbook.md"))
+	if !strings.Contains(rb, "<cnpg-base-image-digest>") {
+		t.Fatal("runbook must tell the operator to substitute the CNPG base image digest")
+	}
+}
+
+// Runbook step 5 told the operator to `ko build --local`, which produces
+// ko.local/substrate-server:latest — a mutable tag that step 2's gate rejects,
+// and an image a containerd node cannot pull. The documented build path has to
+// be able to produce what the gate demands.
+func TestDocumentedBuildPathCanProduceADigest(t *testing.T) {
+	mk := string(readFile(t, "Makefile"))
+	if !strings.Contains(mk, "ko-push:") {
+		t.Fatal("Makefile needs a target that pushes and yields a digest; --local cannot satisfy the digest gate")
+	}
+	if !strings.Contains(mk, "--bare") {
+		t.Fatal("ko must be invoked so it prints the fully-qualified repo/name@sha256 reference")
+	}
+	rb := string(readFile(t, "docs/ops/runbook.md"))
+	if !strings.Contains(rb, "make ko-push") {
+		t.Fatal("runbook step 5 must point at the build path that produces a digest")
+	}
+	if strings.Contains(rb, "| 5 | `make ko-build`") {
+		t.Fatal("runbook step 5 still tells the operator to build an image the step 2 gate rejects")
+	}
+}
+
+// A scanner that is not wired into CI is a scanner that does not exist: this
+// one was referenced by CONTRIBUTING.md, the runbook, and a Go test, and a PR
+// committing a filled SUBSTRATE_DSN would still have gone green.
+func TestSecretScannerIsACIGate(t *testing.T) {
+	ci := string(readFile(t, ".github/workflows/ci.yml"))
+	// A `run:` line, not a mention. The script was already named in a comment,
+	// in CONTRIBUTING.md and in the runbook while never executing anywhere.
+	invoked := false
+	for _, line := range strings.Split(ci, "\n") {
+		t := strings.TrimSpace(line)
+		if !strings.HasPrefix(t, "run:") && !strings.HasPrefix(t, "- run:") {
+			continue
+		}
+		body := t[strings.Index(t, "run:")+len("run:"):]
+		if strings.Contains(body, "check-deploy-secrets.sh") && !strings.Contains(body, "#") {
+			invoked = true
+		}
+	}
+	if !invoked {
+		t.Fatal(".github/workflows/ci.yml has no step that RUNS scripts/check-deploy-secrets.sh; " +
+			"being named in a comment, in CONTRIBUTING.md and in a Go test is not a gate, and a PR " +
+			"committing a filled SUBSTRATE_DSN or a MinIO key goes green")
+	}
+}
+
+// Kubelet probe traffic comes from the node's host network. It is not a pod,
+// so no podSelector or namespaceSelector can match it — under a default-deny
+// ingress policy only an ipBlock admits it. Cilium auto-allows host->pod;
+// Calico and k3s's kube-router do not, and there the liveness probe is dropped,
+// the single substrate-server replica CrashLoops, CNPG fences its only
+// instance, and the maxUnavailable: 0 PDB makes recovery manual.
+//
+// Red when: an ipBlock allow is removed from any policy guarding a probed pod.
+func TestNetworkPoliciesAdmitKubeletProbes(t *testing.T) {
+	docs := docsOfKind(t, "deploy/networkpolicy.yaml", "NetworkPolicy")
+	guarded := 0
+	for _, d := range docs {
+		name := str(t, nested(t, d, "metadata", "name"), "np.name")
+		spec := asMap(t, d["spec"], "np.spec")
+		rules, _ := spec["ingress"].([]any)
+		if len(rules) == 0 {
+			continue // the default-deny policy itself
+		}
+		guarded++
+		hasIPBlock := false
+		for _, r := range rules {
+			froms, _ := asMap(t, r, "rule")["from"].([]any)
+			for _, f := range froms {
+				if _, ok := asMap(t, f, "from")["ipBlock"]; ok {
+					hasIPBlock = true
+				}
+			}
+		}
+		if !hasIPBlock {
+			t.Errorf("NetworkPolicy %q has no ipBlock allow, so kubelet probe traffic from the node is denied "+
+				"on any CNI that does not auto-allow the host (Calico, k3s kube-router). "+
+				"The probed pod CrashLoops the moment this is applied.", name)
+		}
+	}
+	if guarded == 0 {
+		t.Fatal("no NetworkPolicy declares an ingress allow; this test is asserting nothing")
+	}
+
+	rb := string(readFile(t, "docs/ops/runbook.md"))
+	if !strings.Contains(rb, "<node-cidr>") {
+		t.Fatal("runbook must tell the operator to substitute <node-cidr>")
+	}
+	if !strings.Contains(rb, "which CNI enforces NetworkPolicy") {
+		t.Fatal("runbook needs a post-apply step confirming the CNI enforces NetworkPolicy and probes still pass")
+	}
+}
+
+// RBAC cannot name-scope a create, so `create clusters` was unbounded: the
+// restore ServiceAccount could create a Cluster with any imageName (arbitrary
+// code execution in the namespace, via the CNPG operator), any Secret
+// reference (reading SUBSTRATE_DSN and the MinIO keys, defeating the whole
+// point of splitting those two Secrets), or any storage size (filling Longhorn
+// and taking production Postgres's PVC with it). The in-file comment claimed
+// the ConfigMap was the bound; RBAC bounds the credential, not the script.
+//
+// Red when: the admission policy is removed, stops being matched to that
+// ServiceAccount, stops constraining name/image/instances/storage/secrets, or
+// the wrong justification comes back.
+func TestRestoreCreateIsBoundedByAdmissionPolicy(t *testing.T) {
+	pol := docOfKind(t, "deploy/restore/admission-policy.yaml", "ValidatingAdmissionPolicy")
+	bind := docOfKind(t, "deploy/restore/admission-policy.yaml", "ValidatingAdmissionPolicyBinding")
+
+	if got := str(t, nested(t, bind, "spec", "policyName"), "binding.policyName"); got != str(t, nested(t, pol, "metadata", "name"), "policy.name") {
+		t.Fatalf("binding %q does not reference the policy", got)
+	}
+	if actions := toStrings(nested(t, bind, "spec", "validationActions")); len(actions) != 1 || actions[0] != "Deny" {
+		t.Fatalf("binding must Deny, got %v — Warn/Audit is not a control", actions)
+	}
+	if fp := str(t, nested(t, pol, "spec", "failurePolicy"), "failurePolicy"); fp != "Fail" {
+		t.Fatalf("failurePolicy is %q; a policy that fails open is not a bound", fp)
+	}
+
+	conds, _ := nested(t, pol, "spec", "matchConditions").([]any)
+	matched := false
+	for _, c := range conds {
+		if strings.Contains(str(t, asMap(t, c, "cond")["expression"], "expression"),
+			"system:serviceaccount:substrate:substrate-restore") {
+			matched = true
+		}
+	}
+	if !matched {
+		t.Fatal("the policy is not matched to the substrate-restore ServiceAccount, so it either binds nothing or binds everyone")
+	}
+
+	vals, _ := nested(t, pol, "spec", "validations").([]any)
+	all := ""
+	for _, v := range vals {
+		all += str(t, asMap(t, v, "validation")["expression"], "expression") + "\n"
+	}
+	for _, must := range []string{
+		"substrate-pg-scratch", // the only name it may create
+		"instances",            // no instances: 5
+		"storage",              // no storage: 100Gi
+		"imageName",            // no attacker-chosen image
+		"superuserSecret",      // no mounting an arbitrary Secret
+		"externalClusters",     // no pointing s3Credentials at any Secret in the namespace
+	} {
+		if !strings.Contains(all, must) {
+			t.Errorf("admission policy does not constrain %q; that hole is still open", must)
+		}
+	}
+
+	// The justification in rbac.yaml has to stop being wrong.
+	rbac := string(readFile(t, "deploy/restore/rbac.yaml"))
+	if strings.Contains(rbac, "The bound on create is therefore the manifest this job applies") {
+		t.Fatal("rbac.yaml still claims the ConfigMap bounds `create`. RBAC bounds the credential, not the shipped script")
+	}
+	if !strings.Contains(rbac, "admission-policy.yaml") {
+		t.Fatal("rbac.yaml must name what actually bounds `create clusters`")
+	}
+	if !strings.Contains(rbac, "Residual risk") {
+		t.Fatal("rbac.yaml must state the residual risk honestly: this token is production-data-equivalent")
+	}
+
+	res := toStrings(docOfKind(t, "deploy/kustomization.yaml", "Kustomization")["resources"])
+	found := false
+	for _, r := range res {
+		if strings.Contains(r, "admission-policy.yaml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the admission policy is not in kustomization resources, so the bound is not applied with the Role that needs it")
+	}
+}

@@ -11,17 +11,32 @@ metadata:
   namespace: substrate
 rules:
   # `create` cannot be name-scoped: RBAC evaluates resourceNames against an
-  # existing object's name, and a create request has no name yet, so a rule with
-  # resourceNames never matches a create. The bound on create is therefore the
-  # manifest this job applies (deploy/cnpg/scratch-cluster.yaml, mounted
-  # read-only from a ConfigMap), not RBAC.
+  # existing object's name, and a create request has no name yet, so a rule
+  # with resourceNames never matches a create.
+  #
+  # The ConfigMap this job reads its manifest from is NOT the bound. RBAC
+  # bounds what the credential may do, not what the shipped script chooses to
+  # do; anyone holding this ServiceAccount token can POST any Cluster they
+  # like. The bound is deploy/restore/admission-policy.yaml, a
+  # ValidatingAdmissionPolicy matched to this ServiceAccount that pins the
+  # name, the image, instances, storage size, and which Secrets a Cluster may
+  # reference. Apply it, or do not arm the CronJob.
+  #
+  # Residual risk, stated honestly: even fully constrained, this job creates a
+  # Cluster restored from the production backup and execs `psql -U postgres`
+  # into it. Whoever holds this token can therefore read every row of
+  # production with RLS and audit bypassed. That is inherent to verifying a
+  # backup — the check is "is production's data in there" — not an oversight.
+  # What the policy removes is arbitrary code execution, credential theft via
+  # a chosen Secret reference, and storage exhaustion. Treat this token as
+  # production-data-equivalent.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["create"]
   # Everything destructive is pinned to the scratch cluster by name. Without
   # resourceNames a typo, an edited ConfigMap, or a compromised job image could
   # issue `delete cluster substrate-pg` and CNPG would take the 20Gi Longhorn
-  # PVC with it.
+  # PVC with it. This one really is closed by RBAC: delete carries a name.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["get", "update", "patch", "delete"]

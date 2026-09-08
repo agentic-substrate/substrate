@@ -15,6 +15,22 @@ metadata:
     app.kubernetes.io/name: substrate-otel-collector
 data:
   collector.yaml: |
+    # Metrics only. The prometheus exporter is a metrics-only component: a
+    # `traces` pipeline that names it fails config validation at startup
+    # ("telemetry type is not supported"), the process exits non-zero, and the
+    # Deployment sits in CrashLoopBackOff forever. There is no trace backend in
+    # the homelab yet, so traces are NOT exported: the OTLP receiver only
+    # registers /v1/metrics, and substrate-server's trace export gets a 404.
+    # That is best-effort and logged once (it never fails a request). When a
+    # trace backend exists, add it as an exporter and add a traces pipeline
+    # here — do not point traces at `prometheus`.
+    extensions:
+      # Liveness target. The prometheus exporter's HTTP server serves /metrics
+      # and 404s on /, and kubelet treats >=400 as a probe failure, so probing
+      # the exporter's port at / kills the pod every period.
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /
     receivers:
       otlp:
         protocols:
@@ -31,26 +47,29 @@ data:
         timeout: 10s
         send_batch_size: 1024
     exporters:
-      # Prometheus scrapes :8889. substrate_* names arrive already prefixed
-      # (AGENTS.md translates the EDD's acp_*), so no namespace is added here —
-      # adding one would rename every series out from under deploy/alerts.yaml.
+      # Prometheus scrapes :8889/metrics. substrate_* names arrive already
+      # prefixed (AGENTS.md translates the EDD's acp_*), so no namespace is
+      # added here — adding one would rename every series out from under
+      # deploy/alerts.yaml.
       prometheus:
         endpoint: 0.0.0.0:8889
-        resource_to_telemetry_conversion:
-          # Off on purpose: promoting every resource attribute to a label is
-          # the classic cardinality explosion. machine/instance come from the
-          # metric itself.
-          enabled: false
+        # Off on purpose, and load-bearing. The instrument names in
+        # internal/observe already carry their suffixes
+        # (substrate_render_drift_total is an Int64Counter,
+        # substrate_tool_latency_seconds carries WithUnit("s")). With the
+        # default `true` the exporter appends type and unit suffixes, and
+        # whether it de-duplicates an already-present suffix has changed
+        # between collector releases — `substrate_render_drift_total_total`
+        # would silently break SubstrateDriftProposals in deploy/alerts.yaml.
+        # False means the scraped name is exactly the instrument name.
+        add_metric_suffixes: false
     service:
+      extensions: [health_check]
       telemetry:
         logs:
           level: info
       pipelines:
         metrics:
-          receivers: [otlp]
-          processors: [memory_limiter, batch]
-          exporters: [prometheus]
-        traces:
           receivers: [otlp]
           processors: [memory_limiter, batch]
           exporters: [prometheus]
@@ -88,6 +107,8 @@ spec:
               containerPort: 4318
             - name: prom
               containerPort: 8889
+            - name: healthz
+              containerPort: 13133
           resources:
             requests:
               cpu: 50m
@@ -99,11 +120,18 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          # health_check extension, not the exporter: / on the prometheus
+          # port is a 404 and would restart this pod every period.
           livenessProbe:
             httpGet:
               path: /
-              port: prom
+              port: healthz
             periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: healthz
+            periodSeconds: 10
           volumeMounts:
             - name: conf
               mountPath: /conf

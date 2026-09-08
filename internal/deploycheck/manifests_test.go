@@ -158,7 +158,11 @@ func TestKubernetesManifestsHaveIdentityAndNamespace(t *testing.T) {
 			if str(t, meta["name"], rel+".metadata.name") == "" {
 				t.Errorf("%s doc %d: missing metadata.name", rel, n)
 			}
-			if kind == "Namespace" || kind == "Kustomization" {
+			// Cluster-scoped kinds have no namespace to set, and setting one
+			// is rejected by the apiserver.
+			switch kind {
+			case "Namespace", "Kustomization",
+				"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding":
 				continue
 			}
 			ns, _ := meta["namespace"].(string)

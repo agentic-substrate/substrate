@@ -28,6 +28,8 @@ resources:
   #                                 issuer.
   - restore/cronjob.yaml
   - restore/rbac.yaml
+  # The bound on the restore SA's un-name-scopeable `create clusters`.
+  - restore/admission-policy.yaml
 configMapGenerator:
   - name: substrate-restore
     files:

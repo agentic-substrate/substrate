@@ -42,6 +42,7 @@ while IFS= read -r -d '' f; do
   grep -qI '' "$f" 2>/dev/null || continue
 
   lineno=0
+  pending_env_key=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     lineno=$((lineno + 1))
 
@@ -75,8 +76,32 @@ while IFS= read -r -d '' f; do
       findings=$((findings + 1))
     fi
 
+    # A literal in a container `env:` block is `- name: POSTGRES_PASSWORD` on
+    # one line and `value: hunter2` on the next: the key on the line carrying
+    # the secret is `value`, which matches nothing below. Track the pair.
+    if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name:[[:space:]]*(.*)$ ]]; then
+      env_name=$(unquote "$(printf '%s' "${BASH_REMATCH[1]}" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')")
+      if [[ "$env_name" =~ ^$VALUE_KEY$ ]]; then
+        pending_env_key=$env_name
+      else
+        pending_env_key=""
+      fi
+    elif [[ "$line" =~ ^[[:space:]]*valueFrom: ]]; then
+      pending_env_key=""
+    fi
+
+    raw=""
+    have_value=0
     if [[ "$line" =~ $VALUE_KEY:[[:space:]]*(.*)$ ]]; then
       raw=${BASH_REMATCH[2]}
+      have_value=1
+    elif [[ -n "$pending_env_key" ]] && [[ "$line" =~ ^[[:space:]]*value:[[:space:]]*(.*)$ ]]; then
+      raw=${BASH_REMATCH[1]}
+      have_value=1
+      pending_env_key=""
+    fi
+
+    if (( have_value )); then
       # Drop a trailing inline comment.
       raw=${raw%%#*}
       # Trim whitespace.
