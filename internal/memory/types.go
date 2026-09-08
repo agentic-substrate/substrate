@@ -1,5 +1,7 @@
 package memory
 
+import "github.com/google/uuid"
+
 // SourceIn is write provenance. machine is required (MEM-1).
 type SourceIn struct {
 	Machine string `json:"machine" jsonschema:"machine the write originated on"`
@@ -32,6 +34,10 @@ type WriteOut struct {
 	Status string `json:"status" jsonschema:"status actually stored"`
 }
 
+// MaxSearchLimit is the hard ceiling for SearchIn.Limit. Values above it are
+// clamped silently — callers that need more rows must page or narrow filters.
+const MaxSearchLimit = 100
+
 // SearchIn is the memory.search input (EDD §4.1).
 type SearchIn struct {
 	Query  string   `json:"query" jsonschema:"search text; exact identifier hits outrank keyword"`
@@ -39,6 +45,12 @@ type SearchIn struct {
 	Tier   string   `json:"tier,omitempty" jsonschema:"working, episodic, or semantic; default semantic"`
 	Status []string `json:"status,omitempty" jsonschema:"status filter; default confirmed and probable"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"max results; default 20"`
+	// ScopeIDs, when non-nil, restricts results to memories whose scope_id is in
+	// this set (ANY). An empty non-nil slice matches nothing (fail-closed). Nil
+	// means "no chain filter" — exact Scope applies if set, otherwise RLS-only.
+	// Internal/compiler use; omitted from the MCP schema so memory.search stays
+	// the single-scope wire form.
+	ScopeIDs []uuid.UUID `json:"-"`
 }
 
 // SearchHit is one memory.search result.

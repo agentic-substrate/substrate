@@ -43,6 +43,9 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 
 	ctx, span := observe.Start(ctx, observe.SpanCompile)
 	defer span.End()
+	// Set here so memory.Search need not carry Scope just for logging; getTool
+	// also sets it, but direct Compile callers would otherwise leave it empty.
+	observe.SetScopePath(ctx, req.Scope.String())
 
 	var d draft
 	var chain []uuid.UUID
@@ -61,7 +64,12 @@ func (s *Service) Compile(ctx context.Context, req Request) (Pack, error) {
 
 	if s.mem != nil && len(req.Files) > 0 {
 		q := strings.Join(req.Files, " ")
-		out, err := s.mem.Search(ctx, memory.SearchIn{Query: q, Limit: 200})
+		// Same chain filterHits will see (SCOPE-1 / #82). Do not pass Scope:
+		// when chain is empty, exact Scope resolve hard-fails on unwritten
+		// paths; ScopeIDs (possibly empty) keeps the soft-empty pack.
+		out, err := s.mem.Search(ctx, memory.SearchIn{
+			Query: q, ScopeIDs: chain, Limit: memory.MaxSearchLimit,
+		})
 		if err != nil {
 			return Pack{}, err
 		}

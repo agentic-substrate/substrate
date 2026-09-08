@@ -45,7 +45,13 @@ SELECT m.id::text, m.title, left(m.body, 240), m.status::text, m.scope_id::text,
              THEN (1 - (m.embedding <=> $6::vector)) * 25 ELSE 0 END, 0), 25)
   )::float8 AS score
 FROM memory m
-WHERE ($2::uuid IS NULL OR m.scope_id = $2)
+WHERE (
+    CASE
+      WHEN $7::uuid[] IS NOT NULL THEN m.scope_id = ANY($7)
+      WHEN $2::uuid IS NOT NULL THEN m.scope_id = $2
+      ELSE true
+    END
+  )
   AND ($3::memory_tier IS NULL OR m.tier = $3)
   AND (
     CASE
@@ -78,12 +84,21 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	// Contract: Limit is capped at MaxSearchLimit with no error (EDD §4.1
+	// leaves the ceiling unspecified). Callers that pass a higher value get
+	// MaxSearchLimit rows; the compiler asks for MaxSearchLimit explicitly.
+	if limit > MaxSearchLimit {
+		limit = MaxSearchLimit
 	}
 
 	var scopeID any
-	if strings.TrimSpace(in.Scope) != "" {
+	var scopeIDs any
+	// Non-nil ScopeIDs (including empty) is fail-closed: ANY('{}') matches
+	// nothing. A nil ScopeIDs with empty Scope is the MCP default — RLS-only
+	// (ELSE true), which TestSearchBothEmptyScopeIsUnfilteredByDesign pins.
+	if in.ScopeIDs != nil {
+		scopeIDs = in.ScopeIDs
+	} else if strings.TrimSpace(in.Scope) != "" {
 		sc, err := scope.Parse(in.Scope)
 		if err != nil {
 			return SearchOut{}, fmt.Errorf("memory.search: scope: %w", err)
@@ -124,7 +139,7 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 
 	var out SearchOut
 	err = st.Tx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, searchSQL, q, scopeID, tier, statuses, limit, qv)
+		rows, err := tx.Query(ctx, searchSQL, q, scopeID, tier, statuses, limit, qv, scopeIDs)
 		if err != nil {
 			return fmt.Errorf("memory.search: %w", err)
 		}
