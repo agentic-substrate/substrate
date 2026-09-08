@@ -1062,21 +1062,19 @@ func (f *fake) handleRender(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	body := map[string]any{"targets": targets}
-	// The real server answers a single-repo render with the chain it compiled
-	// for, which is what the adapter hangs a drift proposal on.
-	if len(repos) == 1 {
-		body["scope"] = repoScopeWire(repos[0])
-	}
-	_ = json.NewEncoder(w).Encode(body)
+	// The real server never returns the chain it compiled for: a chain names an
+	// org, team and project the caller may have no right to read.
+	_ = json.NewEncoder(w).Encode(map[string]any{"targets": targets})
 }
 
 // testTeamScope is the scope an operator configures for home-scoped files. It
 // is deliberately not global:, which no agent token may write.
 const testTeamScope = "global:/org:acme/team:core"
 
-// repoScopeWire is the wire chain the server binds a remote to: the repo scope
-// is keyed by the normalized remote itself.
+// repoScopeWire is the chain the server binds a remote to: the repo scope is
+// keyed by the normalized remote itself. Only the server ever computes this --
+// the adapter posts the repo key and the server resolves it, which is what
+// handleReview models below.
 func repoScopeWire(remote string) string {
 	return testTeamScope + "/project:" + strings.ReplaceAll(remote, "/", "-") +
 		"/repo:" + strings.ReplaceAll(remote, "/", "%2F")
@@ -1099,6 +1097,7 @@ func (f *fake) handleReview(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Kind    string `json:"kind"`
 		Scope   string `json:"scope"`
+		Repo    string `json:"repo"`
 		Payload struct {
 			Diff string `json:"diff"`
 			Path string `json:"path"`
@@ -1107,6 +1106,15 @@ func (f *fake) handleReview(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &in); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if in.Repo != "" && in.Scope != "" {
+		http.Error(w, "scope and repo are mutually exclusive", http.StatusBadRequest)
+		return
+	}
+	if in.Repo != "" {
+		// The server owns the repo-key-to-chain binding; the client is only
+		// ever told whether the row was accepted.
+		in.Scope = repoScopeWire(in.Repo)
 	}
 	f.mu.Lock()
 	reject := f.rejectPath != "" && strings.Contains(in.Payload.Path, f.rejectPath)

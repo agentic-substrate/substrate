@@ -136,7 +136,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repos := splitCSV(r.URL.Query().Get("repos"))
-	cfg, used, err := h.effectiveConfig(r.Context(), st, repos)
+	cfg, _, err := h.effectiveConfig(r.Context(), st, repos)
 	if err != nil {
 		writePolicy(w, err)
 		return
@@ -153,14 +153,13 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 			targets = append(targets, renderTarget{Path: path, Content: content, SHA256: sum})
 		}
 	}
-	// scope is the authoritative chain these targets were compiled for. The
-	// adapter puts it on a drift proposal so the proposal carries the scope of
-	// the file it concerns rather than a local guess (#58).
-	body := map[string]any{"targets": targets}
-	if len(used) > 0 {
-		body["scope"] = used.String()
-	}
-	writeJSON(w, http.StatusOK, body)
+	// The chain these targets were compiled for is deliberately NOT returned.
+	// The `scope` table carries no RLS and a repo key resolves for anyone, so
+	// echoing the chain would hand a non-member the org, team and project
+	// names of a repo it may not read. A drift proposal names the repo key the
+	// adapter already has and POST /v1/review re-derives the chain server-side
+	// (#58), so no client ever needs to be told one.
+	writeJSON(w, http.StatusOK, map[string]any{"targets": targets})
 }
 
 func (h *Handler) effectiveConfig(ctx context.Context, st *store.Store, repos []string) (render.EffectiveConfig, scope.Path, error) {
@@ -449,6 +448,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Kind    string          `json:"kind"`
 		Scope   string          `json:"scope"`
+		Repo    string          `json:"repo"`
 		TeamID  string          `json:"team_id"`
 		Payload json.RawMessage `json:"payload"`
 	}
@@ -456,8 +456,26 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		writeDecodeErr(w, err)
 		return
 	}
-	sc, err := scope.Parse(in.Scope)
+	// A proposal about a checkout names the repo key and nothing else. The
+	// server owns the binding from a repo key to its chain, so the caller
+	// cannot file a row at a chain it invented or was told (#58). `scope` and
+	// `repo` are mutually exclusive: accepting both would let a caller name a
+	// repo and still choose the chain.
+	if in.Repo != "" && in.Scope != "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("scope and repo are mutually exclusive"))
+		return
+	}
+	var sc scope.Path
+	if in.Repo != "" {
+		sc, err = h.repoScope(r.Context(), st, in.Repo)
+	} else {
+		sc, err = scope.Parse(in.Scope)
+	}
 	if err != nil {
+		if in.Repo != "" {
+			writePolicy(w, err)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -514,6 +532,30 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		"kind":   string(row.Kind),
 		"status": string(row.Status),
 	})
+}
+
+// repoScope resolves a repo key to the chain the server bound it to. The
+// result is used to place a row, never returned to the caller: resolveRepoPaths
+// reads the RLS-free `scope` table, so handing the chain back would disclose
+// another team's naming. Placement is still gated -- policy.Check runs on the
+// derived chain and the review_item INSERT policy calls scope_writable.
+func (h *Handler) repoScope(ctx context.Context, st *store.Store, key string) (scope.Path, error) {
+	var out scope.Path
+	err := st.Tx(ctx, func(tx pgx.Tx) error {
+		paths, err := resolveRepoPaths(ctx, tx, []string{key})
+		if err != nil {
+			return err
+		}
+		if len(paths) != 1 {
+			return policyDenied(key)
+		}
+		out = paths[0]
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (h *Handler) reviewList(w http.ResponseWriter, r *http.Request) {

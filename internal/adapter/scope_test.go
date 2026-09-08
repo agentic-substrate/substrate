@@ -1,6 +1,11 @@
 package adapter
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestParseRemoteIsLayoutIndependent(t *testing.T) {
 	ssh, ok := ParseRemote(NormalizeRemote("git@github.com:unrounded/adapter-sdk.git"))
@@ -27,26 +32,51 @@ func TestParseRemoteRefusesToGuess(t *testing.T) {
 	}
 }
 
-// A remote names an org and a repo and nothing between them, so a locally
-// invented chain would skip team and project — which scope.Validate rejects.
-// The chain therefore comes from the server, and is checked before use.
-func TestScopeForRemoteRejectsWhatValidateRejects(t *testing.T) {
-	const remote = "github.com/acme/api"
-	good := "global:/org:acme/team:core/project:api/repo:github.com%2Facme%2Fapi"
-	if got, err := scopeForRemote(remote, good); err != nil || got != good {
-		t.Fatalf("scopeForRemote(good) = %q, %v", got, err)
-	}
-	bad := map[string]string{
-		"skipped levels": "global:/org:acme/repo:github.com%2Facme%2Fapi",
-		"global default": "global:",
-		"org only":       "global:/org:acme",
-		"other repo":     "global:/org:acme/team:core/project:api/repo:github.com%2Facme%2Fweb",
-		"empty":          "",
-	}
-	for name, wire := range bad {
-		t.Run(name, func(t *testing.T) {
-			if got, err := scopeForRemote(remote, wire); err == nil {
-				t.Fatalf("scopeForRemote(%q) = %q, nil; want an error", wire, got)
+// A drift proposal about a file in a checkout names that checkout's repo key
+// and nothing else. The chain behind the key -- org, team, project -- is the
+// server's to resolve and is never sent to, nor accepted from, the adapter.
+// A home file has no repo and carries its explicitly configured scope instead.
+func TestPostReviewNamesRepoNotChain(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		scope      string
+		repo       string
+		wantFields map[string]string
+		absent     string
+	}{
+		{
+			name:       "repo target",
+			repo:       "github.com/acme/api",
+			wantFields: map[string]string{"repo": "github.com/acme/api"},
+			absent:     "scope",
+		},
+		{
+			name:       "home target",
+			scope:      "global:/org:acme/team:core",
+			wantFields: map[string]string{"scope": "global:/org:acme/team:core"},
+			absent:     "repo",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Errorf("decode: %v", err)
+				}
+				w.WriteHeader(http.StatusCreated)
+			}))
+			t.Cleanup(srv.Close)
+			a := newAPI(Config{Server: srv.URL})
+			if err := a.postReview(t.Context(), tc.scope, tc.repo, "/tmp/AGENTS.md", "diff"); err != nil {
+				t.Fatalf("postReview: %v", err)
+			}
+			for k, want := range tc.wantFields {
+				if got[k] != want {
+					t.Fatalf("body[%q] = %v, want %q (body: %v)", k, got[k], want, got)
+				}
+			}
+			if _, ok := got[tc.absent]; ok {
+				t.Fatalf("body carries %q = %v; the adapter must name a target exactly one way", tc.absent, got[tc.absent])
 			}
 		})
 	}

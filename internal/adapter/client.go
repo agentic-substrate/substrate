@@ -75,11 +75,11 @@ func (a *api) callTimeout() time.Duration {
 	return DefaultHTTPTimeout
 }
 
-// renderResponse is GET /v1/render. Scope is the chain the server compiled
-// these targets for; the adapter never derives that chain itself.
+// renderResponse is GET /v1/render. It carries targets only: the server does
+// not tell the adapter which chain they were compiled for, because a chain
+// names an org, team and project the caller may have no right to read.
 type renderResponse struct {
 	Targets []renderTarget `json:"targets"`
-	Scope   string         `json:"scope"`
 }
 
 func (a *api) getRender(ctx context.Context, machine string, repos []string) (renderResponse, int, error) {
@@ -265,18 +265,28 @@ func (a *api) getSkillsManifest(ctx context.Context, repos []string) ([]manifest
 	return out.Skills, nil
 }
 
-func (a *api) postReview(ctx context.Context, scope, path, diff string) error {
+// postReview files a drift proposal. Exactly one of scopePath and repo is set:
+// a file inside a checkout is named by its repo key and the server derives the
+// chain from its own binding (#58), while a home file has no repo and carries
+// the explicitly configured scope. The adapter never invents a chain and is
+// never handed one.
+func (a *api) postReview(ctx context.Context, scopePath, repo, path, diff string) error {
 	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
 	defer cancel()
-	payload, err := json.Marshal(map[string]any{
-		"kind":  "drift_proposal",
-		"scope": scope,
+	body := map[string]any{
+		"kind": "drift_proposal",
 		"payload": map[string]string{
 			"path":  path,
 			"diff":  diff,
 			"title": "drift in " + path,
 		},
-	})
+	}
+	if repo != "" {
+		body["repo"] = repo
+	} else {
+		body["scope"] = scopePath
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}

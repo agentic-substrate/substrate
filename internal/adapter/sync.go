@@ -15,6 +15,11 @@ import (
 // become a scope (EDD R18), and targets whose drift could not be proposed.
 type SyncResult struct {
 	UnknownRemotes []string
+	// UnscopedRemotes is the remotes the server knows but the adapter cannot
+	// name a repo key for, so their checkouts are not managed this cycle. A
+	// silent skip here unmanages every repo on the machine while Sync returns
+	// nil, which is exactly the failure mode UnknownRemotes exists to prevent.
+	UnscopedRemotes []string
 	// UnproposedDrift is the on-disk paths whose drift proposal failed. Those
 	// files were left exactly as found: the proposal is filed before the file
 	// is overwritten, and a failed proposal means no write (#59).
@@ -56,25 +61,31 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	}
 
 	a := newAPI(cfg)
-	targets, known, unknown, scopes, err := fetchTargets(ctx, a, cfg, remotes)
+	targets, known, unknown, unscoped, repoKeys, err := fetchTargets(ctx, a, cfg, remotes)
 	if err != nil {
 		return SyncResult{}, err
 	}
 	for _, u := range unknown {
 		slog.Warn("unknown git remote; bind it with substrate repo bind", "remote", u)
 	}
+	for _, u := range unscoped {
+		slog.Warn("no repo key for remote; checkout not managed", "remote", u)
+	}
 
 	applyTo := checkoutsWithRemotes(checkouts, known)
 	var unproposed []string
+	res := func() SyncResult {
+		return SyncResult{UnknownRemotes: unknown, UnscopedRemotes: unscoped, UnproposedDrift: unproposed}
+	}
 	for _, tgt := range targets {
-		dests, err := destTargets(cfg, tgt.Path, applyTo, scopes)
+		dests, err := destTargets(cfg, tgt.Path, applyTo, repoKeys)
 		if err != nil {
-			return SyncResult{UnknownRemotes: unknown}, err
+			return res(), err
 		}
 		for _, dest := range dests {
 			skipped, err := applyTarget(ctx, db, a, cfg, dest, tgt, now)
 			if err != nil {
-				return SyncResult{UnknownRemotes: unknown, UnproposedDrift: unproposed}, err
+				return res(), err
 			}
 			if skipped {
 				unproposed = append(unproposed, dest.path)
@@ -82,42 +93,46 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 		}
 	}
 	if err := linkSkills(ctx, db, a, cfg, known); err != nil {
-		return SyncResult{UnknownRemotes: unknown, UnproposedDrift: unproposed}, err
+		return res(), err
 	}
-	return SyncResult{UnknownRemotes: unknown, UnproposedDrift: unproposed}, nil
+	return res(), nil
 }
 
 // fetchTargets probes each remote on its own so an unknown one is isolated
-// (R18: logged, never auto-created), and records the scope chain the server
-// compiled that remote's targets for. That per-remote scope is what a drift
-// proposal carries.
-func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]renderTarget, []string, []string, map[string]string, error) {
-	var known, unknown []string
-	scopes := map[string]string{}
+// (R18: logged, never auto-created), and records the repo key a drift proposal
+// about that checkout must name. The key is the normalized remote itself; the
+// chain behind it belongs to the server and is never sent to the adapter.
+//
+// A remote the server accepts but ParseRemote cannot key is returned in
+// `unscoped` rather than dropped: an unmanaged checkout must be visible in the
+// result, not only in a log line.
+func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]renderTarget, []string, []string, []string, map[string]string, error) {
+	var known, unknown, unscoped []string
+	repoKeys := map[string]string{}
 	for _, r := range remotes {
-		res, code, err := a.getRender(ctx, cfg.Machine, []string{r})
+		_, code, err := a.getRender(ctx, cfg.Machine, []string{r})
 		if err != nil && deniedStatus(code) {
 			unknown = append(unknown, r)
 			continue
 		}
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
-		sc, err := scopeForRemote(r, res.Scope)
-		if err != nil {
-			// A remote whose scope cannot be established is not managed: it is
-			// never guessed at and never defaulted to global.
-			slog.Warn("no usable scope for remote; skipping checkout", "remote", r, "err", err)
+		id, ok := ParseRemote(r)
+		if !ok {
+			// The checkout is not managed: its repo key is never guessed at
+			// and never defaulted to global.
+			unscoped = append(unscoped, r)
 			continue
 		}
-		scopes[r] = sc
+		repoKeys[r] = id.Key
 		known = append(known, r)
 	}
 	res, _, err := a.getRender(ctx, cfg.Machine, known)
 	if err != nil {
-		return nil, known, unknown, scopes, err
+		return nil, known, unknown, unscoped, repoKeys, err
 	}
-	return res.Targets, known, unknown, scopes, nil
+	return res.Targets, known, unknown, unscoped, repoKeys, nil
 }
 
 func checkoutsWithRemotes(checkouts []Workspace, remotes []string) []Workspace {
@@ -134,15 +149,23 @@ func checkoutsWithRemotes(checkouts []Workspace, remotes []string) []Workspace {
 	return out
 }
 
-// destTarget is one file to write plus the scope a drift proposal about it
-// must carry. The scope comes from the checkout's git remote (via the server's
-// binding for it), not from where the checkout happens to sit on disk.
+// destTarget is one file to write plus how a drift proposal about it names its
+// scope. A file inside a checkout carries `repo`, the key derived from that
+// checkout's git remote rather than from where it sits on disk, and the server
+// resolves it to a chain. A home file has no repo and carries `scope`. Exactly
+// one is set; with neither, drift cannot be proposed and the file is left
+// alone.
 type destTarget struct {
 	path  string
 	scope string
+	repo  string
 }
 
-func destTargets(cfg Config, serverPath string, checkouts []Workspace, scopes map[string]string) ([]destTarget, error) {
+// proposable reports whether a drift proposal about this target can name a
+// scope at all.
+func (d destTarget) proposable() bool { return d.scope != "" || d.repo != "" }
+
+func destTargets(cfg Config, serverPath string, checkouts []Workspace, repoKeys map[string]string) ([]destTarget, error) {
 	if strings.HasPrefix(serverPath, "~/") {
 		dests, err := destsFor(cfg, serverPath, nil)
 		if err != nil {
@@ -172,7 +195,7 @@ func destTargets(cfg Config, serverPath string, checkouts []Workspace, scopes ma
 			return nil, err
 		}
 		for _, d := range dests {
-			out = append(out, destTarget{path: d, scope: scopes[c.Remote]})
+			out = append(out, destTarget{path: d, repo: repoKeys[c.Remote]})
 		}
 	}
 	return out, nil
@@ -204,18 +227,31 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarge
 	if exists && (!hasStored || diskHash != stored.SHA256) && diskHash != tgtHash {
 		// Drift is counted whether or not the proposal lands, so a file that
 		// can never be proposed is visible instead of silently retried.
-		if cfg.Metrics != nil {
+		// A file that can never be proposed would otherwise emit one metric
+		// increment and one ERROR line every interval forever. The report is
+		// backed off per path; the target still appears in UnproposedDrift on
+		// every cycle, so the operator signal is throttled, never silenced.
+		report, suppressed := db.shouldReportDrift(dest.path, now)
+		if report && cfg.Metrics != nil {
 			cfg.Metrics.RecordRenderDrift(ctx, cfg.Machine)
 		}
-		if dest.scope == "" {
-			slog.Error("drift not proposed: no scope for target; leaving file untouched", "path", dest.path)
+		if !dest.proposable() {
+			if report {
+				slog.Error("drift not proposed: no scope for target; leaving file untouched",
+					"path", dest.path, "suppressed_cycles", suppressed)
+			}
 			return true, nil
 		}
 		diff := unifiedDiff(tgt.Path, string(disk), tgt.Content)
-		if err := a.postReview(ctx, dest.scope, dest.path, diff); err != nil {
-			slog.Error("drift proposal rejected; leaving file untouched", "path", dest.path, "scope", dest.scope, "err", err)
+		if err := a.postReview(ctx, dest.scope, dest.repo, dest.path, diff); err != nil {
+			if report {
+				slog.Error("drift proposal rejected; leaving file untouched",
+					"path", dest.path, "scope", dest.scope, "repo", dest.repo,
+					"suppressed_cycles", suppressed, "err", err)
+			}
 			return true, nil
 		}
+		db.clearDriftBackoff(dest.path)
 		if err := AtomicWrite(dest.path, []byte(tgt.Content)); err != nil {
 			return false, err
 		}

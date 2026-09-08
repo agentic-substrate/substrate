@@ -40,35 +40,6 @@ func ParseRemote(remote string) (RemoteIdentity, bool) {
 	return RemoteIdentity{Host: host, Org: org, Repo: repo, Key: r}, true
 }
 
-// scopeForRemote validates the chain the server compiled a remote's targets
-// for. The adapter does not invent the chain: a remote alone names an org and
-// a repo, and `global:/org:x/repo:y` skips team and project, which
-// scope.Path.Validate rejects. The server holds the bound chain, returns it on
-// GET /v1/render, and this checks that what came back is well formed and is
-// actually the repo scope for this remote before a drift proposal is hung on
-// it. Anything else is skipped, never defaulted to global.
-func scopeForRemote(remote, wire string) (string, error) {
-	id, ok := ParseRemote(remote)
-	if !ok {
-		return "", fmt.Errorf("adapter: unparseable remote %q", remote)
-	}
-	if wire == "" {
-		return "", fmt.Errorf("adapter: server returned no scope for remote %s", remote)
-	}
-	p, err := scope.Parse(wire)
-	if err != nil {
-		return "", fmt.Errorf("adapter: scope %q for remote %s: %w", wire, remote, err)
-	}
-	leaf := p.Leaf()
-	if leaf.Kind != scope.Repo {
-		return "", fmt.Errorf("adapter: scope %q for remote %s is not a repo scope", wire, remote)
-	}
-	if leaf.Name != id.Key {
-		return "", fmt.Errorf("adapter: scope %q does not name remote %s", wire, remote)
-	}
-	return p.String(), nil
-}
-
 // homeScope is the scope a home-file drift proposal carries. A file like
 // ~/.claude/CLAUDE.md has no repo, so it needs an explicitly configured scope;
 // with none, the proposal is skipped and the file left alone rather than

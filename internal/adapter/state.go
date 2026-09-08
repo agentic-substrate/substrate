@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure Go SQLite driver (EDD R11); no CGO
@@ -12,7 +13,82 @@ import (
 
 // DB is the adapter's SQLite store (~/.substrate/adapter.sqlite).
 type DB struct {
-	sql *sql.DB
+	sql   *sql.DB
+	drift driftBackoff
+}
+
+// DriftReportBackoffBase and MaxDriftReportBackoff bound how often a target
+// whose drift cannot be proposed re-reports. A file that can never be proposed
+// is re-detected every render tick forever; without a backoff that is one
+// metric increment and one ERROR line per tick, per file, for as long as the
+// daemon runs. The target still appears in SyncResult.UnproposedDrift on every
+// cycle, so this throttles the noise without hiding the condition.
+const (
+	DriftReportBackoffBase = DefaultInterval
+	MaxDriftReportBackoff  = time.Hour
+)
+
+// driftBackoff is per-process, not persisted: a daemon restart should report
+// the current state of the world once, and a fresh SyncResult carries the file
+// regardless.
+type driftBackoff struct {
+	mu    sync.Mutex
+	state map[string]*driftReport
+}
+
+type driftReport struct {
+	nextAt     int64
+	reports    int
+	suppressed int
+}
+
+// shouldReportDrift reports whether this cycle may log and count an
+// unproposable target, and how many cycles were suppressed since the last one.
+func (db *DB) shouldReportDrift(path string, now int64) (bool, int) {
+	if db == nil {
+		return true, 0
+	}
+	db.drift.mu.Lock()
+	defer db.drift.mu.Unlock()
+	if db.drift.state == nil {
+		db.drift.state = map[string]*driftReport{}
+	}
+	st := db.drift.state[path]
+	if st == nil {
+		st = &driftReport{}
+		db.drift.state[path] = st
+	}
+	if st.reports > 0 && now < st.nextAt {
+		st.suppressed++
+		return false, st.suppressed
+	}
+	st.reports++
+	suppressed := st.suppressed
+	st.suppressed = 0
+	st.nextAt = now + int64(driftBackoffFor(st.reports).Seconds())
+	return true, suppressed
+}
+
+// clearDriftBackoff forgets a path whose proposal landed, so a later, unrelated
+// failure on the same file reports immediately.
+func (db *DB) clearDriftBackoff(path string) {
+	if db == nil {
+		return
+	}
+	db.drift.mu.Lock()
+	defer db.drift.mu.Unlock()
+	delete(db.drift.state, path)
+}
+
+func driftBackoffFor(reports int) time.Duration {
+	wait := DriftReportBackoffBase
+	for i := 1; i < reports && wait < MaxDriftReportBackoff; i++ {
+		wait *= 2
+	}
+	if wait > MaxDriftReportBackoff {
+		return MaxDriftReportBackoff
+	}
+	return wait
 }
 
 // Workspace is a discovered checkout (EDD R26).

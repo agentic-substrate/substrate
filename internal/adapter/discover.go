@@ -21,6 +21,13 @@ const MaxDiscoverDepth = 2
 // siblings (`<repo>-wt-*`) have their own .git file and are discovered like any
 // other checkout; they share the primary checkout's remote and therefore its
 // scope.
+//
+// A symlink under a root is not a candidate and is not followed: os.ReadDir has
+// Lstat semantics and the scan requires a real directory. That is a decision,
+// not an oversight -- it is exactly why the walk needs no cycle guard, and a
+// symlink farm aimed at checkouts elsewhere is simply not managed. The README
+// says so where the behaviour is described. Point -roots at the real parents
+// instead.
 func Discover(roots []string) ([]Workspace, error) {
 	var out []Workspace
 	for _, root := range roots {
