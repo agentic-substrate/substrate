@@ -14,6 +14,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/policy"
+	"github.com/agentic-substrate/substrate/internal/scope"
 )
 
 // TestOfflineHourTwentyObservationsZeroDuplicates is SYNC-2: 20 observations
@@ -790,4 +794,83 @@ func (f *batchFake) cacheCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.cacheCalls)
+}
+
+// The scope an observation is filed at must be one the principal enqueueing it
+// may actually write. This spans the adapter and the real policy layer in one
+// test, because that seam is where the bug lived: the outbox tests drive a
+// stubbed endpoint so policy.Check never runs, and the policy tests never
+// assert what scope the adapter sends. Both suites were green while every
+// observation an agent enqueued was refused by the server.
+//
+// Restoring the `global:` default in Config.observationScope is the one-line
+// production change that makes this red.
+func TestObservationScopeAgreesWithPolicy(t *testing.T) {
+	home := t.TempDir()
+	db := openDB(t, filepath.Join(home, "adapter.sqlite"))
+	cfg := testConfig(home, filepath.Join(home, "adapter.sqlite"), "http://127.0.0.1:1")
+
+	cid, err := EnqueueObservation(db, cfg, Observation{Tool: "bash", Body: "ok"})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	var payload string
+	if err := db.sql.QueryRow(`SELECT payload FROM outbox WHERE client_id = ?`, cid).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var sent struct {
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal([]byte(payload), &sent); err != nil {
+		t.Fatal(err)
+	}
+
+	sc, err := scope.Parse(sent.Scope)
+	if err != nil {
+		t.Fatalf("adapter sent an unparseable scope %q: %v", sent.Scope, err)
+	}
+	agent := identity.Principal{
+		ID:           uuid.New(),
+		Kind:         "agent",
+		Trust:        "agent_autonomous",
+		TeamIDs:      []uuid.UUID{uuid.New()},
+		Capabilities: []string{"memory:write"},
+	}
+	if err := policy.Check("memory.write", sc, agent); err != nil {
+		t.Fatalf("an agent cannot write an observation at the scope the adapter sends (%s): %v", sent.Scope, err)
+	}
+
+	// Anti-vacuity: the same check must actually refuse `global:`, or the
+	// assertion above would pass for any scope at all.
+	global, err := scope.Parse("global:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := policy.Check("memory.write", global, agent); err == nil {
+		t.Fatal("policy.Check accepted memory.write at global: for an agent; this test proves nothing")
+	}
+}
+
+// An adapter started without -scope must fail at enqueue, where the operator
+// sees it, rather than filing at a scope the server will refuse and leaving the
+// row to retry in the outbox forever.
+func TestEnqueueObservationRefusesWithoutAScope(t *testing.T) {
+	home := t.TempDir()
+	db := openDB(t, filepath.Join(home, "adapter.sqlite"))
+	cfg := testConfig(home, filepath.Join(home, "adapter.sqlite"), "http://127.0.0.1:1")
+	cfg.Scope = ""
+
+	if _, err := EnqueueObservation(db, cfg, Observation{Tool: "bash", Body: "ok"}); err == nil {
+		t.Fatal("enqueue with no scope succeeded; want an error naming -scope")
+	} else if !strings.Contains(err.Error(), "-scope") {
+		t.Fatalf("error does not name the fix: %v", err)
+	}
+
+	var n int
+	if err := db.sql.QueryRow(`SELECT count(*) FROM outbox`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("outbox holds %d rows after a refused enqueue, want 0", n)
+	}
 }

@@ -82,11 +82,19 @@ func (cfg Config) interval() time.Duration {
 	return DefaultInterval
 }
 
-func (cfg Config) scope() string {
-	if cfg.Scope != "" {
-		return cfg.Scope
+// observationScope is the scope an outbox observation is filed at. There is
+// deliberately no default: `global:` was one, and internal/policy requires
+// human_admin for any write at global or org, so every observation an agent
+// enqueued was refused by the server and sat in the outbox retrying. A default
+// that no agent token can ever use is not a default, it is a delayed failure.
+//
+// An empty scope is therefore an error at enqueue time, where the caller can
+// still see it, rather than a 403 discovered later by the drain loop.
+func (cfg Config) observationScope() (string, error) {
+	if cfg.Scope == "" {
+		return "", fmt.Errorf("adapter: observation scope is required (-scope); refusing to file at global:, which no agent token may write")
 	}
-	return "global:"
+	return cfg.Scope, nil
 }
 
 func (cfg Config) httpClient() *http.Client {
