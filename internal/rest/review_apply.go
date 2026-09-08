@@ -2,8 +2,6 @@ package rest
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -21,6 +19,13 @@ import (
 type decideRow struct {
 	Kind string `json:"kind"`
 	Body string `json:"body"`
+
+	// key is the slot key a re-import would compute for this row, derived
+	// from the review payload's slot and ordinal. It is unexported because
+	// it is server-internal: the wire plan stays byte-identical, and the
+	// dry-run/commit comparison in TestReviewDecideDryRunPlanEqualsCommit
+	// keeps working.
+	key string
 }
 
 type decideResult struct {
@@ -99,7 +104,17 @@ func planReviewDecision(ctx context.Context, tx pgx.Tx, id uuid.UUID, in decideI
 			return decideResult{}, fmt.Errorf("as_kind must be instruction or preference")
 		}
 		out.AsKind = asKind
-		out.Activate = append(out.Activate, decideRow{Kind: asKind, Body: side.Body})
+		// The flipped row's key must be the one the importer would compute
+		// for this slot, not a content hash: a hash-keyed row can never be
+		// superseded, corrected, or matched by a future import (#80). The
+		// payload carries the slot and the side's ordinal, which is exactly
+		// rowKey's input, so it needs no lookup the decider's RLS session
+		// might be unable to make.
+		out.Activate = append(out.Activate, decideRow{
+			Kind: asKind,
+			Body: side.Body,
+			key:  importer.RowKey(asKind, relOfSlot(payload.Slot), headingOfSlot(payload.Slot), side.Ordinal),
+		})
 		seen := map[string]bool{asKind + "\x00" + side.Body: true}
 		for _, other := range payload.Pair {
 			for _, k := range []string{"instruction", "preference"} {
@@ -227,9 +242,9 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 	// imported preference is owner-visible (#86), so a lead flipping someone
 	// else's row sees nothing there. The retire pass just above runs through
 	// the SECURITY DEFINER review_apply_* functions, which do see it, so its
-	// row counts are the authoritative existence signal. The flipped row's
-	// key still falls back to decideKey's hash form in that case, because the
-	// original key is only readable through the same blocked lookup.
+	// row counts are the authoritative existence signal. The key comes from
+	// the review payload's slot and ordinal (see decideRow.key), so the
+	// blocked lookup is not needed for that either.
 	retired := map[string]bool{}
 	for _, r := range out.Retire {
 		n, err := apply(r.Kind, r.Body, store.InstructionStatusRetired)
@@ -260,7 +275,10 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 		if !otherExists {
 			return fmt.Errorf("review decide: matched no row")
 		}
-		key := decideKey(keyForBody(r.Body, insByBody, prefByBody), r.Kind, r.Body)
+		key, err := decideKey(keyForBody(r.Body, insByBody, prefByBody), r.Kind, r.key)
+		if err != nil {
+			return err
+		}
 		nid, err := uuid.NewV7()
 		if err != nil {
 			return err
@@ -270,7 +288,7 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 			if _, err := q.InsertInstruction(ctx, store.InsertInstructionParams{
 				ID:         pgUUID(nid),
 				ScopeID:    pgUUID(leaf),
-				Visibility: store.VisibilityTeam,
+				Visibility: importer.TargetVisibility("instruction"),
 				OwnerID:    pgUUID(p.ID),
 				Kind:       store.InstructionKindRule,
 				Key:        key,
@@ -282,9 +300,12 @@ func commitReviewDecision(ctx context.Context, tx pgx.Tx, p *identity.Principal,
 			}
 		case "preference":
 			if _, err := q.InsertPreference(ctx, store.InsertPreferenceParams{
-				ID:         pgUUID(nid),
-				ScopeID:    pgUUID(prefScope),
-				Visibility: store.VisibilityTeam,
+				ID:      pgUUID(nid),
+				ScopeID: pgUUID(prefScope),
+				// Same helper the importer files through: a preference is a
+				// personal row and must not become team-readable just because
+				// a lead flipped its kind (#86).
+				Visibility: importer.TargetVisibility("preference"),
 				OwnerID:    pgUUID(p.ID),
 				Key:        key,
 				Body:       r.Body,
@@ -391,17 +412,26 @@ func indexPreferenceBodies(rows []store.ListPreferencesByBodiesRow) (map[string]
 	return out, nil
 }
 
-func decideKey(existing, asKind, body string) string {
+// decideKey re-kinds the key of the row an operator flipped. `existing` is the
+// key read back under the decider's own RLS session, which is empty whenever
+// the row is owner-visible and the decider is not its owner (#86); `slotKey`
+// is the same key recomputed from the review payload, which is always
+// available. There is deliberately no content-hash fallback: a hash-keyed row
+// is an orphan no later import can match (#80), so a missing key is an error,
+// not something to paper over.
+func decideKey(existing, asKind, slotKey string) (string, error) {
 	if existing != "" {
 		for _, k := range []string{"instruction", "preference"} {
 			old := "import." + k + "."
 			if strings.HasPrefix(existing, old) {
-				return "import." + asKind + "." + strings.TrimPrefix(existing, old)
+				return "import." + asKind + "." + strings.TrimPrefix(existing, old), nil
 			}
 		}
 	}
-	sum := sha256.Sum256([]byte(body))
-	return "import." + asKind + ".review." + hex.EncodeToString(sum[:6])
+	if slotKey == "" {
+		return "", fmt.Errorf("review decide: no key for the flipped row")
+	}
+	return slotKey, nil
 }
 
 func headingOfSlot(slot string) string {

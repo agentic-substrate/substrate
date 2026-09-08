@@ -378,13 +378,24 @@ func labelTargets(res *ApplyResult, sc scope.Path) {
 // just because its owner onboarded (#86). A review item carries no
 // visibility of its own, so it gets none here.
 func plannedTarget(sc scope.Path, kind string) (string, store.Visibility) {
+	if kind == "preference" {
+		return teamPath(sc).String(), TargetVisibility(kind)
+	}
+	return sc.String(), TargetVisibility(kind)
+}
+
+// TargetVisibility is the visibility half of plannedTarget, exported because
+// review decide files rows on the same terms when it flips a conflict's kind.
+// Duplicating the literal there is how the two drift, and only one of the two
+// is covered by the import tests.
+func TargetVisibility(kind string) store.Visibility {
 	switch kind {
 	case "preference":
-		return teamPath(sc).String(), store.VisibilityOwner
+		return store.VisibilityOwner
 	case "import_conflict":
-		return sc.String(), ""
+		return ""
 	default:
-		return sc.String(), store.VisibilityTeam
+		return store.VisibilityTeam
 	}
 }
 
@@ -415,8 +426,12 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 		if err != nil {
 			return err
 		}
-		// Use the visibility the dry-run already showed the operator; fall
-		// back to the same helper that produced it so the two can never drift.
+		// Use the visibility the dry-run already showed the operator, so the
+		// preview cannot drift from the write. labelTargets stamps every
+		// Active and Proposed row and those are the only kinds reaching
+		// writeRow, so the fallback below is unreachable today: it is
+		// defensive against a future planner path that forgets to label,
+		// not a live branch.
 		vis := store.Visibility(row.Visibility)
 		if vis == "" {
 			_, vis = plannedTarget(sc, row.Kind)
@@ -852,6 +867,13 @@ func machineClientID(host, scope string) uuid.UUID {
 // now-stale ordinal. Reconciling them is deliberately not attempted.
 func rowKey(kind, rel, heading string, ordinal int) string {
 	return strings.Join([]string{"import", slug(kind), slug(rel), slug(heading), strconv.Itoa(ordinal)}, ".")
+}
+
+// RowKey exposes rowKey to review decide, which re-keys a row whose kind an
+// operator flipped. It must land on the key a re-import would compute, or the
+// flipped row is an orphan no later import can match (#80).
+func RowKey(kind, rel, heading string, ordinal int) string {
+	return rowKey(kind, rel, heading, ordinal)
 }
 
 func slug(s string) string {
