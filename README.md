@@ -193,6 +193,46 @@ Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire i
 `./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
 arguments reports the version.
 
+### Exclude the corpus that should never be imported
+
+`-exclude` takes a glob matched against each file's path relative to its root; `**` spans
+separators, and the flag repeats. **Set it before the first import.** A home directory holds far
+more `AGENTS.md`/`CLAUDE.md` files than it has real configuration: git worktree checkouts each
+carry a copy of their repo's file, skill eval fixtures carry deliberately synthetic ones, and a
+dependency directory like `.nvm` carries someone else's project entirely.
+
+Measured on one real home (2026-09-08), the difference between scanning everything and scanning
+only the primary checkouts:
+
+| | Files | Blocks | Conflicts | Slots | Slots >1 block |
+|---|---|---|---|---|---|
+| No excludes | 56 | 861 | 79 | 301 | 136 |
+| Excludes below | 18 | 459 | 22 | 126 | 69 |
+
+Conflicts are the population a human has to key by hand, so the 79 → 22 drop is the number that
+matters. Most of the excluded "conflicts" were worktree copies of one file disagreeing with each
+other — noise that reads exactly like a real disagreement between two machines.
+
+```sh
+./bin/substrate import scan -root "$HOME" -hostname wsl -out /abs/path/inventory.json \
+    -exclude '.nvm/**' \
+    -exclude '**/node_modules/**' \
+    -exclude '**/eval-*/**' \
+    -exclude '**/fixtures/**' \
+    -exclude 'worktrees/**' \
+    -exclude '**/worktrees/**' \
+    -exclude '**/.worktrees/**' \
+    -exclude '**/.git-worktrees/**' \
+    -exclude 'repos/*-worktrees/**' \
+    -exclude 'repos/.wt/**' -exclude 'repos/.wt-*/**' \
+    -exclude 'repos/*-wt/**' -exclude 'repos/*-wt-*/**' -exclude 'repos/wt-*/**'
+```
+
+Adapt the worktree patterns to your own naming — there is no universal convention, and a missed
+one is silent: the copy is scanned, its blocks dedupe against the primary checkout's, and the
+`rel` that survives is whichever file the walk reached first. Re-run `import plan` and read the
+file list back before committing anything.
+
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
 requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
 more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
