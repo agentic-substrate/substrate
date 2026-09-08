@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -174,7 +175,8 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		if conflictSlots[b.Rel+"#"+b.Heading] {
 			continue
 		}
-		if identicalActive(b.Body, activeIns, activePref) {
+		body := sanitizeStored(b.Body)
+		if identicalActive(body, activeIns, activePref) {
 			continue
 		}
 		row := PlannedRow{
@@ -182,13 +184,16 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			Kind:     b.Kind,
 			Key:      rowKey(b.Kind, b.Rel, b.Heading, b.Hash),
 			Hash:     b.Hash,
-			Body:     b.Body,
+			Body:     body,
 		}
 		if row.Kind == "" {
 			row.Kind = Classify(b).Kind
 		}
+		if secretSkip(res, skipSource(row.Kind, b.Rel, b.Heading, b.Hash), body) {
+			continue
+		}
 		slot := b.Rel + "#" + b.Heading
-		if existing := activeBodyAtSlot(row.Kind, b.Rel, b.Heading, activeIns, activePref); existing != "" && existing != b.Body {
+		if existing := activeBodyAtSlot(row.Kind, b.Rel, b.Heading, activeIns, activePref); existing != "" && existing != body {
 			row.Status = string(store.InstructionStatusProposed)
 			row.Slot = slot
 			res.Proposed = append(res.Proposed, row)
@@ -202,11 +207,11 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Kind:     "import_conflict",
 					Status:   "conflict",
 					Hash:     b.Hash,
-					Body:     b.Body,
+					Body:     body,
 					Slot:     slot,
 					Pair: []ConflictSide{
 						{Hash: sha256Hex([]byte(existing)), Hostnames: []string{other}, Body: existing},
-						{Hash: b.Hash, Hostnames: []string{req.Machine}, Body: b.Body},
+						{Hash: b.Hash, Hostnames: []string{req.Machine}, Body: body},
 					},
 				})
 				reviewSlots[slot] = true
@@ -227,17 +232,35 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			if !hostIn(side.Hostnames, req.Machine) {
 				continue
 			}
-			if identicalActive(side.Body, activeIns, activePref) {
+			body := sanitizeStored(side.Body)
+			if identicalActive(body, activeIns, activePref) {
 				continue
 			}
-			kind := Classify(Block{Heading: headingOfSlot(c.Slot), Body: side.Body, Rel: relOfSlot(c.Slot)}).Kind
+			kind := Classify(Block{Heading: headingOfSlot(c.Slot), Body: body, Rel: relOfSlot(c.Slot)}).Kind
+			src := skipSource(kind, relOfSlot(c.Slot), headingOfSlot(c.Slot), side.Hash)
+			pair := make([]ConflictSide, len(c.Pair))
+			pairSecret := false
+			for i, s := range c.Pair {
+				sb := sanitizeStored(s.Body)
+				pair[i] = ConflictSide{
+					Hash:      s.Hash,
+					Hostnames: s.Hostnames,
+					Body:      sb,
+				}
+				if secretSkip(res, src, sb) {
+					pairSecret = true
+				}
+			}
+			if pairSecret {
+				continue
+			}
 			res.Proposed = append(res.Proposed, PlannedRow{
 				Hostname: req.Machine,
 				Kind:     kind,
 				Status:   string(store.InstructionStatusProposed),
 				Key:      rowKey(kind, relOfSlot(c.Slot), headingOfSlot(c.Slot), side.Hash),
 				Hash:     side.Hash,
-				Body:     side.Body,
+				Body:     body,
 				Slot:     c.Slot,
 			})
 			if !reviewSlots[c.Slot] {
@@ -246,9 +269,9 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Kind:     "import_conflict",
 					Status:   "conflict",
 					Hash:     side.Hash,
-					Body:     side.Body,
+					Body:     body,
 					Slot:     c.Slot,
-					Pair:     c.Pair,
+					Pair:     pair,
 				})
 				reviewSlots[c.Slot] = true
 			}
@@ -263,13 +286,25 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		if !validMemoryKind(kind) {
 			kind = "observation"
 		}
+		body := sanitizeStored(m.Body)
+		title := sanitizeStored(m.Title)
+		if title == "" {
+			title = body
+		}
+		src := "memory:" + m.Hash
+		if len(m.Hash) > 12 {
+			src = "memory:" + m.Hash[:12]
+		}
+		if secretSkip(res, src, title, body) {
+			continue
+		}
 		res.Memory = append(res.Memory, PlannedRow{
 			Hostname: req.Machine,
 			Kind:     kind,
 			Status:   string(store.MemoryStatusUnverified),
 			Hash:     m.Hash,
-			Body:     m.Body,
-			Title:    m.Title,
+			Body:     body,
+			Title:    title,
 		})
 	}
 
@@ -558,6 +593,60 @@ func activeBodyAtSlot(kind, rel, heading string, ins []store.ListActiveInstructi
 	return ""
 }
 
+// sanitizeStored strips control bytes and caps length so the scanner sees the
+// bytes that land in the row (same order as memory.prepareWrite).
+func sanitizeStored(s string) string {
+	return capBody(stripControls(s))
+}
+
+func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func capBody(s string) string {
+	if len(s) <= 4096 {
+		return s
+	}
+	s = s[:4096]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func skipSource(kind, rel, heading, hash string) string {
+	slot := rel + "#" + heading
+	if strings.Trim(slot, "#") == "" {
+		h := hash
+		if len(h) > 12 {
+			h = h[:12]
+		}
+		return kind + ":" + h
+	}
+	return kind + ":" + slot
+}
+
+func secretSkip(res *ApplyResult, source string, parts ...string) bool {
+	for _, p := range parts {
+		if err := policy.ScanSecrets(p); err != nil {
+			res.Skipped = append(res.Skipped, Skipped{
+				Source: source,
+				Reason: policy.CodeSecretDetected,
+			})
+			return true
+		}
+	}
+	return false
+}
+
 func lookupPath(ctx context.Context, q *store.Queries, p scope.Path) (ids []pgtype.UUID, teamScopeID, leaf, leafTeam uuid.UUID, err error) {
 	var parent pgtype.UUID
 	for i := range p {
@@ -777,6 +866,9 @@ func (r *ApplyResult) Format() string {
 	write(r.Proposed)
 	write(r.Conflict)
 	write(r.Memory)
+	for _, s := range r.Skipped {
+		fmt.Fprintf(&b, "  skipped %s %s\n", s.Source, s.Reason)
+	}
 	return b.String()
 }
 

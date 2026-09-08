@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -10,21 +9,12 @@ import (
 	"github.com/agentic-substrate/substrate/internal/policy"
 )
 
-var (
-	awsKeyRe      = regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
-	pemRe         = regexp.MustCompile(`(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----`)
-	jwtRe         = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
-	githubTokenRe = regexp.MustCompile(`\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]{20,}\b`)
-	identRe       = regexp.MustCompile(`[A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]+`)
-)
+var identRe = regexp.MustCompile(`[A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]+`)
 
-// scanSecrets returns SUBSTRATE_SECRET_DETECTED when s looks like an AWS key,
-// PEM block, JWT, or GitHub token. The match itself is never included in the error.
+// scanSecrets delegates to policy.ScanSecrets so import and memory share one
+// detector (issue #79).
 func scanSecrets(s string) error {
-	if awsKeyRe.MatchString(s) || pemRe.MatchString(s) || jwtRe.MatchString(s) || githubTokenRe.MatchString(s) {
-		return fmt.Errorf("%w", policy.ErrSecretDetected)
-	}
-	return nil
+	return policy.ScanSecrets(s)
 }
 
 func scanAll(parts ...string) error {
