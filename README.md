@@ -271,9 +271,24 @@ lead or `human_admin` decides; the proposer cannot self-approve.
 `substrate-adapter` is the per-machine daemon (EDD §5). With no `-server` it reports its
 version. With `-server` it pulls `GET /v1/render` on start, every 5 minutes, and on a
 `GET /v1/events` SSE wake-up; writes managed files atomically; and posts a `drift_proposal`
-(unified diff) *before* restoring a hand-edited file. Comparisons use `render.DriftHash`
-(footer excluded). Repo discovery scans `-roots` two levels deep (`<root>/*/*`); unknown
-remotes are logged, never auto-created as scopes, and their checkouts are left untouched.
+(unified diff) *before* restoring a hand-edited file, at the scope of the target being
+restored. A rejected or failed proposal degrades that one target — the local file is left
+untouched and the loop continues. Comparisons use `render.DriftHash`
+(footer excluded). Repo discovery scans `-roots` for any real directory holding a `.git`, up to
+two levels below a root, so both the flat `<root>/<repo>` and the nested
+`<root>/<project>/<repo>` layouts are found. A symlink under a root is deliberately not a
+discovery candidate and is not descended into, so a symlink farm pointing at checkouts
+elsewhere is invisible to the daemon; that is what makes the scan loop-free without a cycle
+guard. Symlinks *inside* a discovered checkout are unaffected. A checkout's scope comes from
+its git remote, never from where it sits on disk, so the same repo gets the same scope under
+either layout. A checkout with no remote, an unparseable one, or one the server does not
+bind to a repo scope is logged and skipped, and reported in the sync result
+(`UnknownRemotes` / `UnscopedRemotes`) so an unmanaged machine is never silently healthy:
+unknown remotes are never auto-created as scopes and their checkouts are left untouched.
+A drift proposal about a file in a checkout names that checkout's repo key; the server
+resolves the key to the chain it bound, so no client is ever told, nor gets to choose,
+another team's org/team/project naming. Home-scoped targets such as `~/.claude/CLAUDE.md` have no repo,
+so their proposals use `-scope`; without one, drift is reported but the file is not restored.
 Render targets are confined to the paths `render.Specs()` declares, under `-home` or a
 discovered checkout, with symlinks resolved. `-home` is required with `-server` so the binary
 cannot guess `$HOME` and overwrite pre-cutover harness files. State lives in

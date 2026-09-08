@@ -75,12 +75,19 @@ func (a *api) callTimeout() time.Duration {
 	return DefaultHTTPTimeout
 }
 
-func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]renderTarget, int, error) {
+// renderResponse is GET /v1/render. It carries targets only: the server does
+// not tell the adapter which chain they were compiled for, because a chain
+// names an org, team and project the caller may have no right to read.
+type renderResponse struct {
+	Targets []renderTarget `json:"targets"`
+}
+
+func (a *api) getRender(ctx context.Context, machine string, repos []string) (renderResponse, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
 	defer cancel()
 	u, err := url.Parse(a.base + "/v1/render")
 	if err != nil {
-		return nil, 0, fmt.Errorf("adapter: render url: %w", err)
+		return renderResponse{}, 0, fmt.Errorf("adapter: render url: %w", err)
 	}
 	q := u.Query()
 	if machine != "" {
@@ -92,28 +99,26 @@ func (a *api) getRender(ctx context.Context, machine string, repos []string) ([]
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, 0, err
+		return renderResponse{}, 0, err
 	}
 	a.auth(req)
 	res, err := a.client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("adapter: GET /v1/render: %w", err)
+		return renderResponse{}, 0, fmt.Errorf("adapter: GET /v1/render: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
-		return nil, res.StatusCode, err
+		return renderResponse{}, res.StatusCode, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, res.StatusCode, fmt.Errorf("adapter: GET /v1/render: %s", strings.TrimSpace(string(body)))
+		return renderResponse{}, res.StatusCode, fmt.Errorf("adapter: GET /v1/render: %s", strings.TrimSpace(string(body)))
 	}
-	var out struct {
-		Targets []renderTarget `json:"targets"`
-	}
+	var out renderResponse
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, res.StatusCode, fmt.Errorf("adapter: decode render: %w", err)
+		return renderResponse{}, res.StatusCode, fmt.Errorf("adapter: decode render: %w", err)
 	}
-	return out.Targets, res.StatusCode, nil
+	return out, res.StatusCode, nil
 }
 
 type batchResult struct {
@@ -260,18 +265,28 @@ func (a *api) getSkillsManifest(ctx context.Context, repos []string) ([]manifest
 	return out.Skills, nil
 }
 
-func (a *api) postReview(ctx context.Context, scope, path, diff string) error {
+// postReview files a drift proposal. Exactly one of scopePath and repo is set:
+// a file inside a checkout is named by its repo key and the server derives the
+// chain from its own binding (#58), while a home file has no repo and carries
+// the explicitly configured scope. The adapter never invents a chain and is
+// never handed one.
+func (a *api) postReview(ctx context.Context, scopePath, repo, path, diff string) error {
 	ctx, cancel := context.WithTimeout(ctx, a.callTimeout())
 	defer cancel()
-	payload, err := json.Marshal(map[string]any{
-		"kind":  "drift_proposal",
-		"scope": scope,
+	body := map[string]any{
+		"kind": "drift_proposal",
 		"payload": map[string]string{
 			"path":  path,
 			"diff":  diff,
 			"title": "drift in " + path,
 		},
-	})
+	}
+	if repo != "" {
+		body["repo"] = repo
+	} else {
+		body["scope"] = scopePath
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}

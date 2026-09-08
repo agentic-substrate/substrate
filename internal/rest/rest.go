@@ -153,6 +153,12 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 			targets = append(targets, renderTarget{Path: path, Content: content, SHA256: sum})
 		}
 	}
+	// The chain these targets were compiled for is deliberately NOT returned.
+	// The `scope` table carries no RLS and a repo key resolves for anyone, so
+	// echoing the chain would hand a non-member the org, team and project
+	// names of a repo it may not read. A drift proposal names the repo key the
+	// adapter already has and POST /v1/review re-derives the chain server-side
+	// (#58), so no client ever needs to be told one.
 	writeJSON(w, http.StatusOK, map[string]any{"targets": targets})
 }
 
@@ -442,6 +448,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Kind    string          `json:"kind"`
 		Scope   string          `json:"scope"`
+		Repo    string          `json:"repo"`
 		TeamID  string          `json:"team_id"`
 		Payload json.RawMessage `json:"payload"`
 	}
@@ -449,8 +456,27 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		writeDecodeErr(w, err)
 		return
 	}
-	sc, err := scope.Parse(in.Scope)
+	// A proposal about a checkout names the repo key and nothing else. The
+	// server owns the binding from a repo key to its chain, so the caller
+	// cannot file a row at a chain it invented or was told (#58). `scope` and
+	// `repo` are mutually exclusive: accepting both would let a caller name a
+	// repo and still choose the chain.
+	if in.Repo != "" && in.Scope != "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("scope and repo are mutually exclusive"))
+		return
+	}
+	var sc scope.Path
+	if in.Repo != "" {
+		sc, err = h.repoScope(r.Context(), st, in.Repo)
+		err = maskRepoDenial(err, true)
+	} else {
+		sc, err = scope.Parse(in.Scope)
+	}
 	if err != nil {
+		if in.Repo != "" {
+			writePolicy(w, err)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -498,7 +524,7 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, in.Repo != ""))
 		return
 	}
 	h.recordReviewOpen(r.Context())
@@ -507,6 +533,30 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 		"kind":   string(row.Kind),
 		"status": string(row.Status),
 	})
+}
+
+// repoScope resolves a repo key to the chain the server bound it to. The
+// result is used to place a row, never returned to the caller: resolveRepoPaths
+// reads the RLS-free `scope` table, so handing the chain back would disclose
+// another team's naming. Placement is still gated -- policy.Check runs on the
+// derived chain and the review_item INSERT policy calls scope_writable.
+func (h *Handler) repoScope(ctx context.Context, st *store.Store, key string) (scope.Path, error) {
+	var out scope.Path
+	err := st.Tx(ctx, func(tx pgx.Tx) error {
+		paths, err := resolveRepoPaths(ctx, tx, []string{key})
+		if err != nil {
+			return err
+		}
+		if len(paths) != 1 {
+			return policyDenied(key)
+		}
+		out = paths[0]
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (h *Handler) reviewList(w http.ResponseWriter, r *http.Request) {
@@ -792,6 +842,36 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
 
+// errRLSRefused is the single body every row-level-security refusal returns.
+var errRLSRefused = fmt.Errorf("%w: row-level security refused this write", policy.ErrDeniedScope)
+
+// maskRepoDenial collapses "no such repo" and "bound to a scope you may not
+// write" into one indistinguishable 403. Told apart, they are an oracle: the
+// `scope` table has no RLS and resolveRepoPaths resolves any key for anyone, so
+// a caller could POST guessed repo keys in a loop and learn exactly which repos
+// this control plane binds -- private repo names, which is the same class of
+// disclosure the chain naming was removed to prevent.
+//
+// Only denials are masked. A genuine server fault must still surface as a 500
+// rather than being reported to the caller as a permission problem.
+func maskRepoDenial(err error, repoPath bool) error {
+	if err == nil || !repoPath {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	isDenial := errors.Is(err, policy.ErrDeniedScope) ||
+		errors.Is(err, policy.ErrDeniedVisibility) ||
+		errors.Is(err, policy.ErrNeedsReview) ||
+		(errors.As(err, &pgErr) && pgErr.Code == "42501")
+	if !isDenial {
+		return err
+	}
+	// The key is deliberately not echoed. The caller supplied it, so repeating
+	// it adds nothing, and leaving it out makes the two outcomes byte-identical
+	// instead of merely similarly-shaped.
+	return fmt.Errorf("%w: repo is not available to this principal", policy.ErrDeniedScope)
+}
+
 func writePolicy(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
 	var pgErr *pgconn.PgError
@@ -805,7 +885,11 @@ func writePolicy(w http.ResponseWriter, err error) {
 	case errors.Is(err, policy.ErrSecretDetected):
 		code = http.StatusBadRequest
 	case errors.As(err, &pgErr) && pgErr.Code == "42501":
+		// Never echo the raw driver text. "new row violates row-level security
+		// policy for table X" names the table and distinguishes an RLS refusal
+		// from every other denial, which is enough to probe with.
 		code = http.StatusForbidden
+		err = errRLSRefused
 	default:
 		slog.Error("v1 handler failed", "err", err)
 	}
