@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -198,11 +199,11 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		row := PlannedRow{
 			Hostname: machine,
 			Kind:     kind,
-			Key:      rowKey(kind, rel, heading, b.Hash),
+			Key:      rowKey(kind, rel, heading, b.Ordinal),
 			Hash:     b.Hash,
 			Body:     body,
 		}
-		if existing := activeBodyAtSlot(row.Kind, rel, heading, activeIns, activePref); existing != "" && existing != body {
+		if existing := activeBodyAtKey(row.Kind, row.Key, activeIns, activePref); existing != "" && existing != body {
 			other := sanitizeStored(storedHost)
 			if other == "" {
 				other = machine
@@ -222,8 +223,10 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Body:     body,
 					Slot:     slot,
 					Pair: []ConflictSide{
-						{Hash: sha256Hex([]byte(existing)), Hostnames: []string{other}, Body: existing},
-						{Hash: b.Hash, Hostnames: []string{machine}, Body: body},
+						// Both sides sit at the same ordinal by construction:
+						// `existing` is the row holding row.Key.
+						{Hash: sha256Hex([]byte(existing)), Hostnames: []string{other}, Body: existing, Ordinal: b.Ordinal},
+						{Hash: b.Hash, Hostnames: []string{machine}, Body: body, Ordinal: b.Ordinal},
 					},
 				})
 				reviewSlots[slot] = true
@@ -272,6 +275,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Hash:      s.Hash,
 					Hostnames: hosts,
 					Body:      sb,
+					Ordinal:   s.Ordinal,
 				}
 				sideSrc := skipSource(kind, rel, heading, s.Hash)
 				parts := append([]string{sb}, hosts...)
@@ -286,7 +290,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				Hostname: machine,
 				Kind:     kind,
 				Status:   string(store.InstructionStatusProposed),
-				Key:      rowKey(kind, rel, heading, side.Hash),
+				Key:      rowKey(kind, rel, heading, side.Ordinal),
 				Hash:     side.Hash,
 				Body:     body,
 				Slot:     slot,
@@ -603,18 +607,24 @@ func validatePlanSlots(plan Plan) error {
 	return nil
 }
 
-func activeBodyAtSlot(kind, rel, heading string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) string {
-	prefix := strings.Join([]string{"import", slug(kind), slug(rel), slug(heading)}, ".") + "."
+// activeBodyAtKey returns the body of the active row that already holds this
+// exact key, or "" if the key is free. It matches the whole key, not the slot
+// prefix: under ordinal keys a slot is a namespace holding one row per bullet,
+// so only the row at the same ordinal is the incoming block's predecessor. A
+// prefix match pairs an edit against an arbitrary sibling, attaching the
+// supersession edge to a rule the edit never touched (Gotcha 6), and reports a
+// brand-new bullet as a conflict with a rule it does not contradict.
+func activeBodyAtKey(kind, key string, ins []store.ListActiveInstructionsRow, pref []store.ListActivePreferencesRow) string {
 	if kind == "preference" {
 		for _, r := range pref {
-			if strings.HasPrefix(r.Key, prefix) {
+			if r.Key == key {
 				return r.Body
 			}
 		}
 		return ""
 	}
 	for _, r := range ins {
-		if strings.HasPrefix(r.Key, prefix) {
+		if r.Key == key {
 			return r.Body
 		}
 	}
@@ -772,12 +782,22 @@ func machineClientID(host, scope string) uuid.UUID {
 	return uuid.NewSHA1(importNS, []byte("substrate-import-machine/"+host+"/"+scope))
 }
 
-func rowKey(kind, rel, heading, hash string) string {
-	h := hash
-	if len(h) > 12 {
-		h = h[:12]
-	}
-	return strings.Join([]string{"import", slug(kind), slug(rel), slug(heading), h}, ".")
+// rowKey keys an imported row by where it came from, not by what it says: a
+// content hash made every edit a brand-new rule that could override nothing
+// (#80). The ordinal is the bullet's position in its slot.
+//
+// Ordinal, like the hash before it, arrives in an operator-supplied plan.json
+// and is never checked against real source position, so the key is not a trust
+// boundary. What stops a forged or colliding key from promoting the wrong
+// content is the body-equality check in activeBodyAtKey/identicalActive plus
+// the hash-parity guard in validatePlanSlots — not key uniqueness. Do not
+// simplify either away on the grounds that the key already discriminates.
+//
+// Accepted limitation: a pure reorder of unedited bullets is skipped by
+// identicalActive before its key is ever consulted, so those rows keep a
+// now-stale ordinal. Reconciling them is deliberately not attempted.
+func rowKey(kind, rel, heading string, ordinal int) string {
+	return strings.Join([]string{"import", slug(kind), slug(rel), slug(heading), strconv.Itoa(ordinal)}, ".")
 }
 
 func slug(s string) string {

@@ -104,16 +104,21 @@ type ApplyResult struct {
 
 // Block is one content-hash-unique markdown block after classification.
 type Block struct {
-	Hash         string   `json:"hash"`
-	Heading      string   `json:"heading"`
-	Body         string   `json:"body"`
-	Kind         string   `json:"kind"`
-	Confidence   float64  `json:"confidence"`
-	Note         string   `json:"note"`
-	ImpliedScope string   `json:"implied_scope"`
-	DetectedType string   `json:"detected_type"`
-	Rel          string   `json:"rel"`
-	Sources      []Source `json:"sources"`
+	Hash         string  `json:"hash"`
+	Heading      string  `json:"heading"`
+	Body         string  `json:"body"`
+	Kind         string  `json:"kind"`
+	Confidence   float64 `json:"confidence"`
+	Note         string  `json:"note"`
+	ImpliedScope string  `json:"implied_scope"`
+	DetectedType string  `json:"detected_type"`
+	Rel          string  `json:"rel"`
+	// Ordinal is the block's position within its (rel, heading) slot in source
+	// order. It keys the instruction instead of a content hash so that editing
+	// one bullet does not mint a new rule (#80). Reordering bullets does
+	// re-key them — the accepted limitation.
+	Ordinal int      `json:"ordinal"`
+	Sources []Source `json:"sources"`
 }
 
 // Source is one machine/path a block was observed on.
@@ -134,6 +139,7 @@ type ConflictSide struct {
 	Hash      string   `json:"hash"`
 	Hostnames []string `json:"hostnames"`
 	Body      string   `json:"body"`
+	Ordinal   int      `json:"ordinal"`
 }
 
 // Classification is a heuristic kind with an honest confidence.

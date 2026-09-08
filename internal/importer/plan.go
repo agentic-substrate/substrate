@@ -82,6 +82,12 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 		bySlot[k] = append(bySlot[k], b)
 	}
 
+	for _, k := range slotOrder {
+		for i, b := range bySlot[k] {
+			b.Ordinal = i
+		}
+	}
+
 	plan := &Plan{}
 	for _, k := range slotOrder {
 		blocks := bySlot[k]
@@ -97,6 +103,7 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 				Hash:      b.Hash,
 				Hostnames: hostnames(b.Sources),
 				Body:      b.Body,
+				Ordinal:   b.Ordinal,
 			})
 		}
 		plan.Conflicts = append(plan.Conflicts, c)
