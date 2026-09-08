@@ -193,6 +193,70 @@ Tokens are printed once and stored only as a SHA-256 hash; agent tokens expire i
 `./bin/substrate token revoke <token> --dsn "$SUBSTRATE_DSN"`. `./bin/substrate` with no
 arguments reports the version.
 
+### Exclude the corpus that should never be imported
+
+`-exclude` takes a glob matched against each file's path relative to its root; `**` spans
+separators, and the flag repeats. **Set it before the first import.** A home directory holds far
+more `AGENTS.md`/`CLAUDE.md` files than it has real configuration: git worktree checkouts each
+carry a copy of their repo's file, skill eval fixtures carry deliberately synthetic ones, and a
+dependency directory like `.nvm` carries someone else's project entirely.
+
+Measured on one real home (2026-09-08), the difference between scanning everything and scanning
+only the primary checkouts:
+
+| | Files | Blocks | Conflicts | Slots | Slots >1 block |
+|---|---|---|---|---|---|
+| No excludes | 56 | 861 | 79 | 301 | 136 |
+| Excludes below | 18 | 459 | 22 | 126 | 69 |
+
+Conflicts are the population a human has to key by hand, so the 79 → 22 drop is the number that
+matters. Most of the excluded "conflicts" were worktree copies of one file disagreeing with each
+other — noise that reads exactly like a real disagreement between two machines.
+
+**Judge an exclude set by the file list and the conflict count, never the block count.** Blocks
+dedupe by content hash and are attributed to the *first* file the walk reaches
+(`BuildPlan`'s `byHash` map), so excluding a worktree copy hands its blocks back to the primary
+checkout rather than deleting them. Widening the set above from six patterns to fourteen — a strict
+superset — took blocks from 271 *up* to 459 while conflicts fell from 71 to 22. More exclusions,
+more blocks, better corpus.
+
+```sh
+./bin/substrate import scan -root "$HOME" -hostname wsl -out /abs/path/inventory.json \
+    -exclude '.nvm/**' \
+    -exclude '**/node_modules/**' \
+    -exclude '**/eval-*/**' \
+    -exclude '**/fixtures/**' \
+    -exclude 'worktrees/**' \
+    -exclude '**/worktrees/**' \
+    -exclude '**/.worktrees/**' \
+    -exclude '**/.git-worktrees/**' \
+    -exclude 'repos/*-worktrees/**' \
+    -exclude 'repos/.wt/**' -exclude 'repos/.wt-*/**' \
+    -exclude 'repos/*-wt/**' -exclude 'repos/*-wt-*/**' -exclude 'repos/wt-*/**'
+```
+
+### Verify the survivors by hand — the glob list will not catch everything
+
+There is no universal worktree convention, and a missed one is **silent**: the copy is scanned,
+its blocks dedupe against the primary checkout's, and the `rel` that survives is whichever file
+the walk reached first.
+
+On the home measured above, the exclude list still let two worktrees through — `plotlens-trivy-cve`
+and `parley-shots-tshirt` — because they are named after their feature branch and carry no `wt` or
+`worktree` token for a glob to match. Assume yours has some too. A worktree's `.git` is a *file*
+containing a `gitdir:` pointer, not a directory, which is what distinguishes it from a primary
+checkout:
+
+```sh
+jq -r '.files[].rel' /abs/path/inventory.json | sort -u        # what the scan kept
+jq -r '.files[].path' /abs/path/inventory.json | while read -r f; do
+    d=$(dirname "$f")
+    [ -f "$d/.git" ] && echo "worktree copy, exclude it: $f"
+done
+```
+
+Do that before `--commit`. Nothing downstream will tell you a worktree copy got imported.
+
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
 requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
 more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
