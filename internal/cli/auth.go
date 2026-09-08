@@ -127,11 +127,31 @@ func validateToken(ctx context.Context, d Deps, server, token string) error {
 	}
 	defer func() { _ = res.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
+	// 401 and 403 are different problems and must not share advice. rest.go
+	// maps every policy denial and every RLS refusal (Postgres 42501) to 403,
+	// so a brand-new principal whose scope denies gets a 403 with a perfectly
+	// good token: telling it to mint another sends it round the loop forever.
+	if res.StatusCode == http.StatusUnauthorized {
 		return &UserError{
 			What: "the server rejected that token",
-			Why:  fmt.Sprintf("GET %s/v1/render returned %s", server, res.Status),
+			Why:  fmt.Sprintf("GET %s/v1/render returned %s: the credential is unknown, malformed or revoked", server, res.Status),
 			Next: "mint a fresh one with: substrate admin create-user --dsn <dsn> --name <you> --org <org> --team <team>",
+		}
+	}
+	if res.StatusCode == http.StatusForbidden {
+		return &UserError{
+			What: "the token authenticated but the server denied the request",
+			Why:  fmt.Sprintf("GET %s/v1/render returned %s: this is a permissions problem, not a token problem -- the scope, visibility or review policy refused", server, res.Status),
+			Next: "ask an org admin for access to the scope you are working in, or pick one you hold: substrate context use --org <org> --team <team>",
+		}
+	}
+	// 503 is requireStore: the control plane is up but its database is not.
+	// The token was never examined, so refusing to store it would be a guess.
+	if res.StatusCode == http.StatusServiceUnavailable {
+		return &UserError{
+			What: fmt.Sprintf("%s is not ready to validate a token", server),
+			Why:  fmt.Sprintf("GET %s/v1/render returned %s: the server is reachable but its database is not, so the token was not checked either way", server, res.Status),
+			Next: "wait for the server to become ready, then retry: substrate doctor",
 		}
 	}
 	if res.StatusCode >= 400 {

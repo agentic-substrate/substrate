@@ -130,6 +130,16 @@ makes a novel instance of the same trap recognizable.
     package-level `rootCmd` or flag var makes two roots share state, which `-race` reports as an
     intermittent failure in an unrelated test rather than as the aliasing bug it is.
 
+14. **A bootstrap command cannot use `store.Tx`.** `Tx` and `TxReadOnly` return `ErrNoPrincipal`
+    when `identity.FromContext(ctx)` is nil, and nothing in `cmd/` ever puts a principal there —
+    `substrate admin create-user` is the command that creates the first one, so by definition it
+    has none. It uses `store.TxBootstrap` (no principal, no session GUCs, still one atomic
+    transaction); `token mint` uses `st.Pool()` for the same reason. *Failure mode:* the command
+    opens the pool, runs migrations, then dies with the bare string `store: no principal on
+    context` having written zero rows — and it stays green in CI, because a test that injects a
+    fake `DBTX` straight into the domain function never reaches `store.Tx` at all. A bootstrap
+    path must be tested end-to-end against a real Postgres.
+
 ## Conventions
 
 - **Errors:** wrap with `%w` and check with `errors.Is`/`As`. Policy denials return a

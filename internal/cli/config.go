@@ -102,11 +102,29 @@ func writeJSON0600(path string, v any) error {
 		_ = tmp.Close()
 		return fmt.Errorf("write %s: %w", tmpName, err)
 	}
+	// Sync before the rename, or the claim "a crash never truncates it" is
+	// false: on ext4 with data=writeback the rename can reach the disk while
+	// the bytes are still in page cache, and the reboot finds a zero-length
+	// config.json where a valid one used to be.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync %s: %w", tmpName, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", tmpName, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("rename onto %s: %w", path, err)
+	}
+	// And fsync the directory, so the rename itself survives the crash rather
+	// than leaving the old file, or no file, behind.
+	dh, err := os.Open(dir) //nolint:gosec // dir is the user's own config dir
+	if err != nil {
+		return fmt.Errorf("open %s: %w", dir, err)
+	}
+	defer func() { _ = dh.Close() }()
+	if err := dh.Sync(); err != nil {
+		return fmt.Errorf("sync %s: %w", dir, err)
 	}
 	return nil
 }

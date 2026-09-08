@@ -81,7 +81,9 @@ it 0600, and revoke it with "substrate token revoke" when the machine retires.`,
 			var res identity.CreateUserResult
 			// One transaction: CreateUser writes five tables, and a partial
 			// failure must leave zero rows rather than an org with no members.
-			err = st.Tx(ctx, func(tx pgx.Tx) error {
+			// TxBootstrap, not Tx: Tx requires a principal on the context, and
+			// this is the command that creates the first one (Gotcha 12).
+			err = st.TxBootstrap(ctx, func(tx pgx.Tx) error {
 				var terr error
 				res, terr = identity.CreateUser(ctx, tx, identity.CreateUserInput{
 					DisplayName: flags.name,
@@ -116,6 +118,6 @@ it 0600, and revoke it with "substrate token revoke" when the machine retires.`,
 	f.StringVar(&flags.org, "org", "", "org to create or reuse (required)")
 	f.StringVar(&flags.team, "team", "", "team to create or reuse inside the org (required)")
 	f.StringVar(&flags.machine, "machine", "", "machine the token is issued for (defaults to $HOSTNAME)")
-	f.BoolVar(&flags.admin, "admin", false, "mint at human_admin trust rather than human")
+	f.BoolVar(&flags.admin, "admin", false, "mint at human_admin trust and join the team as its admin, rather than human at member role")
 	return cmd
 }

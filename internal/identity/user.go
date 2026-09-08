@@ -15,14 +15,18 @@ type CreateUserInput struct {
 	Org         string
 	Team        string
 	Machine     string
-	// Admin mints the principal at human_admin trust. The default is human;
-	// IsAdmin is true only for human_admin (EDD R25).
+	// Admin mints the principal at human_admin trust and makes it a team
+	// admin. The default is human at member role; IsAdmin is true only for
+	// human_admin (EDD R25).
 	Admin bool
 	// Scopes are the token's capabilities, e.g. memory:write.
 	Scopes []string
 }
 
 // CreateUserResult is shown once. The database holds only the token's hash.
+// OrgID and TeamID are the ids of the rows the principal is actually attached
+// to, which are the pre-existing rows when --org or --team names one that is
+// already there -- not the ids CreateUser generated and then discarded.
 type CreateUserResult struct {
 	PrincipalID uuid.UUID
 	OrgID       uuid.UUID
@@ -48,8 +52,13 @@ func CreateUser(ctx context.Context, tx DBTX, in CreateUserInput) (CreateUserRes
 		return CreateUserResult{}, fmt.Errorf("admin create-user: --machine is required")
 	}
 	trust := TrustHuman
+	// The membership role follows --admin rather than being hardcoded: a
+	// bootstrap user created without --admin used to land as a team admin,
+	// which is an escalation the flag help did not describe.
+	role := "member"
 	if in.Admin {
 		trust = TrustHumanAdmin
+		role = "admin"
 	}
 	ids := make([]uuid.UUID, 4)
 	for i := range ids {
@@ -69,13 +78,17 @@ func CreateUser(ctx context.Context, tx DBTX, in CreateUserInput) (CreateUserRes
 		scopes = []string{}
 	}
 
-	if _, err := tx.Exec(ctx, `INSERT INTO org (id, name) VALUES ($1, $2)
-		ON CONFLICT (name) DO NOTHING`, orgID, in.Org); err != nil {
+	// ON CONFLICT DO UPDATE, not DO NOTHING: DO NOTHING returns no row when
+	// the org already exists, and the result would then carry a generated id
+	// that names no row anywhere.
+	if err := tx.QueryRow(ctx, `INSERT INTO org (id, name) VALUES ($1, $2)
+		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`, orgID, in.Org).Scan(&orgID); err != nil {
 		return CreateUserResult{}, fmt.Errorf("admin create-user: org: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO team (id, org_id, name)
-		SELECT $1, o.id, $3 FROM org o WHERE o.name = $2
-		ON CONFLICT (org_id, name) DO NOTHING`, teamID, in.Org, in.Team); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO team (id, org_id, name) VALUES ($1, $2, $3)
+		ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`, teamID, orgID, in.Team).Scan(&teamID); err != nil {
 		return CreateUserResult{}, fmt.Errorf("admin create-user: team: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO principal (id, kind, display_name, trust)
@@ -83,8 +96,7 @@ func CreateUser(ctx context.Context, tx DBTX, in CreateUserInput) (CreateUserRes
 		return CreateUserResult{}, fmt.Errorf("admin create-user: principal: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO membership (principal_id, team_id, role)
-		SELECT $1, t.id, 'admin' FROM team t JOIN org o ON o.id = t.org_id
-		WHERE o.name = $2 AND t.name = $3`, princID, in.Org, in.Team); err != nil {
+		VALUES ($1, $2, $3)`, princID, teamID, role); err != nil {
 		return CreateUserResult{}, fmt.Errorf("admin create-user: membership: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO api_token (id, principal_id, machine, token_hash, scopes)

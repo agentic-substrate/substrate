@@ -216,12 +216,12 @@ ported separately.
 
 | Command | What it does |
 |---|---|
-| `substrate admin create-user` | Creates org, team, user principal, membership and token in one transaction. Requires the DSN. Prints the token once. |
+| `substrate admin create-user` | Creates org, team, user principal, membership and token in one transaction. Requires the DSN. Prints the token once. `--admin` mints at `human_admin` trust **and** joins the team as its admin; without it the principal is `human` at `member` role. Reusing an existing `--org`/`--team` attaches to that row rather than creating a second one. |
 | `substrate auth login` | Reads a token from **stdin**, validates it against the server, writes `config.json` 0600. |
 | `substrate auth status` | Reports the stored server and whether a token is present. Never prints the token. |
 | `substrate context use` | Saves an org/team/project as the default scope. |
 | `substrate context show` | Prints the resolved scope and the source that won. |
-| `substrate doctor` | Checks config, credential, server reachability and scope; prints a fix per failure. |
+| `substrate doctor` | Checks config, credential, server reachability and scope; prints a fix per failure. A 401 is a bad credential and says to mint one; a 403 means the token authenticated and the *policy* refused, so it says to fix scope or access, not to mint again. |
 
 Every command takes `--json` for machine-readable output and `--org/--team/--project` to
 override the saved scope for one invocation.
@@ -240,8 +240,9 @@ First hit wins, and `context show` names the winner:
 ### Config files
 
 `${XDG_CONFIG_HOME:-~/.config}/substrate/` holds `config.json` (server plus token) and
-`context.json`. Both are written mode 0600 via a temp file plus rename, so a crash mid-write
-leaves the previous file intact. `config.json` is **refused on load** if any group or other bit
+`context.json`. Both are written mode 0600 via a temp file that is `fsync`ed, renamed into
+place, and followed by an `fsync` of the directory — so a crash mid-write leaves either the
+previous file or the new one, never a truncated or zero-length credential. `config.json` is **refused on load** if any group or other bit
 is set — `chmod 600` it, the way ssh requires of a private key. Substrate never guesses `$HOME`:
 if `os.UserConfigDir()` fails, the error is propagated and the command stops.
 

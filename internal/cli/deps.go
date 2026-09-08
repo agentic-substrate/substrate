@@ -67,6 +67,17 @@ func (d Deps) httpClient() *http.Client {
 	return d.HTTP
 }
 
+// installer is the adapter unit installer. A nil Deps.Installer means the real
+// OS installer for this GOOS, which writes a systemd --user unit or a launchd
+// agent -- so a test that forgets to inject cutover.FakeInstaller installs on
+// the machine running the test. Every test must set Deps.Installer.
+func (d Deps) installer() cutover.UnitInstaller {
+	if d.Installer == nil {
+		return cutover.NewOSInstaller()
+	}
+	return d.Installer
+}
+
 func (d Deps) now() time.Time {
 	if d.Now == nil {
 		return time.Now()

@@ -6,41 +6,69 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// failAtExec fails the Nth Exec and records the ones it let through, so a
-// caller can assert exactly how far CreateUser got before it gave up.
-type failAtExec struct {
+// failAtWrite fails the Nth write and records the ones it let through, so a
+// caller can assert exactly how far CreateUser got before it gave up. Org and
+// team are QueryRow (they RETURN the id of the row actually used), the rest
+// are Exec, so both have to land in the same ordered list.
+type failAtWrite struct {
 	failOn int
 	seen   []string
 }
 
 var errInjected = errors.New("injected write failure")
 
-func (f *failAtExec) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (f *failAtWrite) record(sql string) bool {
 	f.seen = append(f.seen, sql)
-	if len(f.seen) == f.failOn {
+	return len(f.seen) == f.failOn
+}
+
+func (f *failAtWrite) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	if f.record(sql) {
 		return pgconn.CommandTag{}, errInjected
 	}
 	return pgconn.CommandTag{}, nil
 }
 
-func (f *failAtExec) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (f *failAtWrite) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errors.New("unexpected Query")
 }
 
-func (f *failAtExec) QueryRow(context.Context, string, ...any) pgx.Row { return nilRow{} }
+func (f *failAtWrite) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if f.record(sql) {
+		return errRow{errInjected}
+	}
+	return idRow{}
+}
 
-type nilRow struct{}
+// idRow stands in for the RETURNING id of a real insert.
+type idRow struct{}
 
-func (nilRow) Scan(...any) error { return pgx.ErrNoRows }
+func (idRow) Scan(dest ...any) error {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	p, ok := dest[0].(*uuid.UUID)
+	if !ok {
+		return errors.New("RETURNING id must scan into a *uuid.UUID")
+	}
+	*p = id
+	return nil
+}
+
+type errRow struct{ err error }
+
+func (r errRow) Scan(...any) error { return r.err }
 
 // Turn red by having CreateUser swallow an Exec error: the last insert then
 // fails silently and the caller commits a half-built principal.
 func TestCreateUserStopsAtFirstFailedInsert(t *testing.T) {
-	db := &failAtExec{failOn: 5}
+	db := &failAtWrite{failOn: 5}
 	_, err := CreateUser(context.Background(), db, CreateUserInput{
 		DisplayName: "op", Org: "acme", Team: "platform", Machine: "laptop",
 	})
@@ -58,7 +86,7 @@ func TestCreateUserStopsAtFirstFailedInsert(t *testing.T) {
 // Turn red by giving the api_token insert a non-null expires_at: user tokens
 // must not expire, because lookup.go only TTL-caps agent tokens.
 func TestCreateUserTokenHasNoExpiry(t *testing.T) {
-	db := &failAtExec{failOn: 0}
+	db := &failAtWrite{failOn: 0}
 	res, err := CreateUser(context.Background(), db, CreateUserInput{
 		DisplayName: "op", Org: "acme", Team: "platform", Machine: "laptop",
 	})

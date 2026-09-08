@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -42,12 +41,7 @@ func run(args []string) error {
 		Getwd:  os.Getwd,
 	})
 	root.SetArgs(args)
-	err := root.Execute()
-	var ue *cli.UserError
-	if errors.As(err, &ue) {
-		// main owns error printing (SilenceErrors), so the what/why/next
-		// reaches stderr exactly once.
-		return ue
-	}
-	return err
+	// main owns error printing (SilenceErrors), so a UserError's what/why/next
+	// reaches stderr exactly once, via the same return as every other error.
+	return root.Execute()
 }
