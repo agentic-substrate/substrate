@@ -22,7 +22,7 @@ func writeSettingsFile(t *testing.T, home, body string) string {
 
 func readJSON(t *testing.T, path string) map[string]any {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,14 +91,14 @@ func TestInstallClaudeHooksIsIdempotentAndPreservesUnrelatedKeys(t *testing.T) {
 	if err := InstallClaudeHooks(home, "/opt/substrate-adapter"); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	first, err := os.ReadFile(path)
+	first, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := InstallClaudeHooks(home, "/opt/substrate-adapter"); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
-	second, err := os.ReadFile(path)
+	second, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestInstallClaudeHooksBacksUpOnceAndNeverOverwrites(t *testing.T) {
 	if err := InstallClaudeHooks(home, "adapter"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(backup)
+	got, err := os.ReadFile(backup) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatalf("no backup was taken: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestInstallClaudeHooksBacksUpOnceAndNeverOverwrites(t *testing.T) {
 	if err := InstallClaudeHooks(home, "adapter"); err != nil {
 		t.Fatal(err)
 	}
-	got2, err := os.ReadFile(backup)
+	got2, err := os.ReadFile(backup) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestRemoveClaudeHooksRestoresOriginal(t *testing.T) {
 	if err := RemoveClaudeHooks(home); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	got, err := os.ReadFile(path)
+	got, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestRemoveClaudeHooksSurgicalWithoutBackup(t *testing.T) {
 	if err := RemoveClaudeHooks(home); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestInstallClaudeHooksRefusesUnparseableSettings(t *testing.T) {
 	if err := InstallClaudeHooks(home, "adapter"); err == nil {
 		t.Fatal("install rewrote a settings.json it could not parse")
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,14 +294,14 @@ func TestCutoverInstallsHookAndRestoreRemovesIt(t *testing.T) {
 		t.Fatalf("the plan never mentions settings.json:\n%s", rep.Format())
 	}
 	if !ClaudeHooksInstalled(root) {
-		body, _ := os.ReadFile(path)
+		body, _ := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 		t.Fatalf("cutover did not install the hook:\n%s", body)
 	}
 
 	if _, err := Restore(Request{Roots: []string{root}, Home: root, Commit: true, Installer: inst}); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // path is under t.TempDir()
 	if err != nil {
 		t.Fatalf("settings.json is gone after restore: %v", err)
 	}
