@@ -658,19 +658,28 @@ func validatePlanSlots(plan Plan) error {
 			inConflict[side.Hash] = true
 		}
 	}
-	slotHash := map[string]string{}
+	// Keyed by ordinal, not by slot alone: splitBlocks emits one block per
+	// bullet, so a heading with N bullets legitimately holds N distinct hashes
+	// on a single machine. Keying on the slot refused every such plan — which
+	// is to say almost every real file (#93). What the guard is actually for is
+	// two different bodies claiming one identity, and identity is the ordinal.
+	type slotOrd struct {
+		slot    string
+		ordinal int
+	}
+	slotHash := map[slotOrd]string{}
 	for _, b := range plan.Blocks {
-		slot := b.Rel + "#" + b.Heading
-		prev, ok := slotHash[slot]
+		k := slotOrd{slot: b.Rel + "#" + b.Heading, ordinal: b.Ordinal}
+		prev, ok := slotHash[k]
 		if !ok {
-			slotHash[slot] = b.Hash
+			slotHash[k] = b.Hash
 			continue
 		}
 		if prev == b.Hash {
 			continue
 		}
 		if !inConflict[prev] || !inConflict[b.Hash] {
-			return fmt.Errorf("import apply: slot %q has distinct hashes not listed in conflicts", slot)
+			return fmt.Errorf("import apply: slot %q ordinal %d has distinct hashes not listed in conflicts", k.slot, k.ordinal)
 		}
 	}
 	return nil
