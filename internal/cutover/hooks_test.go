@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -165,9 +166,16 @@ func TestInstallClaudeHooksBacksUpOnceAndNeverOverwrites(t *testing.T) {
 	}
 }
 
-// Restore must put the user's original file back byte-for-byte, which also
-// removes the hook. A settings.json still naming an uninstalled binary would
-// make every tool call in every session pay a failed exec.
+// Restore must leave the user with the settings they had, and above all must
+// remove the hook: a settings.json still naming an uninstalled binary would make
+// every tool call in every session pay a failed exec.
+//
+// The comparison is semantic, not byte-exact. Removal is surgical -- we edit the
+// user's live file rather than overwriting it with the backup -- so the file is
+// reserialised and unrelated keys may be reordered or reindented. Asserting
+// bytes here would only pass by restoring the backup verbatim, which discards
+// any edit the user made after install (see
+// TestRemoveClaudeHooksKeepsEditsMadeSinceInstall).
 func TestRemoveClaudeHooksRestoresOriginal(t *testing.T) {
 	home := t.TempDir()
 	path := writeSettingsFile(t, home, userSettings)
@@ -182,8 +190,15 @@ func TestRemoveClaudeHooksRestoresOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != userSettings {
-		t.Fatalf("restore did not put the original back:\ngot:\n%s\nwant:\n%s", got, userSettings)
+	var want map[string]any
+	if err := json.Unmarshal([]byte(userSettings), &want); err != nil {
+		t.Fatal(err)
+	}
+	// The user's own SessionStart hook is part of what must survive, so the
+	// whole document is compared -- only our PostToolUse entry may disappear.
+	gotDoc := readJSON(t, path)
+	if !reflect.DeepEqual(gotDoc, want) {
+		t.Fatalf("restore did not preserve the user's settings:\ngot:\n%s\nwant:\n%s", got, userSettings)
 	}
 	if strings.Contains(string(got), HookSubcommand) {
 		t.Fatalf("the shim is still referenced after restore:\n%s", got)
@@ -308,10 +323,84 @@ func TestCutoverInstallsHookAndRestoreRemovesIt(t *testing.T) {
 	if strings.Contains(string(body), HookSubcommand) {
 		t.Fatalf("restore left a hook pointing at an uninstalled binary:\n%s", body)
 	}
-	if string(body) != userSettings {
+	// Semantic, not byte-exact: removal is surgical, so the document is
+	// reserialised. See TestRemoveClaudeHooksRestoresOriginal.
+	var want any
+	if err := json.Unmarshal([]byte(userSettings), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(readJSON(t, path), want) {
 		t.Fatalf("restore did not put the user's settings back:\ngot:\n%s\nwant:\n%s", body, userSettings)
 	}
 	if ClaudeHooksInstalled(root) {
 		t.Fatal("ClaudeHooksInstalled is true after restore")
+	}
+}
+
+// settings.json is the only user-owned mutable file Substrate touches, so
+// uninstall removes our entry surgically and leaves everything else exactly as
+// the user last wrote it. Restoring the *.pre-substrate copy over the top would
+// silently discard every edit made between install and uninstall -- days or
+// weeks of the user's own configuration, with no prompt and no copy left.
+//
+// Restoring the backup verbatim in RemoveClaudeHooks turns this red.
+func TestRemoveClaudeHooksKeepsEditsMadeSinceInstall(t *testing.T) {
+	home := t.TempDir()
+	writeSettingsFile(t, home, `{"model":"sonnet"}`)
+
+	if err := InstallClaudeHooks(home, "adapter"); err != nil {
+		t.Fatal(err)
+	}
+	// The user edits their settings while Substrate is installed.
+	doc := readJSON(t, ClaudeSettingsPath(home))
+	doc["model"] = "opus"
+	doc["mcpServers"] = map[string]any{"parley": map[string]any{"command": "parley"}}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSettingsFile(t, home, string(raw))
+
+	if err := RemoveClaudeHooks(home); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readJSON(t, ClaudeSettingsPath(home))
+	if got["model"] != "opus" {
+		t.Fatalf("model is %v, want opus: the user's edit was discarded", got["model"])
+	}
+	if _, ok := got["mcpServers"]; !ok {
+		t.Fatal("mcpServers added after install was discarded")
+	}
+	if _, ok := got["hooks"]; ok {
+		t.Fatalf("our hook survived uninstall: %v", got["hooks"])
+	}
+	if ClaudeHooksInstalled(home) {
+		t.Fatal("ClaudeHooksInstalled still reports true")
+	}
+	// The user diverged from the backup, so the backup is kept as their
+	// pre-Substrate archive rather than deleted.
+	if _, err := os.Lstat(ClaudeSettingsPath(home) + BackupSuffix); err != nil {
+		t.Fatalf("the pre-Substrate archive was removed even though the file had diverged: %v", err)
+	}
+}
+
+// When the user changed nothing, the backup carries no information and is
+// cleaned up, so uninstall leaves no litter behind in the common case.
+func TestRemoveClaudeHooksDropsARedundantBackup(t *testing.T) {
+	home := t.TempDir()
+	writeSettingsFile(t, home, "{\n  \"model\": \"sonnet\"\n}\n")
+
+	if err := InstallClaudeHooks(home, "adapter"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveClaudeHooks(home); err != nil {
+		t.Fatal(err)
+	}
+	if got := readJSON(t, ClaudeSettingsPath(home)); got["model"] != "sonnet" {
+		t.Fatalf("model is %v, want sonnet", got["model"])
+	}
+	if _, err := os.Lstat(ClaudeSettingsPath(home) + BackupSuffix); !os.IsNotExist(err) {
+		t.Fatalf("a redundant backup was left behind: %v", err)
 	}
 }

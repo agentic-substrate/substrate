@@ -1,10 +1,12 @@
 package cutover
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -41,11 +43,22 @@ func ClaudeSettingsPath(home string) string {
 
 // hookCommand is the command string written into settings.json. It doubles as
 // the idempotency marker: an entry containing HookSubcommand is ours.
-func hookCommand(binary string) string {
+//
+// -home is not optional. The shim refuses to guess $HOME, so a command string
+// without it exits with a usage error on every tool call and enqueues nothing
+// -- silently, because the shim always exits 0 so it can never break a session.
+// The installer is the layer that knows home, so the installer must supply it.
+func hookCommand(binary, home string) string {
 	if strings.TrimSpace(binary) == "" {
 		binary = "substrate-adapter"
 	}
-	return binary + " " + HookSubcommand
+	return binary + " " + HookSubcommand + " -home " + shellQuote(home)
+}
+
+// shellQuote single-quotes s for the harness's shell. Claude Code runs the hook
+// command through a shell, so a home with a space or a quote in it must survive.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func isOurs(cmd string) bool { return strings.Contains(cmd, HookSubcommand) }
@@ -65,7 +78,7 @@ func InstallClaudeHooks(home, binary string) error {
 	if err != nil {
 		return err
 	}
-	changed, err := mergeHookEntry(doc, hookCommand(binary))
+	changed, err := mergeHookEntry(doc, hookCommand(binary, home))
 	if err != nil {
 		return err
 	}
@@ -80,9 +93,11 @@ func InstallClaudeHooks(home, binary string) error {
 	return writeSettings(path, doc)
 }
 
-// RemoveClaudeHooks undoes InstallClaudeHooks. If the *.pre-substrate copy is
-// present the user's original file is put back verbatim; otherwise the entry is
-// removed surgically and a file that only ever held our hook is deleted. This
+// RemoveClaudeHooks undoes InstallClaudeHooks by removing our entry surgically
+// and deleting a file that only ever held our hook. It never restores the
+// *.pre-substrate copy over the live file: the user owns settings.json and may
+// have edited it since install, and a verbatim restore would discard that
+// silently. The backup is dropped only when it matches the result exactly. This
 // is the half that must not be skipped: a settings.json left pointing at an
 // uninstalled binary makes every tool call in every session pay a failed exec.
 func RemoveClaudeHooks(home string) error {
@@ -90,22 +105,6 @@ func RemoveClaudeHooks(home string) error {
 		return nil
 	}
 	path := ClaudeSettingsPath(home)
-	backup := path + BackupSuffix
-	if _, err := os.Lstat(backup); err == nil {
-		body, rerr := os.ReadFile(backup) //nolint:gosec // path is <home>/.claude/settings.json.pre-substrate
-		if rerr != nil {
-			return fmt.Errorf("cutover: read %s: %w", backup, rerr)
-		}
-		if werr := atomicWrite(path, body, 0o600); werr != nil {
-			return werr
-		}
-		if rmErr := os.Remove(backup); rmErr != nil && !os.IsNotExist(rmErr) {
-			return fmt.Errorf("cutover: remove %s: %w", backup, rmErr)
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("cutover: stat %s: %w", backup, err)
-	}
 
 	doc, existed, err := readSettings(path)
 	if err != nil || !existed {
@@ -122,9 +121,45 @@ func RemoveClaudeHooks(home string) error {
 		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
 			return fmt.Errorf("cutover: remove %s: %w", path, rmErr)
 		}
+		return dropBackupIfRedundant(path, nil)
+	}
+	if err := writeSettings(path, doc); err != nil {
+		return err
+	}
+	live, rerr := os.ReadFile(path) //nolint:gosec // path is <home>/.claude/settings.json
+	if rerr != nil {
+		return fmt.Errorf("cutover: read %s: %w", path, rerr)
+	}
+	return dropBackupIfRedundant(path, live)
+}
+
+// dropBackupIfRedundant removes the *.pre-substrate copy only when the live
+// file now says the same thing it does -- i.e. the user changed nothing while
+// Substrate was installed, so the backup carries no information. The comparison
+// is semantic: surgical removal reserialises the document, so the bytes differ
+// even when the settings do not.
+//
+// It is never used to *overwrite* the live file. settings.json is the only
+// user-owned mutable file Substrate touches, and restoring a backup verbatim
+// would silently discard every edit made since install. Removal is surgical:
+// our entry goes, everything else the user wrote stays. When the two differ the
+// backup is deliberately left behind as the user's pre-Substrate archive.
+func dropBackupIfRedundant(path string, live []byte) error {
+	backup := path + BackupSuffix
+	body, err := os.ReadFile(backup) //nolint:gosec // path is <home>/.claude/settings.json.pre-substrate
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("cutover: read %s: %w", backup, err)
+	}
+	if !sameSettings(body, live) {
 		return nil
 	}
-	return writeSettings(path, doc)
+	if rmErr := os.Remove(backup); rmErr != nil && !os.IsNotExist(rmErr) {
+		return fmt.Errorf("cutover: remove %s: %w", backup, rmErr)
+	}
+	return nil
 }
 
 // ClaudeHooksInstalled reports whether settings.json currently names the shim.
@@ -393,4 +428,20 @@ func jsonIndent(b *strings.Builder, raw json.RawMessage) error {
 	}
 	b.Write(out)
 	return nil
+}
+
+// sameSettings reports whether two settings.json bodies carry the same
+// document. A live file that is gone (nil) matches only an empty backup.
+func sameSettings(backup, live []byte) bool {
+	if len(bytes.TrimSpace(live)) == 0 {
+		return len(bytes.TrimSpace(backup)) == 0
+	}
+	var a, b any
+	if err := json.Unmarshal(backup, &a); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(live, &b); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(a, b)
 }

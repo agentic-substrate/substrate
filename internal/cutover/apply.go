@@ -206,13 +206,18 @@ func applyCutover(rep *Report, req Request) error {
 	if rep.Unit != nil {
 		spec = *rep.Unit
 	}
+	if err := req.Installer.Install(spec); err != nil {
+		return errWithPlan(rep, err)
+	}
+	// The hook goes in last, after the unit it invokes exists. Installing it
+	// first means a failed unit install leaves settings.json naming a binary
+	// that was never installed -- every tool call in every session paying a
+	// failed exec, which is precisely the outcome the hook work exists to
+	// prevent. Restore already unwinds in the mirror order (restore.go).
 	if rep.HookSettings != "" {
 		if err := InstallClaudeHooks(spec.Home, spec.Binary); err != nil {
 			return errWithPlan(rep, err)
 		}
-	}
-	if err := req.Installer.Install(spec); err != nil {
-		return errWithPlan(rep, err)
 	}
 	return nil
 }
