@@ -732,6 +732,37 @@ func TestCompileKeepsTargetScopeMemoriesWhenUnrelatedFillSearchCap(t *testing.T)
 			t.Fatalf("target memory %q missing from pack after unrelated scopes filled the search cap (#82):\n%s", tg.title, memSec)
 		}
 	}
+	if strings.Contains(memSec, "unrelated-crowd-") {
+		t.Fatalf("unrelated sibling memories appeared in the pack; ScopeIDs must filter before the clamp, not rely on filterHits alone:\n%s", memSec)
+	}
+}
+
+// TestCompileUnwrittenScopeReturnsEmptyMemoriesNotError guards availability:
+// when chainIDs finds nothing, Compile used to pass Scope into Search and
+// resolveScopeID hard-failed. A valid-but-unwritten path must still return a
+// pack with an empty memory section (#82).
+func TestCompileUnwrittenScopeReturnsEmptyMemoriesNotError(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openCompiler(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	unwritten, err := scope.Parse(w.pathStr + "/repo:never-written-" + w.repo[:8])
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pack, err := svc.Compile(ctx, Request{
+		Scope: unwritten, Files: []string{"no-hit-token-zzzz"}, Budget: tok(12000),
+	})
+	if err != nil {
+		t.Fatalf("Compile for unwritten scope: %v; want a pack with an empty memory section, not an error", err)
+	}
+	if pack.Markdown == "" {
+		t.Fatal("Compile returned an empty pack for an unwritten scope")
+	}
+	if n := strings.Count(sectionBody(pack.Markdown, "Memories"), "footer:"); n != 0 {
+		t.Fatalf("memory section has %d items for an unwritten leaf with no matching memories; want 0", n)
+	}
 }
 
 // TestCompileIncludesAncestorScopedMemories guards SCOPE-1 inheritance: a

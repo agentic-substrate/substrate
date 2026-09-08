@@ -45,9 +45,11 @@ type SearchIn struct {
 	Tier   string   `json:"tier,omitempty" jsonschema:"working, episodic, or semantic; default semantic"`
 	Status []string `json:"status,omitempty" jsonschema:"status filter; default confirmed and probable"`
 	Limit  int      `json:"limit,omitempty" jsonschema:"max results; default 20"`
-	// ScopeIDs, when non-empty, restricts results to memories whose scope_id is
-	// in this set (ANY). Internal/compiler use only — omitted from the MCP
-	// schema so the memory.search tool surface stays the single-scope wire form.
+	// ScopeIDs, when non-nil, restricts results to memories whose scope_id is in
+	// this set (ANY). An empty non-nil slice matches nothing (fail-closed). Nil
+	// means "no chain filter" — exact Scope applies if set, otherwise RLS-only.
+	// Internal/compiler use; omitted from the MCP schema so memory.search stays
+	// the single-scope wire form.
 	ScopeIDs []uuid.UUID `json:"-"`
 }
 

@@ -460,6 +460,57 @@ func TestSearchScopeRemainsExactMatch(t *testing.T) {
 	}
 }
 
+// TestSearchEmptyScopeIDsDoesNotFallThroughToExactScope pins the compiler
+// empty-chain case: ScopeIDs is a non-nil empty slice from chainIDs, and must
+// not fall through to resolving Scope (which hard-errors on unknown paths).
+func TestSearchEmptyScopeIDsDoesNotFallThroughToExactScope(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	missing := "global:/org:missing-" + w.orgID[:8] + "/team:alpha/project:ghost"
+	out, err := svc.Search(ctx, SearchIn{
+		Query: "any-query", Scope: missing, ScopeIDs: []uuid.UUID{}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("Search with empty ScopeIDs: %v; want empty results, not a Scope resolve error", err)
+	}
+	if len(out.Results) != 0 {
+		t.Fatalf("empty ScopeIDs returned %d hits; want 0 (fail-closed, not ELSE true)", len(out.Results))
+	}
+}
+
+// TestSearchBothEmptyScopeIsUnfilteredByDesign pins the MCP default: no Scope
+// and nil ScopeIDs means RLS-only filtering (ELSE true). Deliberate, not a fallthrough.
+func TestSearchBothEmptyScopeIsUnfilteredByDesign(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+	in := aliceWrite(w)
+	in.Title = "unfiltered-scope-sentinel"
+	in.Identifiers = []string{"unfiltered-scope-token"}
+	in.Visibility = "global"
+	if _, err := svc.Write(ctx, in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	out, err := svc.Search(ctx, SearchIn{Query: "unfiltered-scope-token", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	found := false
+	for _, h := range out.Results {
+		if h.Title == "unfiltered-scope-sentinel" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("both-empty Search missed a visible memory; nil ScopeIDs + empty Scope is RLS-only by contract")
+	}
+}
+
 func TestSearchReturnsWithinTwoSecondsWithoutEmbeddings(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)

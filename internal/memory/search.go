@@ -93,9 +93,10 @@ func (s *Service) Search(ctx context.Context, in SearchIn) (SearchOut, error) {
 
 	var scopeID any
 	var scopeIDs any
-	if len(in.ScopeIDs) > 0 {
-		// Chain filter wins when set (compiler / SCOPE-1). Exact Scope remains
-		// for MCP memory.search callers that pass a single path.
+	// Non-nil ScopeIDs (including empty) is fail-closed: ANY('{}') matches
+	// nothing. A nil ScopeIDs with empty Scope is the MCP default — RLS-only
+	// (ELSE true), which TestSearchBothEmptyScopeIsUnfilteredByDesign pins.
+	if in.ScopeIDs != nil {
 		scopeIDs = in.ScopeIDs
 	} else if strings.TrimSpace(in.Scope) != "" {
 		sc, err := scope.Parse(in.Scope)
