@@ -43,6 +43,30 @@ func TestScanSecretsAllowsCleanText(t *testing.T) {
 	}
 }
 
+// Near-misses share a detector prefix but miss the length/shape bound. Loosening
+// {16} to {16,} or dropping a \b would make these start matching while positives
+// stay green — that is the one-line change that makes each case red.
+func TestScanSecretsAllowsNearMisses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		s    string
+	}{
+		{"aws_one_short", "AKIA" + strings.Repeat("A", 15)},
+		{"ghp_below_min", "ghp_" + strings.Repeat("a", 10)},
+		{"jwt_two_segments", "eyJa.b"},
+		{"pem_public", "-----BEGIN PUBLIC KEY-----\n" + strings.Repeat("A", 64) + "\n-----END PUBLIC KEY-----"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := ScanSecrets(tc.s); err != nil {
+				t.Fatalf("near-miss %s rejected (%v); detector shape drifted", tc.name, err)
+			}
+		})
+	}
+}
+
 func generatedAWSAccessKey(t *testing.T) string {
 	t.Helper()
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

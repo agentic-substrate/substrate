@@ -182,31 +182,40 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		if identicalActive(body, activeIns, activePref) {
 			continue
 		}
+		kind := b.Kind
+		if kind == "" {
+			kind = Classify(b).Kind
+		}
+		// Location fields first: if they are the secret, Source must omit them.
+		if secretSkip(res, skipSourceHashOnly(kind, b.Hash), rel, heading) {
+			continue
+		}
+		machine := sanitizeStored(req.Machine)
+		src := skipSource(kind, rel, heading, b.Hash)
+		if secretSkip(res, src, body, machine) {
+			continue
+		}
 		row := PlannedRow{
-			Hostname: req.Machine,
-			Kind:     b.Kind,
-			Key:      rowKey(b.Kind, rel, heading, b.Hash),
+			Hostname: machine,
+			Kind:     kind,
+			Key:      rowKey(kind, rel, heading, b.Hash),
 			Hash:     b.Hash,
 			Body:     body,
 		}
-		if row.Kind == "" {
-			row.Kind = Classify(b).Kind
-		}
-		src := skipSource(row.Kind, b.Hash)
-		if secretSkip(res, src, body, rel, heading) {
-			continue
-		}
 		if existing := activeBodyAtSlot(row.Kind, rel, heading, activeIns, activePref); existing != "" && existing != body {
+			other := sanitizeStored(storedHost)
+			if other == "" {
+				other = machine
+			}
+			if secretSkip(res, src, other) {
+				continue
+			}
 			row.Status = string(store.InstructionStatusProposed)
 			row.Slot = slot
 			res.Proposed = append(res.Proposed, row)
 			if !reviewSlots[slot] {
-				other := storedHost
-				if other == "" {
-					other = req.Machine
-				}
 				res.Conflict = append(res.Conflict, PlannedRow{
-					Hostname: req.Machine,
+					Hostname: machine,
 					Kind:     "import_conflict",
 					Status:   "conflict",
 					Hash:     b.Hash,
@@ -214,7 +223,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Slot:     slot,
 					Pair: []ConflictSide{
 						{Hash: sha256Hex([]byte(existing)), Hostnames: []string{other}, Body: existing},
-						{Hash: b.Hash, Hostnames: []string{req.Machine}, Body: body},
+						{Hash: b.Hash, Hostnames: []string{machine}, Body: body},
 					},
 				})
 				reviewSlots[slot] = true
@@ -243,8 +252,12 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				continue
 			}
 			kind := Classify(Block{Heading: heading, Body: body, Rel: rel}).Kind
-			src := skipSource(kind, side.Hash)
-			if secretSkip(res, src, rel, heading) {
+			if secretSkip(res, skipSourceHashOnly(kind, side.Hash), rel, heading) {
+				continue
+			}
+			machine := sanitizeStored(req.Machine)
+			src := skipSource(kind, rel, heading, side.Hash)
+			if secretSkip(res, src, body, machine) {
 				continue
 			}
 			pair := make([]ConflictSide, len(c.Pair))
@@ -260,8 +273,9 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 					Hostnames: hosts,
 					Body:      sb,
 				}
+				sideSrc := skipSource(kind, rel, heading, s.Hash)
 				parts := append([]string{sb}, hosts...)
-				if secretSkip(res, src, parts...) {
+				if secretSkip(res, sideSrc, parts...) {
 					pairSecret = true
 				}
 			}
@@ -269,7 +283,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				continue
 			}
 			res.Proposed = append(res.Proposed, PlannedRow{
-				Hostname: req.Machine,
+				Hostname: machine,
 				Kind:     kind,
 				Status:   string(store.InstructionStatusProposed),
 				Key:      rowKey(kind, rel, heading, side.Hash),
@@ -279,7 +293,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			})
 			if !reviewSlots[slot] && !reviewSlots[c.Slot] {
 				res.Conflict = append(res.Conflict, PlannedRow{
-					Hostname: req.Machine,
+					Hostname: machine,
 					Kind:     "import_conflict",
 					Status:   "conflict",
 					Hash:     side.Hash,
@@ -310,8 +324,11 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		// memory.scanStored's machine field). Kind is not scanned: invalid
 		// kinds are replaced with "observation" before insert.
 		machine := sanitizeStored(req.Machine)
-		src := skipSource("memory", m.Hash)
-		if secretSkip(res, src, title, body, machine) {
+		if secretSkip(res, skipSourceHashOnly("memory", m.Hash), machine) {
+			continue
+		}
+		src := skipSource("memory", "", "", m.Hash)
+		if secretSkip(res, src, title, body) {
 			continue
 		}
 		res.Memory = append(res.Memory, PlannedRow{
@@ -389,7 +406,7 @@ func commitWrites(ctx context.Context, tx pgx.Tx, p *identity.Principal, req App
 		if err != nil {
 			return err
 		}
-		payload, err := conflictPayload(req, row)
+		payload, err := conflictPayload(row)
 		if err != nil {
 			return err
 		}
@@ -523,15 +540,10 @@ func storeTrustedHost(ctx context.Context, q *store.Queries, p *identity.Princip
 	return nil
 }
 
-func conflictPayload(req ApplyRequest, row PlannedRow) ([]byte, error) {
+func conflictPayload(row PlannedRow) ([]byte, error) {
 	pair := row.Pair
 	if len(pair) == 0 {
-		for _, c := range req.Plan.Conflicts {
-			if c.Slot == row.Slot {
-				pair = c.Pair
-				break
-			}
-		}
+		return nil, fmt.Errorf("import apply: conflict slot %q missing pair", row.Slot)
 	}
 	hosts := make([]string, 0, 2)
 	seen := map[string]bool{}
@@ -551,7 +563,7 @@ func conflictPayload(req ApplyRequest, row PlannedRow) ([]byte, error) {
 	}
 	sort.Strings(hosts)
 	return json.Marshal(map[string]any{
-		"hostname":  req.Machine,
+		"hostname":  row.Hostname,
 		"hostnames": hosts,
 		"slot":      row.Slot,
 		"pair":      pair,
@@ -638,12 +650,29 @@ func capBody(s string) string {
 	return s
 }
 
-func skipSource(kind, hash string) string {
-	h := hash
-	if len(h) > 12 {
-		h = h[:12]
+func truncHash(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
 	}
-	return kind + ":" + h
+	return hash
+}
+
+// skipSource builds a locatable skip id from already-scanned-clean location
+// fields plus a hash disambiguator. Do not pass fields that failed ScanSecrets —
+// use skipSourceHashOnly when the location itself is the secret.
+func skipSource(kind, rel, heading, hash string) string {
+	h := truncHash(hash)
+	if rel == "" {
+		return kind + ":" + h
+	}
+	if heading == "" {
+		return kind + ":" + rel + ":" + h
+	}
+	return kind + ":" + rel + "#" + heading + ":" + h
+}
+
+func skipSourceHashOnly(kind, hash string) string {
+	return kind + ":" + truncHash(hash)
 }
 
 func secretSkip(res *ApplyResult, source string, parts ...string) bool {

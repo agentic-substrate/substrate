@@ -47,7 +47,7 @@ func TestApplyRejectsSecretShapesInInstructionBody(t *testing.T) {
 			if len(res.Active) != 0 {
 				t.Fatalf("Active=%#v, want secret instruction blocked from plan", res.Active)
 			}
-			assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, tc.body)
+			assertSkippedSecret(t, res.Skipped, skipSource("instruction", ".claude/CLAUDE.md", heading, plan.Blocks[0].Hash), tc.body)
 			var n int
 			if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM instruction WHERE body = $1`, tc.body).Scan(&n); err != nil {
 				t.Fatal(err)
@@ -84,7 +84,7 @@ func TestApplyRejectsSecretInPreferenceBody(t *testing.T) {
 	if len(res.Active) != 0 {
 		t.Fatalf("Active=%#v, want secret preference blocked", res.Active)
 	}
-	assertSkippedSecret(t, res.Skipped, "preference:", plan.Blocks[0].Hash, body)
+	assertSkippedSecret(t, res.Skipped, skipSource("preference", ".claude/CLAUDE.md", "Voice", plan.Blocks[0].Hash), body)
 	var n int
 	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM preference WHERE body = $1`, body).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestApplyRejectsSecretShapesInMemoryBody(t *testing.T) {
 	if len(res.Memory) != 0 {
 		t.Fatalf("Memory=%#v, want secret memory blocked", res.Memory)
 	}
-	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, body)
+	assertSkippedSecret(t, res.Skipped, skipSource("memory", "", "", plan.Memories[0].Hash), body)
 	var n int
 	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM memory WHERE body = $1`, body).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestApplyRejectsSecretInMemoryHostname(t *testing.T) {
 	if len(res.Memory) != 0 {
 		t.Fatalf("Memory=%#v, want hostname-secret memory blocked", res.Memory)
 	}
-	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, host)
+	assertSkippedSecret(t, res.Skipped, skipSourceHashOnly("memory", plan.Memories[0].Hash), host)
 	var n int
 	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM memory WHERE body = $1`, body).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestApplyImportsCleanRowsWhenOneHasSecret(t *testing.T) {
 	if _, ok := got[tainted]; ok {
 		t.Fatalf("tainted instruction was stored: %#v", got)
 	}
-	assertSkippedSecret(t, res.Skipped, "instruction:", taintedHash, tainted)
+	assertSkippedSecret(t, res.Skipped, skipSource("instruction", ".claude/CLAUDE.md", "Token", taintedHash), tainted)
 	if len(res.Active) != 2 {
 		t.Fatalf("Active count=%d, want 2 clean rows; %#v", len(res.Active), res.Active)
 	}
@@ -248,7 +248,7 @@ func TestApplyScansPostTransformBytes(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("control-byte-split secret reached the database (%d rows); scanner ran on pre-transform bytes", n)
 	}
-	assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, stored)
+	assertSkippedSecret(t, res.Skipped, skipSource("instruction", ".claude/CLAUDE.md", "Split", plan.Blocks[0].Hash), stored)
 }
 
 // Title defaults to Body when empty. Scanning only the empty Title before that
@@ -280,7 +280,7 @@ func TestApplyScansDefaultedMemoryTitle(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("defaulted-title secret reached the database (%d rows)", n)
 	}
-	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, body)
+	assertSkippedSecret(t, res.Skipped, skipSource("memory", "", "", plan.Memories[0].Hash), body)
 }
 
 // Slot carries Rel#Heading into review_item.payload. Skipping only Body, then
@@ -322,7 +322,7 @@ func TestApplyRejectsSecretInHeadingSlot(t *testing.T) {
 		t.Fatalf("secret heading still planned: conflict=%d proposed=%d active=%d",
 			len(res.Conflict), len(res.Proposed), len(res.Active))
 	}
-	assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, tok)
+	assertSkippedSecret(t, res.Skipped, skipSourceHashOnly("instruction", plan.Blocks[0].Hash), tok)
 
 	var n int
 	if err := conn.QueryRow(t.Context(), `
@@ -335,9 +335,63 @@ func TestApplyRejectsSecretInHeadingSlot(t *testing.T) {
 	}
 }
 
-// A NUL in Heading used to abort the whole import (jsonb rejects escaped NUL).
-// Sanitizing Slot before the conflict payload is the fix; leaving Heading raw
+// The discovered-conflict path (not Plan.Conflicts) synthesises Pair hostnames
+// from req.Machine. Leaving those unscanned while the Conflicts loop scans them
 // is the one-line change that makes this red.
+func TestApplyRejectsSecretHostnameOnConflictPath(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	host := generatedGitHubToken(t)
+	body := "Prefer spaces on " + host[:8]
+	keyPrefix := "import.instruction." + slug(".claude/CLAUDE.md") + "." + slug("Indent") + "."
+	if _, err := conn.Exec(t.Context(), `
+		INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'team', $2, 'rule', $3, $4, 'active', $2)`,
+		w.project, w.actor, keyPrefix+"seed", "Prefer tabs.",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := Plan{
+		Blocks: []Block{{
+			Hash: sha256Hex([]byte(body)), Heading: "Indent", Body: body,
+			Kind: "instruction", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: host}},
+		}},
+	}
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: host, TrustedMachine: host, Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Conflict) != 0 || len(res.Proposed) != 0 {
+		t.Fatalf("secret hostname still planned conflict=%d proposed=%d", len(res.Conflict), len(res.Proposed))
+	}
+	assertSkippedSecret(t, res.Skipped, skipSource("instruction", ".claude/CLAUDE.md", "Indent", plan.Blocks[0].Hash), host)
+
+	var n int
+	if err := conn.QueryRow(t.Context(), `
+		SELECT count(*) FROM review_item
+		WHERE kind = 'import_conflict' AND payload::text LIKE '%' || $1 || '%'`, host).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("secret hostname reached review_item.payload (%d rows)", n)
+	}
+	out := res.Format()
+	if strings.Contains(out, host) {
+		t.Fatalf("secret hostname leaked into Format():\n%s", out)
+	}
+}
+
+// A NUL in Heading used to land in Slot and abort InsertReviewItem (jsonb
+// rejects \u0000). This test seeds the post-sanitize slot key so Apply reaches
+// that payload path; leaving Heading raw (no sanitizeStored) is the one-line
+// change that makes it red via SQLSTATE 22P05.
 func TestApplySanitizesNULInHeadingSlot(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedImportWorld(t, conn)
@@ -385,21 +439,16 @@ func TestApplySanitizesNULInHeadingSlot(t *testing.T) {
 	}
 }
 
-// assertSkippedSecret requires a live Source match (hash prefix) and that
-// neither Source nor Reason echo the secret. A fallback that accepts any
-// instruction:/memory: prefix would make this pass even if skipSource returned
-// kind+":x" — that is the defect class this helper must not have.
-func assertSkippedSecret(t *testing.T, skipped []Skipped, kindPrefix, hash, secret string) {
+// assertSkippedSecret requires an exact Source match and that neither Source,
+// Reason, nor Format() echo the secret. Passing kind+":x" from skipSource
+// must fail every caller — no prefix fallback.
+func assertSkippedSecret(t *testing.T, skipped []Skipped, wantSource, secret string) {
 	t.Helper()
-	if len(hash) > 12 {
-		hash = hash[:12]
-	}
-	want := kindPrefix + hash
 	for _, s := range skipped {
 		if s.Reason != policy.CodeSecretDetected && !strings.Contains(s.Reason, policy.CodeSecretDetected) {
 			continue
 		}
-		if s.Source != want {
+		if s.Source != wantSource {
 			continue
 		}
 		if strings.Contains(s.Source, secret) || strings.Contains(s.Reason, secret) {
@@ -411,7 +460,7 @@ func assertSkippedSecret(t *testing.T, skipped []Skipped, kindPrefix, hash, secr
 		}
 		return
 	}
-	t.Fatalf("Skipped=%#v, want Source %q reason %s", skipped, want, policy.CodeSecretDetected)
+	t.Fatalf("Skipped=%#v, want Source %q reason %s", skipped, wantSource, policy.CodeSecretDetected)
 }
 
 func generatedAWSAccessKey(t *testing.T) string {
