@@ -172,7 +172,10 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		if _, ok := conflictHash[b.Hash]; ok {
 			continue
 		}
-		if conflictSlots[b.Rel+"#"+b.Heading] {
+		rel := sanitizeStored(b.Rel)
+		heading := sanitizeStored(b.Heading)
+		slot := rel + "#" + heading
+		if conflictSlots[b.Rel+"#"+b.Heading] || conflictSlots[slot] {
 			continue
 		}
 		body := sanitizeStored(b.Body)
@@ -182,18 +185,18 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		row := PlannedRow{
 			Hostname: req.Machine,
 			Kind:     b.Kind,
-			Key:      rowKey(b.Kind, b.Rel, b.Heading, b.Hash),
+			Key:      rowKey(b.Kind, rel, heading, b.Hash),
 			Hash:     b.Hash,
 			Body:     body,
 		}
 		if row.Kind == "" {
 			row.Kind = Classify(b).Kind
 		}
-		if secretSkip(res, skipSource(row.Kind, b.Rel, b.Heading, b.Hash), body) {
+		src := skipSource(row.Kind, b.Hash)
+		if secretSkip(res, src, body, rel, heading) {
 			continue
 		}
-		slot := b.Rel + "#" + b.Heading
-		if existing := activeBodyAtSlot(row.Kind, b.Rel, b.Heading, activeIns, activePref); existing != "" && existing != body {
+		if existing := activeBodyAtSlot(row.Kind, rel, heading, activeIns, activePref); existing != "" && existing != body {
 			row.Status = string(store.InstructionStatusProposed)
 			row.Slot = slot
 			res.Proposed = append(res.Proposed, row)
@@ -228,6 +231,9 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 	}
 
 	for _, c := range req.Plan.Conflicts {
+		rel := sanitizeStored(relOfSlot(c.Slot))
+		heading := sanitizeStored(headingOfSlot(c.Slot))
+		slot := rel + "#" + heading
 		for _, side := range c.Pair {
 			if !hostIn(side.Hostnames, req.Machine) {
 				continue
@@ -236,18 +242,26 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			if identicalActive(body, activeIns, activePref) {
 				continue
 			}
-			kind := Classify(Block{Heading: headingOfSlot(c.Slot), Body: body, Rel: relOfSlot(c.Slot)}).Kind
-			src := skipSource(kind, relOfSlot(c.Slot), headingOfSlot(c.Slot), side.Hash)
+			kind := Classify(Block{Heading: heading, Body: body, Rel: rel}).Kind
+			src := skipSource(kind, side.Hash)
+			if secretSkip(res, src, rel, heading) {
+				continue
+			}
 			pair := make([]ConflictSide, len(c.Pair))
 			pairSecret := false
 			for i, s := range c.Pair {
 				sb := sanitizeStored(s.Body)
+				hosts := make([]string, len(s.Hostnames))
+				for j, h := range s.Hostnames {
+					hosts[j] = sanitizeStored(h)
+				}
 				pair[i] = ConflictSide{
 					Hash:      s.Hash,
-					Hostnames: s.Hostnames,
+					Hostnames: hosts,
 					Body:      sb,
 				}
-				if secretSkip(res, src, sb) {
+				parts := append([]string{sb}, hosts...)
+				if secretSkip(res, src, parts...) {
 					pairSecret = true
 				}
 			}
@@ -258,21 +272,22 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				Hostname: req.Machine,
 				Kind:     kind,
 				Status:   string(store.InstructionStatusProposed),
-				Key:      rowKey(kind, relOfSlot(c.Slot), headingOfSlot(c.Slot), side.Hash),
+				Key:      rowKey(kind, rel, heading, side.Hash),
 				Hash:     side.Hash,
 				Body:     body,
-				Slot:     c.Slot,
+				Slot:     slot,
 			})
-			if !reviewSlots[c.Slot] {
+			if !reviewSlots[slot] && !reviewSlots[c.Slot] {
 				res.Conflict = append(res.Conflict, PlannedRow{
 					Hostname: req.Machine,
 					Kind:     "import_conflict",
 					Status:   "conflict",
 					Hash:     side.Hash,
 					Body:     body,
-					Slot:     c.Slot,
+					Slot:     slot,
 					Pair:     pair,
 				})
+				reviewSlots[slot] = true
 				reviewSlots[c.Slot] = true
 			}
 		}
@@ -291,15 +306,16 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 		if title == "" {
 			title = body
 		}
-		src := "memory:" + m.Hash
-		if len(m.Hash) > 12 {
-			src = "memory:" + m.Hash[:12]
-		}
-		if secretSkip(res, src, title, body) {
+		// Machine is what lands in memory.source jsonb (parity with
+		// memory.scanStored's machine field). Kind is not scanned: invalid
+		// kinds are replaced with "observation" before insert.
+		machine := sanitizeStored(req.Machine)
+		src := skipSource("memory", m.Hash)
+		if secretSkip(res, src, title, body, machine) {
 			continue
 		}
 		res.Memory = append(res.Memory, PlannedRow{
-			Hostname: req.Machine,
+			Hostname: machine,
 			Kind:     kind,
 			Status:   string(store.MemoryStatusUnverified),
 			Hash:     m.Hash,
@@ -622,16 +638,12 @@ func capBody(s string) string {
 	return s
 }
 
-func skipSource(kind, rel, heading, hash string) string {
-	slot := rel + "#" + heading
-	if strings.Trim(slot, "#") == "" {
-		h := hash
-		if len(h) > 12 {
-			h = h[:12]
-		}
-		return kind + ":" + h
+func skipSource(kind, hash string) string {
+	h := hash
+	if len(h) > 12 {
+		h = h[:12]
 	}
-	return kind + ":" + slot
+	return kind + ":" + h
 }
 
 func secretSkip(res *ApplyResult, source string, parts ...string) bool {

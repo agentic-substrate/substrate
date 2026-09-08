@@ -30,9 +30,10 @@ func TestApplyRejectsSecretShapesInInstructionBody(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			heading := "Creds-" + tc.name
 			plan := Plan{
 				Blocks: []Block{{
-					Hash: sha256Hex([]byte(tc.body)), Heading: "Creds-" + tc.name, Body: tc.body,
+					Hash: sha256Hex([]byte(tc.body)), Heading: heading, Body: tc.body,
 					Kind: "instruction", Rel: ".claude/CLAUDE.md",
 					Sources: []Source{{Hostname: "mac"}},
 				}},
@@ -46,9 +47,7 @@ func TestApplyRejectsSecretShapesInInstructionBody(t *testing.T) {
 			if len(res.Active) != 0 {
 				t.Fatalf("Active=%#v, want secret instruction blocked from plan", res.Active)
 			}
-			if !skippedSecret(res.Skipped, tc.body) {
-				t.Fatalf("Skipped=%#v, want an entry naming the secret block", res.Skipped)
-			}
+			assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, tc.body)
 			var n int
 			if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM instruction WHERE body = $1`, tc.body).Scan(&n); err != nil {
 				t.Fatal(err)
@@ -57,6 +56,41 @@ func TestApplyRejectsSecretShapesInInstructionBody(t *testing.T) {
 				t.Fatalf("instruction with %s secret reached the database (%d rows)", tc.name, n)
 			}
 		})
+	}
+}
+
+// One-line change that makes this red: delete ScanSecrets on preference bodies
+// before the InsertPreference branch in commitWrites.
+func TestApplyRejectsSecretInPreferenceBody(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	body := "I keep token " + generatedGitHubToken(t)
+	plan := Plan{
+		Blocks: []Block{{
+			Hash: sha256Hex([]byte(body)), Heading: "Voice", Body: body,
+			Kind: "preference", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: "mac"}},
+		}},
+	}
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Active) != 0 {
+		t.Fatalf("Active=%#v, want secret preference blocked", res.Active)
+	}
+	assertSkippedSecret(t, res.Skipped, "preference:", plan.Blocks[0].Hash, body)
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM preference WHERE body = $1`, body).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("preference with secret reached the database (%d rows)", n)
 	}
 }
 
@@ -84,15 +118,49 @@ func TestApplyRejectsSecretShapesInMemoryBody(t *testing.T) {
 	if len(res.Memory) != 0 {
 		t.Fatalf("Memory=%#v, want secret memory blocked", res.Memory)
 	}
-	if !skippedSecret(res.Skipped, body) {
-		t.Fatalf("Skipped=%#v, want secret memory reported", res.Skipped)
-	}
+	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, body)
 	var n int
 	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM memory WHERE body = $1`, body).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
 		t.Fatalf("memory with secret reached the database (%d rows)", n)
+	}
+}
+
+// Machine lands in memory.source jsonb. Scanning only title/body, then storing
+// an unscanned Hostname, is the one-line change that makes this red.
+// Kind is not a leak path: invalid kinds fall back to "observation" before insert.
+func TestApplyRejectsSecretInMemoryHostname(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	host := generatedGitHubToken(t)
+	body := "hostname-secret fixture " + host[:8]
+	plan := Plan{
+		Memories: []MemoryItem{{
+			Hash: sha256Hex([]byte(body)), Title: "cluster", Body: body,
+			Kind: "fact", Hostname: host,
+		}},
+	}
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: host, TrustedMachine: host, Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Memory) != 0 {
+		t.Fatalf("Memory=%#v, want hostname-secret memory blocked", res.Memory)
+	}
+	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, host)
+	var n int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM memory WHERE body = $1`, body).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("memory whose source.machine is a secret reached the database (%d rows)", n)
 	}
 }
 
@@ -107,6 +175,7 @@ func TestApplyImportsCleanRowsWhenOneHasSecret(t *testing.T) {
 	clean := "Always run gofmt."
 	tainted := "token " + generatedGitHubToken(t)
 	other := "Use modules."
+	taintedHash := sha256Hex([]byte(tainted))
 	plan := Plan{
 		Blocks: []Block{
 			{
@@ -115,7 +184,7 @@ func TestApplyImportsCleanRowsWhenOneHasSecret(t *testing.T) {
 				Sources: []Source{{Hostname: "mac"}},
 			},
 			{
-				Hash: sha256Hex([]byte(tainted)), Heading: "Token", Body: tainted,
+				Hash: taintedHash, Heading: "Token", Body: tainted,
 				Kind: "instruction", Rel: ".claude/CLAUDE.md",
 				Sources: []Source{{Hostname: "mac"}},
 			},
@@ -139,9 +208,7 @@ func TestApplyImportsCleanRowsWhenOneHasSecret(t *testing.T) {
 	if _, ok := got[tainted]; ok {
 		t.Fatalf("tainted instruction was stored: %#v", got)
 	}
-	if !skippedSecret(res.Skipped, "Token") {
-		t.Fatalf("Skipped=%#v, want tainted source naming Token", res.Skipped)
-	}
+	assertSkippedSecret(t, res.Skipped, "instruction:", taintedHash, tainted)
 	if len(res.Active) != 2 {
 		t.Fatalf("Active count=%d, want 2 clean rows; %#v", len(res.Active), res.Active)
 	}
@@ -181,15 +248,7 @@ func TestApplyScansPostTransformBytes(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("control-byte-split secret reached the database (%d rows); scanner ran on pre-transform bytes", n)
 	}
-	if len(res.Skipped) == 0 {
-		t.Fatal("expected Skipped entry for post-transform secret; scan likely ran on raw input only")
-	}
-	for _, s := range res.Skipped {
-		if s.Reason == policy.CodeSecretDetected || strings.Contains(s.Reason, policy.CodeSecretDetected) {
-			return
-		}
-	}
-	t.Fatalf("Skipped=%#v, want reason %s", res.Skipped, policy.CodeSecretDetected)
+	assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, stored)
 }
 
 // Title defaults to Body when empty. Scanning only the empty Title before that
@@ -200,8 +259,6 @@ func TestApplyScansDefaultedMemoryTitle(t *testing.T) {
 	st := openStore(t, dsn)
 	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
 
-	// Body alone is innocuous to a scanner that only checks title before
-	// defaulting; after title := body the stored title carries the JWT.
 	jwt := generatedJWT(t)
 	body := jwt
 	plan := Plan{
@@ -223,31 +280,138 @@ func TestApplyScansDefaultedMemoryTitle(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("defaulted-title secret reached the database (%d rows)", n)
 	}
-	if !skippedSecret(res.Skipped, body) {
-		t.Fatalf("Skipped=%#v, want defaulted-title secret reported", res.Skipped)
+	assertSkippedSecret(t, res.Skipped, "memory:", plan.Memories[0].Hash, body)
+}
+
+// Slot carries Rel#Heading into review_item.payload. Skipping only Body, then
+// writing a heading that is itself a token into the payload, is the one-line
+// change that makes this red.
+func TestApplyRejectsSecretInHeadingSlot(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	tok := generatedGitHubToken(t)
+	body := "Always run gofmt."
+	// Seed an active instruction at the same slot so Apply opens a conflict
+	// and would marshal Slot into review_item.payload.
+	keyPrefix := "import.instruction." + slug(".claude/CLAUDE.md") + "." + slug(tok) + "."
+	if _, err := conn.Exec(t.Context(), `
+		INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'team', $2, 'rule', $3, $4, 'active', $2)`,
+		w.project, w.actor, keyPrefix+"seed", "Use goimports instead.",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := Plan{
+		Blocks: []Block{{
+			Hash: sha256Hex([]byte(body)), Heading: tok, Body: body,
+			Kind: "instruction", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: "mac"}},
+		}},
+	}
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Conflict) != 0 || len(res.Proposed) != 0 || len(res.Active) != 0 {
+		t.Fatalf("secret heading still planned: conflict=%d proposed=%d active=%d",
+			len(res.Conflict), len(res.Proposed), len(res.Active))
+	}
+	assertSkippedSecret(t, res.Skipped, "instruction:", plan.Blocks[0].Hash, tok)
+
+	var n int
+	if err := conn.QueryRow(t.Context(), `
+		SELECT count(*) FROM review_item
+		WHERE kind = 'import_conflict' AND payload::text LIKE '%' || $1 || '%'`, tok).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("secret heading reached review_item.payload (%d rows)", n)
 	}
 }
 
-func skippedSecret(skipped []Skipped, sourceFragment string) bool {
+// A NUL in Heading used to abort the whole import (jsonb rejects escaped NUL).
+// Sanitizing Slot before the conflict payload is the fix; leaving Heading raw
+// is the one-line change that makes this red.
+func TestApplySanitizesNULInHeadingSlot(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedImportWorld(t, conn)
+	st := openStore(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	heading := "Indent\x00ation"
+	body := "Prefer spaces."
+	// After sanitizeStored, heading is "Indentation"; seed must match that slot's key prefix.
+	keyPrefix := "import.instruction." + slug(".claude/CLAUDE.md") + "." + slug("Indentation") + "."
+	if _, err := conn.Exec(t.Context(), `
+		INSERT INTO instruction (id, scope_id, visibility, owner_id, kind, key, body, status, created_by)
+		VALUES (gen_random_uuid(), $1, 'team', $2, 'rule', $3, $4, 'active', $2)`,
+		w.project, w.actor, keyPrefix+"seed", "Prefer tabs.",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := Plan{
+		Blocks: []Block{{
+			Hash: sha256Hex([]byte(body)), Heading: heading, Body: body,
+			Kind: "instruction", Rel: ".claude/CLAUDE.md",
+			Sources: []Source{{Hostname: "mac"}},
+		}},
+	}
+	res, err := Apply(ctx, st, ApplyRequest{
+		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
+	})
+	if err != nil {
+		t.Fatalf("NUL in heading aborted import: %v", err)
+	}
+	for _, row := range res.Conflict {
+		if strings.Contains(row.Slot, "\x00") {
+			t.Fatalf("Conflict.Slot still contains NUL: %q", row.Slot)
+		}
+	}
+	var payload string
+	err = conn.QueryRow(t.Context(), `
+		SELECT payload::text FROM review_item WHERE kind = 'import_conflict' ORDER BY created_at DESC LIMIT 1`).Scan(&payload)
+	if err != nil {
+		t.Fatalf("expected a conflict review_item after sanitized heading: %v", err)
+	}
+	if strings.Contains(payload, "\\u0000") || strings.Contains(payload, "\x00") {
+		t.Fatalf("review payload still carries NUL: %s", payload)
+	}
+}
+
+// assertSkippedSecret requires a live Source match (hash prefix) and that
+// neither Source nor Reason echo the secret. A fallback that accepts any
+// instruction:/memory: prefix would make this pass even if skipSource returned
+// kind+":x" — that is the defect class this helper must not have.
+func assertSkippedSecret(t *testing.T, skipped []Skipped, kindPrefix, hash, secret string) {
+	t.Helper()
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	want := kindPrefix + hash
 	for _, s := range skipped {
 		if s.Reason != policy.CodeSecretDetected && !strings.Contains(s.Reason, policy.CodeSecretDetected) {
 			continue
 		}
-		if s.Source == "" {
+		if s.Source != want {
 			continue
 		}
-		if sourceFragment == "" || strings.Contains(s.Source, sourceFragment) {
-			return true
+		if strings.Contains(s.Source, secret) || strings.Contains(s.Reason, secret) {
+			t.Fatalf("secret leaked into skip report: Source=%q Reason=%q", s.Source, s.Reason)
 		}
-		// Source is kind:slot/hash — never the secret body. Any coded skip counts
-		// when the caller only needs to know a secret was blocked.
-		if sourceFragment != "" && (strings.HasPrefix(s.Source, "instruction:") ||
-			strings.HasPrefix(s.Source, "preference:") ||
-			strings.HasPrefix(s.Source, "memory:")) {
-			return true
+		out := (&ApplyResult{Skipped: skipped}).Format()
+		if strings.Contains(out, secret) {
+			t.Fatalf("secret leaked into Format() output:\n%s", out)
 		}
+		return
 	}
-	return false
+	t.Fatalf("Skipped=%#v, want Source %q reason %s", skipped, want, policy.CodeSecretDetected)
 }
 
 func generatedAWSAccessKey(t *testing.T) string {
