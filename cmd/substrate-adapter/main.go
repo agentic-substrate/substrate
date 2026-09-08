@@ -36,7 +36,13 @@ func run() error {
 	state := flag.String("state", "", "sqlite path (default <home>/.substrate/adapter.sqlite)")
 	roots := flag.String("roots", "", "comma-separated roots scanned two levels deep (<root>/*/*)")
 	interval := flag.Duration("interval", adapter.DefaultInterval, "render tick (EDD §7.2)")
-	scope := flag.String("scope", "global:", "scope path posted on drift_proposal review items")
+	// No default. `global:` was one, and internal/policy requires human_admin
+	// for any write at global or org -- so the default silently defeated both
+	// empty-scope guards (homeScope, observationScope) and every home-scoped
+	// drift proposal and every observation was refused by the server.
+	// Unset means "skip the targets that need an explicit scope", which the
+	// guards handle and log; it must not mean "use one that cannot work".
+	scope := flag.String("scope", "", "scope path for targets with no repo of their own (~/.claude/CLAUDE.md, observations); unset skips them")
 	skills := flag.String("skills-repo", os.Getenv("SUBSTRATE_SKILLS_REPO"), "skills git remote; cloned under <home>/.substrate/skills.git")
 	otlp := flag.String("otlp", os.Getenv("SUBSTRATE_OTLP_ENDPOINT"), "OTLP HTTP collector endpoint; empty disables export")
 	flag.Parse()

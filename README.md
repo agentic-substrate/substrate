@@ -289,6 +289,13 @@ A drift proposal about a file in a checkout names that checkout's repo key; the 
 resolves the key to the chain it bound, so no client is ever told, nor gets to choose,
 another team's org/team/project naming. Home-scoped targets such as `~/.claude/CLAUDE.md` have no repo,
 so their proposals use `-scope`; without one, drift is reported but the file is not restored.
+
+`-scope` has **no default**. It applies only to targets that have no repo of their own —
+`~/.claude/CLAUDE.md` and outbox observations — and unset means those targets are skipped
+and logged. It used to default to `global:`, which was worse than having no default: an
+agent token may not write at global or org scope (`internal/policy`), so the two guards
+that check for an unset scope never fired, and the work was filed and refused by the server
+instead of being skipped locally.
 Render targets are confined to the paths `render.Specs()` declares, under `-home` or a
 discovered checkout, with symlinks resolved. `-home` is required with `-server` so the binary
 cannot guess `$HOME` and overwrite pre-cutover harness files. State lives in
@@ -314,7 +321,7 @@ linked versions and does not affect `/readyz`.
 (OTLP HTTP collector; empty disables export), `-skills-repo` / `SUBSTRATE_SKILLS_REPO`
 (skills git remote; probed by `GET /v1/health/git`, never by `/readyz`). Adapter flags:
 `-server`, `-token` / `SUBSTRATE_TOKEN`, `-machine`, `-home`, `-state`, `-roots`, `-interval`
-(default 5m), `-scope` (review items), `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`, `-skills-repo` /
+(default 5m), `-scope`, `-otlp` / `SUBSTRATE_OTLP_ENDPOINT`, `-skills-repo` /
 `SUBSTRATE_SKILLS_REPO` (bare mirror
 under `<home>/.substrate/skills.git`; empty skips linking). The rest of the
 intended surface is specified in [`docs/design/edd.md`](docs/design/edd.md) §7 and §12 and gets
