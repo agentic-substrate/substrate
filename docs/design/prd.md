@@ -180,7 +180,8 @@ Surveyed 2026-09-05. Three layers are solved or maturing; the fourth is the gap.
 
 | ID | Pri | Requirement |
 |---|---|---|
-| CAP-1a | P0 | Claude Code hooks, Phase 1: `SessionStart` → `context.get`; `PostToolUse` → outbox observation |
+| CAP-1a-capture | P0 | Claude Code `PostToolUse` → outbox observation, installed by merging into `~/.claude/settings.json`; scope derived from the checkout's git remote and resolved server-side. **Phase 1** |
+| CAP-1a-context | P0 | Claude Code `SessionStart` → `context.get` with an offline instruction-pack fallback. **Deferred to Phase 2**: no client path to `context.get` outside MCP and no cached instruction pack exists, and Claude Code already auto-loads the rendered `CLAUDE.md`, so the marginal value is retrieved memories and mandatory items. PRD amended |
 | CAP-1b | P0 | Claude Code hooks, Phase 2: `Stop`/`PreCompact` → episodic summary + checkpoint |
 | CAP-2 | P1 | Codex hooks with the same contract; Cursor read-only |
 | CAP-3 | P1 | Session record (task, agent, machine, repo, branch, files, tools, errors, decisions, outcome) summarized, not retained verbatim |
@@ -247,8 +248,8 @@ See the design doc. Phase 1 footprint: PostgreSQL (+pgvector, FTS, RLS), Git (sk
 
 | Phase | Scope | Requirement IDs | Exit criterion |
 |---|---|---|---|
-| **1 — Authority + sync** | Schema; `context.get` (instructions + preferences + keyword memory); `memory.search/write/supersede`; `cp-adapter` pull-config/pull-skills/push-memory; Ollama embeddings (direct from Go); `SessionStart`/`PostToolUse` hooks; reconciliation on WSL + Mac Mini | SCOPE-1..5, INST-1..4, MEM-1..5, CTX-1..2, SKILL-1..2, SYNC-1..6, CAP-1a, GOV-1..4 | Identical generated config on both machines; import conflicts resolved; memory written on one machine searchable on the other ≤ 1 min |
-| **2 — Compiler + capture + Tier-1 continuity** | Ranking, `explain`, `feedback`, Claude Code + Codex hooks, checkpoints, file-level staleness | CTX-3..5, MEM-6, MEM-8 (file-level), CAP-1b, CAP-2..3, CONT-1..2 | Cold start on machine B from checkpoint continues the task |
+| **1 — Authority + sync** | Schema; `context.get` (instructions + preferences + keyword memory); `memory.search/write/supersede`; `cp-adapter` pull-config/pull-skills/push-memory; Ollama embeddings (direct from Go); `PostToolUse` → outbox hook; reconciliation on WSL + Mac Mini | SCOPE-1..5, INST-1..4, MEM-1..5, CTX-1..2, SKILL-1..2, SYNC-1..6, CAP-1a-capture, GOV-1..4 | Identical generated config on both machines; import conflicts resolved; memory written on one machine searchable on the other ≤ 1 min |
+| **2 — Compiler + capture + Tier-1 continuity** | Ranking, `explain`, `feedback`, `SessionStart` → `context.get`, Claude Code + Codex hooks, checkpoints, file-level staleness | CTX-3..5, MEM-6, MEM-8 (file-level), CAP-1a-context, CAP-1b, CAP-2..3, CONT-1..2 | Cold start on machine B from checkpoint continues the task |
 | **3 — Raw session offload (Tier 2)** | Pinned pod image, `cp offload`/`reclaim`, MinIO transcripts, fallback | CONT-3..6 | 10 consecutive WSL ↔ pod round-trips |
 | **4 — Lifecycle + review** | Promotion, trust-weighted contradictions, symbol-level staleness, review queue UI | MEM-7, MEM-8 (symbol), MEM-9..10, CAP-4, INST-5, SCOPE-6 | ≥ 90% served memories confirmed/probable |
 | **5 — Skills governance** | Proposals, versioning UI, namespaces | SKILL-3..4, CAP-5 | First agent-proposed skill approved |

@@ -74,12 +74,12 @@ Reasoning, and what we're deliberately *not* building: [`docs/product/positionin
 
 | Harness | Substrate renders | Captures via | Continuity |
 |---|---|---|---|
-| Claude Code | `CLAUDE.md` (`@AGENTS.md` + hooks block) | `SessionStart` / `PostToolUse` hooks *(Phase 2)* | checkpoint *(Phase 2)* |
+| Claude Code | `CLAUDE.md` (`@AGENTS.md` + hooks block) | `PostToolUse` hook → outbox observation (**CAP-1a capture**, ships today); `SessionStart` → `context.get` *(CAP-1a context, Phase 2)* | checkpoint *(Phase 2)* |
 | Codex | `AGENTS.md`, `~/.codex/AGENTS.md` | hooks *(Phase 2)* | checkpoint *(Phase 2)* |
 | Cursor | `~/.cursor/rules/substrate.mdc` | read-only | checkpoint *(Phase 2)* |
 | Headless workers | context pack over MCP (`context.get`) | `memory.*` MCP tools | lease + checkpoint *(Phase 6)* |
 
-Rendering and skill linking ship today; hooks and continuity are designed and phased, not shipped. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state (`skill_version.git_sha` is the only link). The adapter materializes the active approved `git_sha` into `~/.agents/skills/<name>` and refreshes harness symlinks; a skill whose scope or visibility does not match this machine is omitted from `GET /v1/skills/manifest` and is not linked. `active_version_id` can only point at an approved version (Postgres trigger, R6).
+Rendering, skill linking, and `PostToolUse` capture ship today; `SessionStart` context injection and continuity are designed and phased, not shipped. The `PostToolUse` hook is installed by merging an entry into `~/.claude/settings.json` — a user-owned file Substrate merges into rather than owns: the merge is idempotent, unrelated keys are preserved, the pre-existing file is copied once to `settings.json.pre-substrate`, and `substrate adapter uninstall -restore` removes the entry surgically — everything else you have written since stays, and the `.pre-substrate` copy is kept as your archive rather than written back over your edits. The shim (`substrate-adapter hook posttooluse`) reads the hook JSON on stdin, derives its scope from the checkout's git remote, exits within 2 seconds, and always exits 0 — a capture failure never fails the tool call, and a cwd whose remote is not bound is logged and skipped rather than filed anywhere else. Skills use the [Agent Skills](https://agentskills.io) `SKILL.md` format — Git holds skill content, Substrate holds skill state (`skill_version.git_sha` is the only link). The adapter materializes the active approved `git_sha` into `~/.agents/skills/<name>` and refreshes harness symlinks; a skill whose scope or visibility does not match this machine is omitted from `GET /v1/skills/manifest` and is not linked. `active_version_id` can only point at an approved version (Postgres trigger, R6).
 
 ## Quickstart
 

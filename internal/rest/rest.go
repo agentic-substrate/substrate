@@ -335,9 +335,36 @@ func (h *Handler) memoryBatch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("memory.batch: at most %d items", maxBatchItems))
 		return
 	}
+	// An item about a checkout names its repo key and nothing else, exactly as
+	// POST /v1/review does (#58): the server owns the repo-key-to-chain
+	// binding, so a PostToolUse shim can neither invent a chain nor be told
+	// one. The resolved chain is used to place the row and is never returned.
+	anyRepo := false
+	for i := range items {
+		if items[i].Repo == "" {
+			continue
+		}
+		anyRepo = true
+		if items[i].Scope != "" {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("memory.batch: scope and repo are mutually exclusive"))
+			return
+		}
+		st, serr := h.requireStore()
+		if serr != nil {
+			writeErr(w, http.StatusServiceUnavailable, serr)
+			return
+		}
+		sc, rerr := h.repoScope(r.Context(), st, items[i].Repo)
+		if rerr != nil {
+			writePolicy(w, maskRepoDenial(rerr, true))
+			return
+		}
+		items[i].Scope = sc.String()
+		items[i].Repo = ""
+	}
 	out, err := h.mem.Batch(r.Context(), items)
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, anyRepo))
 		return
 	}
 	results := make([]batchResult, len(out))

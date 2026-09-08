@@ -70,6 +70,9 @@ type Report struct {
 	CreatedHashes  map[string]string
 	JournalPending bool
 	Discard        []string
+	// HookSettings is <home>/.claude/settings.json when cutover would merge
+	// the PostToolUse entry into it, or restore would take it back out.
+	HookSettings string
 }
 
 // Rename is one *.pre-substrate displacement or its inverse.
@@ -191,6 +194,13 @@ func (r *Report) Format() string {
 		if n.SHA != "" {
 			fmt.Fprintf(&b, "  sha256: %s\n", n.SHA)
 		}
+	}
+	if r.HookSettings != "" {
+		verb := "MERGE"
+		if r.Uninstall && !r.Install {
+			verb = "UNMERGE"
+		}
+		fmt.Fprintf(&b, "%s %s hook into %s\n", verb, strings.Join(HookEvents(), ","), r.HookSettings)
 	}
 	if r.Uninstall {
 		b.WriteString("UNINSTALL adapter unit\n")

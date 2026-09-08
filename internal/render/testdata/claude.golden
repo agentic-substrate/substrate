@@ -4,6 +4,6 @@
 
 ## Claude-specific
 
-SessionStart and PostToolUse hooks are installed by the Substrate adapter. They must exit in under 2 seconds; if the server is unreachable, continue from the local cache. Do not skip them.
+A PostToolUse hook installed by the Substrate adapter records each tool call — tool, files, exit status — to a local outbox. It exits in under 2 seconds and, when the server is unreachable, leaves the observation queued locally rather than failing the tool call. Do not disable it.
 
-<!-- sha256:2481c0c80e0b8a30d8731d40cf44ba9fe8332205a23dc98337d452646e1dfc9c generated-at:2026-01-02T15:04:05Z -->
+<!-- sha256:c46fd611c8efeda87922d9a30dc7563f8d2773cc72146ebfbb94ebf0f129c4ca generated-at:2026-01-02T15:04:05Z -->

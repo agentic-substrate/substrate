@@ -19,6 +19,12 @@ type Observation struct {
 	Files  []string `json:"files"`
 	Status int      `json:"status"`
 	Body   string   `json:"body"`
+	// Repo is the repo scope key of the checkout the tool call happened in.
+	// When set, the payload names the repo and the server resolves the chain
+	// it bound that key to (R18); the configured -scope is not consulted and
+	// is not a fallback. Exactly one of Repo and the configured scope ends up
+	// on the wire, never both.
+	Repo string `json:"-"`
 }
 
 type outboxRow struct {
@@ -69,6 +75,18 @@ func (db *DB) EnqueueContext(ctx context.Context, payload []byte, now time.Time)
 
 // EnqueueObservation queues a compact PostToolUse observation (EDD §7.3).
 func EnqueueObservation(db *DB, cfg Config, obs Observation) (string, error) {
+	payload, err := observationPayload(cfg, obs)
+	if err != nil {
+		return "", err
+	}
+	return db.Enqueue(payload, cfg.now())
+}
+
+// observationPayload builds the memory.batch item for one observation. An
+// observation inside a checkout names its repo key and nothing else; one with
+// no repo carries the explicitly configured scope. `repo` and `scope` are
+// mutually exclusive on the wire, exactly as POST /v1/review made them.
+func observationPayload(cfg Config, obs Observation) ([]byte, error) {
 	body := clipUTF8(obs.Body, MaxObservationBytes)
 	title := obs.Tool
 	if title == "" {
@@ -77,25 +95,30 @@ func EnqueueObservation(db *DB, cfg Config, obs Observation) (string, error) {
 	if obs.Status != 0 {
 		title = fmt.Sprintf("%s (exit %d)", title, obs.Status)
 	}
-	sc, err := cfg.observationScope()
-	if err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(map[string]any{
+	item := map[string]any{
 		"kind":         "observation",
 		"title":        title,
 		"body":         body,
 		"identifiers":  obs.Files,
-		"scope":        sc,
 		"visibility":   "team",
 		"verification": map[string]string{"type": "agent_inference"},
 		"source":       map[string]string{"machine": cfg.Machine},
 		"status":       "unverified",
-	})
-	if err != nil {
-		return "", fmt.Errorf("adapter: observation: %w", err)
 	}
-	return db.Enqueue(payload, cfg.now())
+	if obs.Repo != "" {
+		item["repo"] = obs.Repo
+	} else {
+		sc, err := cfg.observationScope()
+		if err != nil {
+			return nil, err
+		}
+		item["scope"] = sc
+	}
+	payload, err := json.Marshal(item)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: observation: %w", err)
+	}
+	return payload, nil
 }
 
 func backoff(attempts int) time.Duration {
@@ -338,8 +361,37 @@ func HookWrite(ctx context.Context, db *DB, cfg Config, payload []byte) error {
 		}
 		return err
 	}
+	if cfg.Server == "" {
+		// No server configured on the hook path: the row is durable in the
+		// outbox and the daemon drains it. Attempting a POST to an empty base
+		// URL would only spend the hook's budget failing.
+		return nil
+	}
 	dctx, cancelDrain := context.WithTimeout(ctx, cfg.hookTimeout())
 	defer cancelDrain()
 	_ = drain(dctx, db, cfg, newHookAPI(cfg))
 	return nil
+}
+
+// OutboxPayloads returns the JSON payload of every undrained outbox row in
+// insertion order. It is a read-only inspection helper for diagnostics and
+// tests; the drain path uses dueOutbox, which honours next_attempt_at.
+func (db *DB) OutboxPayloads(ctx context.Context) ([]string, error) {
+	rows, err := db.sql.QueryContext(ctx, `SELECT payload FROM outbox ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("adapter: outbox payloads: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("adapter: outbox payloads: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adapter: outbox payloads: %w", err)
+	}
+	return out, nil
 }
