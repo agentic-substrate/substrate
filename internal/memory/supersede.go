@@ -77,7 +77,10 @@ func (s *Service) Supersede(ctx context.Context, in SupersedeIn) (SupersedeOut, 
 			}
 		}
 
-		status := decideStatus(p, "")
+		// Humans inherit the superseded row's trust level so a correction of a
+		// confirmed fact stays visible to default reads (MEM-4). Agents still
+		// land unverified via decideStatus (Gotcha 4 / MEM-6).
+		status := decideStatus(p, string(old.Status))
 		ids := extractIdentifiers(body, old.Identifiers)
 		if _, err := q.InsertMemory(ctx, store.InsertMemoryParams{
 			ID:           pgUUID(newID),

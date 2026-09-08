@@ -260,6 +260,119 @@ func TestSupersedeRetainsOldRowAndEdge(t *testing.T) {
 	}
 }
 
+// MEM-4 / Gotcha 4: a human correcting a confirmed fact must publish a
+// replacement that default memory.search can see. Passing "" into
+// decideStatus made the replacement unverified and invisible — the
+// correction removed the wrong answer and put nothing in its place.
+func TestHumanSupersedeConfirmedVisibleInDefaultSearch(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, _ := openService(t, dsn)
+	ctx := identity.WithPrincipal(t.Context(), w.aliceP)
+
+	written, err := svc.Write(ctx, aliceWrite(w))
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	replaced, err := svc.Supersede(ctx, SupersedeIn{
+		OldID:  written.ID,
+		Body:   "staging DB is at 10.0.0.9",
+		Reason: "corrected wrong host",
+	})
+	if err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+
+	def, err := svc.Search(ctx, SearchIn{Query: "staging DB"})
+	if err != nil {
+		t.Fatalf("default search: %v", err)
+	}
+	if !containsID(def.Results, replaced.ID) {
+		t.Fatalf("human supersede of confirmed memory produced replacement %s invisible to default memory.search; status likely unverified", replaced.ID)
+	}
+	hit := hitByID(def.Results, replaced.ID)
+	if hit.Status != "confirmed" {
+		t.Fatalf("replacement status=%q, want confirmed (inherit superseded row for human actor)", hit.Status)
+	}
+	if containsID(def.Results, written.ID) {
+		t.Fatal("superseded row still in default search")
+	}
+}
+
+// Gotcha 4 guard: an agent superseding a confirmed row must still land
+// unverified. If inheritance is applied without the agent check, this fails.
+// The agent must own the row — RLS content_update requires owner_id = actor.
+func TestAgentSupersedeForcedUnverified(t *testing.T) {
+	dsn, conn := startMigrated(t)
+	w := seedWorld(t, conn)
+	svc, st := openService(t, dsn)
+
+	agentCtx := identity.WithPrincipal(t.Context(), w.agentP)
+	in := aliceWrite(w)
+	in.Status = "confirmed"
+	in.Verification.Type = "agent_inference"
+	in.Body = "agent-owned staging host is 10.0.0.5"
+	in.Identifiers = []string{"agent-staging-host"}
+	written, err := svc.Write(agentCtx, in)
+	if err != nil {
+		t.Fatalf("agent write: %v", err)
+	}
+	if written.Status != "unverified" {
+		t.Fatalf("agent write status=%q, want unverified before promotion", written.Status)
+	}
+
+	// Promote outside the agent write path so inheritance has something above
+	// unverified to wrongly copy. FORCE RLS still applies to the table owner,
+	// so is_admin must be set for the UPDATE to match.
+	if _, err := conn.Exec(t.Context(), `SELECT set_config('substrate.is_admin', 'true', false)`); err != nil {
+		t.Fatalf("set is_admin: %v", err)
+	}
+	tag, err := conn.Exec(t.Context(), `UPDATE memory SET status = 'confirmed' WHERE id = $1`, written.ID)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("promote rows=%d, want 1", tag.RowsAffected())
+	}
+
+	replaced, err := svc.Supersede(agentCtx, SupersedeIn{
+		OldID:  written.ID,
+		Body:   "agent thinks staging is at 10.0.0.9",
+		Reason: "agent correction attempt",
+	})
+	if err != nil {
+		t.Fatalf("agent supersede: %v", err)
+	}
+
+	var status string
+	if err := st.Tx(agentCtx, func(tx pgx.Tx) error {
+		return tx.QueryRow(agentCtx, `SELECT status::text FROM memory WHERE id = $1`, replaced.ID).Scan(&status)
+	}); err != nil {
+		t.Fatalf("read replacement: %v", err)
+	}
+	if status != "unverified" {
+		t.Fatalf("agent supersede stored status=%q, want unverified (Gotcha 4)", status)
+	}
+
+	aliceCtx := identity.WithPrincipal(t.Context(), w.aliceP)
+	def, err := svc.Search(aliceCtx, SearchIn{Query: "agent-staging-host"})
+	if err != nil {
+		t.Fatalf("default search: %v", err)
+	}
+	if containsID(def.Results, replaced.ID) {
+		t.Fatal("agent supersede replacement appeared in default search; agents must not publish above unverified")
+	}
+}
+
+func hitByID(hits []SearchHit, id string) SearchHit {
+	for _, h := range hits {
+		if h.ID == id {
+			return h
+		}
+	}
+	return SearchHit{}
+}
+
 func TestIdentifierHitOutranksKeyword(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
