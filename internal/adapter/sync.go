@@ -24,6 +24,15 @@ type SyncResult struct {
 	// files were left exactly as found: the proposal is filed before the file
 	// is overwritten, and a failed proposal means no write (#59).
 	UnproposedDrift []string
+	// SkillsSkipped is why skills were not linked this cycle, empty when they
+	// were. Both reasons -- no remote configured, and a remote that could not
+	// be cloned or fetched -- are deliberately non-fatal: skills failing is not
+	// a reason to stop rendering instructions. But a silent non-fatal skip
+	// makes a daemon with skills entirely off indistinguishable from one that
+	// linked every skill, which is the same failure mode UnscopedRemotes exists
+	// to prevent. deploy/server/configmap.yaml ships SUBSTRATE_SKILLS_REPO
+	// empty, so the unconfigured case is the default, not an edge case.
+	SkillsSkipped string
 }
 
 // Sync discovers checkouts, pulls /v1/render, files drift, then writes.
@@ -74,8 +83,14 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 
 	applyTo := checkoutsWithRemotes(checkouts, known)
 	var unproposed []string
+	var skillsSkipped string
 	res := func() SyncResult {
-		return SyncResult{UnknownRemotes: unknown, UnscopedRemotes: unscoped, UnproposedDrift: unproposed}
+		return SyncResult{
+			UnknownRemotes:  unknown,
+			UnscopedRemotes: unscoped,
+			UnproposedDrift: unproposed,
+			SkillsSkipped:   skillsSkipped,
+		}
 	}
 	for _, tgt := range targets {
 		dests, err := destTargets(cfg, tgt.Path, applyTo, repoKeys)
@@ -92,9 +107,11 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 			}
 		}
 	}
-	if err := linkSkills(ctx, db, a, cfg, known); err != nil {
+	skipped, err := linkSkills(ctx, db, a, cfg, known)
+	if err != nil {
 		return res(), err
 	}
+	skillsSkipped = skipped
 	return res(), nil
 }
 
@@ -263,4 +280,24 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarge
 
 	sum := render.DriftHash(tgt.Content)
 	return false, db.upsertManaged(dest.path, targetName(tgt.Path), sum, now)
+}
+
+// Report logs whatever this cycle did not manage. Sync returns nil for all of
+// these -- an unknown remote, an unkeyable one, a refused drift proposal and a
+// missing skills repo are each non-fatal by design -- so without this the
+// daemon reports healthy while managing less than it should, and every field
+// on SyncResult is asserted by tests and then discarded by the binary.
+func (r SyncResult) Report() {
+	if len(r.UnknownRemotes) > 0 {
+		slog.Warn("unknown git remotes; bind them with substrate repo bind", "remotes", r.UnknownRemotes)
+	}
+	if len(r.UnscopedRemotes) > 0 {
+		slog.Warn("no repo key for remotes; those checkouts are not managed", "remotes", r.UnscopedRemotes)
+	}
+	if len(r.UnproposedDrift) > 0 {
+		slog.Warn("drift proposal failed; those files were left as found", "paths", r.UnproposedDrift)
+	}
+	if r.SkillsSkipped != "" {
+		slog.Warn("skills not linked this cycle", "reason", r.SkillsSkipped)
+	}
 }

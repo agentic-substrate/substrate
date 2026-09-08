@@ -175,9 +175,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	if _, err := Sync(ctx, db, cfg); err != nil {
+	res, err := Sync(ctx, db, cfg)
+	if err != nil {
 		return err
 	}
+	res.Report()
 	if err := Drain(ctx, db, cfg); err != nil {
 		slog.Error("outbox drain failed", "err", err)
 	}
@@ -202,12 +204,16 @@ func Run(ctx context.Context, cfg Config) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if _, err := Sync(ctx, db, cfg); err != nil {
+			if res, err := Sync(ctx, db, cfg); err != nil {
 				slog.Error("render sync failed", "err", err)
+			} else {
+				res.Report()
 			}
 		case <-wake:
-			if _, err := Sync(ctx, db, cfg); err != nil {
+			if res, err := Sync(ctx, db, cfg); err != nil {
 				slog.Error("render sync failed", "err", err)
+			} else {
+				res.Report()
 			}
 		case <-outboxTick.C:
 			if err := Drain(ctx, db, cfg); err != nil {

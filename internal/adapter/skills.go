@@ -24,18 +24,25 @@ var harnessSkillDirs = []string{
 	".cursor/skills",
 }
 
-func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []string) error {
+// linkSkills returns the reason skills were not linked this cycle, empty when
+// they were. Neither reason is an error: a missing or unreachable skills repo
+// must not stop instructions rendering. Both are reported rather than swallowed
+// -- see SyncResult.SkillsSkipped.
+func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []string) (string, error) {
 	if cfg.SkillsRepo == "" {
-		return nil
+		// Deliberately not logged here. Run reports the whole SyncResult, and
+		// a second log line from this layer would make a test asserting the
+		// report pass whether or not Run actually reads the result.
+		return "skills repo not configured; no skills are linked on this machine", nil
 	}
 	skills, err := a.getSkillsManifest(ctx, remotes)
 	if err != nil {
-		return err
+		return "", err
 	}
 	mirror, err := ensureSkillsMirror(ctx, cfg)
 	if err != nil {
 		slog.Error("skills repo fetch failed; keeping last linked versions", "err", err)
-		return nil
+		return fmt.Sprintf("skills repo %s unreachable; keeping last linked versions: %v", cfg.SkillsRepo, err), nil
 	}
 	keep := make(map[string]struct{}, len(skills))
 	for _, s := range skills {
@@ -44,7 +51,7 @@ func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []strin
 		}
 		keep[s.Name] = struct{}{}
 	}
-	return pruneSkills(db, cfg, keep)
+	return "", pruneSkills(db, cfg, keep)
 }
 
 func ensureSkillsMirror(ctx context.Context, cfg Config) (string, error) {

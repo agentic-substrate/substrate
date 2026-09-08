@@ -484,3 +484,81 @@ func readLinkedSkill(t *testing.T, home, name string) string {
 	}
 	return string(b)
 }
+
+// Skills being switched off must be visible in the sync result, not only
+// absent from it. An unconfigured SkillsRepo is the deployment's default
+// (deploy/server/configmap.yaml ships SUBSTRATE_SKILLS_REPO empty), so a
+// daemon with skills entirely disabled is otherwise indistinguishable from one
+// that linked every skill correctly -- the same failure shape UnscopedRemotes
+// and UnknownRemotes exist to prevent.
+//
+// One-line production change that makes this go red: drop the SkillsSkipped
+// assignment from linkSkills' unconfigured branch.
+func TestUnconfiguredSkillsRepoIsSurfacedNotSilent(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newFake(t)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.SkillsRepo = "" // the shipped default
+
+	res, err := Sync(context.Background(), db, cfg)
+	if err != nil {
+		t.Fatalf("an unconfigured skills repo must not fail the cycle: %v", err)
+	}
+	if res.SkillsSkipped == "" {
+		t.Fatal("skills were disabled and the sync result does not say so")
+	}
+	if !strings.Contains(res.SkillsSkipped, "not configured") {
+		t.Fatalf("SkillsSkipped = %q; it must name the reason", res.SkillsSkipped)
+	}
+}
+
+// A configured-but-broken remote is the other half: today it is logged and
+// swallowed, so a permanently unreachable skills repo looks like a healthy
+// cycle to everything downstream of Sync. It must stay non-fatal -- skills
+// failing is not a reason to stop rendering instructions -- but it must be
+// reported.
+//
+// One-line production change that makes this go red: drop the SkillsSkipped
+// assignment from linkSkills' mirror-failure branch.
+func TestUnreachableSkillsRepoIsSurfacedNotSilent(t *testing.T) {
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	srv := newFake(t)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.SkillsRepo = filepath.Join(t.TempDir(), "missing.git")
+
+	res, err := Sync(context.Background(), db, cfg)
+	if err != nil {
+		t.Fatalf("an unreachable skills repo must not fail the cycle: %v", err)
+	}
+	if res.SkillsSkipped == "" {
+		t.Fatal("the skills mirror could not be built and the sync result does not say so")
+	}
+}
+
+// The happy path must not report a skip, or the field is noise and stops being
+// read -- the same reason the drift hash excludes the footer.
+func TestWorkingSkillsRepoReportsNoSkip(t *testing.T) {
+	repo, gitPath, _, sha, _, _ := makeSkillsRepo(t)
+	srv := skillsManifestServer(t, func() []map[string]string {
+		return []map[string]string{{
+			"name": "team/alpha/lint", "git_path": gitPath, "git_sha": sha,
+		}}
+	})
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.SkillsRepo = repo
+
+	res, err := Sync(context.Background(), db, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SkillsSkipped != "" {
+		t.Fatalf("a working skills repo reported a skip: %q", res.SkillsSkipped)
+	}
+}
