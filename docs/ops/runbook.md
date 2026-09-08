@@ -229,59 +229,78 @@ which reads like a transient failure of the remote.
 | Bad instruction rendered everywhere | — | `substrate review revert <audit-id>` → broadcast → all machines re-render within 5 min |
 | Token leaked | — | `substrate token revoke`; the audit log shows every use by `request_id` |
 
-## Import cutover and rollback
+> **`substrate review revert` does not exist.** It appears above and predates this epic;
+> nothing in `cmd/` or `internal/` implements it. Tracked by #71 (GOV-3) — do not invent the
+> command to make this row true, and do not delete the row unilaterally; coordinate the fix
+> with #71.
 
-Cutover replaces a machine's harness files with rendered ones and installs the
-adapter unit. The files it displaces are the only copy of that machine's
-accumulated configuration. There is no backup beyond the `*.pre-substrate`
-renames this command makes. If a `*.pre-substrate` path already exists, stop
-and resolve it by hand — overwriting it destroys an earlier cutover's state.
+## Adapter install and rollback
 
-Always dry-run first. `-root` is repeatable and has no `$HOME` default; passing
-the real home is a deliberate operator choice. When `-root` is omitted, cutover
-defaults to `/work` so CONT-4 checkouts are displaced to `*.pre-substrate`
-instead of being left for the adapter to treat as drift and overwrite. Passing
-`-root "$HOME"` does **not** add `/work`; include both if harness files live
-under home and checkouts live under the mount root.
+Install replaces a machine's harness files with rendered ones and installs the
+adapter unit. Prior to the CLI's cobra migration (#99/#101) this command was
+named `substrate import cutover`; it is now `substrate adapter install`, and its
+preview is `substrate adapter status`. The files it displaces are the only copy
+of that machine's accumulated configuration. There is no backup beyond the
+`*.pre-substrate` renames this command makes. If a `*.pre-substrate` path
+already exists, stop and resolve it by hand — overwriting it destroys an
+earlier install's state.
+
+Preview first, always. `adapter status` is the preview and it is a separate
+verb, not a flag: there is no `-dry-run`/`-commit` pair any more. `--root` is
+repeatable and has no `$HOME` default; passing the real home is a deliberate
+operator choice. When `--root` is omitted, install defaults to `/work` so
+CONT-4 checkouts are displaced to `*.pre-substrate` instead of being left for
+the adapter to treat as drift and overwrite. Passing `--root "$HOME"` does
+**not** add `/work`; include both if harness files live under home and
+checkouts live under the mount root.
+
+`install`, `uninstall`, `import apply` and `review approve|reject` echo what
+they are about to do and then confirm. On a terminal that is an interactive
+prompt; off a terminal — a script, a CronJob, an `ssh host '…'` — they refuse
+rather than assume, so **every command in this runbook that you run
+non-interactively needs `--yes`.** The `--yes` below is not optional decoration.
 
 ```sh
-# Preview. Writes nothing. The printed list must match what --restore would invert.
-./bin/substrate import cutover -root "$HOME" -root /work \
-  -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl
+# Preview. Writes nothing. The printed list must match what `adapter uninstall` would invert.
+./bin/substrate adapter status --root "$HOME" --root /work \
+  --server "$SUBSTRATE_URL" --token "$TOKEN" --machine wsl
 
 # Commit. systemd --user on Linux/WSL, launchd on macOS. Unit pins -roots /work.
-./bin/substrate import cutover -root "$HOME" -root /work \
-  -server "$SUBSTRATE_URL" -token "$TOKEN" -machine wsl -commit
+./bin/substrate adapter install --root "$HOME" --root /work \
+  --server "$SUBSTRATE_URL" --token "$TOKEN" --machine wsl --yes
 ```
 
 Nothing in this flow deletes. Live files and the `.memorix` store are renamed
 to `*.pre-substrate`, then rendered files are written. The adapter unit's
-`-home` is the first `-root`; `-roots` is the set this cutover displaced, so
+`-home` is the first `--root`; `-roots` is the set this install displaced, so
 the daemon only ever renders where a `*.pre-substrate` backup exists. With
-`-root` omitted that set is `/work`, keeping Phase 3 cwd slugs matching
-later (CONT-4). If you cut over `$HOME` only, the unit scans `$HOME` only —
+`--root` omitted that set is `/work`, keeping Phase 3 cwd slugs matching
+later (CONT-4). If you install over `$HOME` only, the unit scans `$HOME` only —
 checkouts under `/work` stay unmanaged rather than being overwritten
-unrecoverably. Cutover walks exactly the `-root` list it was given
-(or `/work` when none was given). Restore is the inverse of that list and
-does not discover extra trees.
+unrecoverably. Install walks exactly the `--root` list it was given
+(or `/work` when none was given). `adapter uninstall` is the inverse of that
+list and does not discover extra trees.
 
-**Rollback** — run this before anything else if cutover went wrong. Server rows
-are additive and can stay.
+**Rollback** — run this before anything else if `adapter install` went wrong.
+Server rows are additive and can stay. `adapter uninstall` always restores —
+there is no `--restore` flag to remember, and no non-restoring path it could
+select between; that flag existed only because uninstall used to require it,
+and it has been removed rather than left as dead ceremony.
 
 ```sh
-./bin/substrate adapter uninstall -restore -root "$HOME" -root /work
-./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -commit
+./bin/substrate adapter uninstall --root "$HOME" --root /work --yes
 ```
 
-`-restore` puts planned `*.pre-substrate` paths back over the live path (verified
-by hash in tests), removes generated files only when they still match the
-written `DriftHash`, and uninstalls the unit. If a live file was edited after
-cutover, restore refuses and prints `DISCARD live edits`; re-run with `-force`
-to overwrite those edits. After a successful restore there must be no
-`*.pre-substrate` leftovers. If restore reports a file/directory mismatch, do
-not delete: rename the unexpected side out of the way and re-run.
+`adapter uninstall` puts planned `*.pre-substrate` paths back over the live path
+(verified by hash in tests), removes generated files only when they still match
+the written `DriftHash`, and uninstalls the unit. If a live file was edited after
+install, uninstall refuses and prints `DISCARD live edits`; re-run with `--force`
+to overwrite those edits — **`--force` is the documented drift-recovery path and
+is the one flag that survives from before this rename.** After a successful
+uninstall there must be no `*.pre-substrate` leftovers. If uninstall reports a
+file/directory mismatch, do not delete: rename the unexpected side out of the
+way and re-run.
 
 ```sh
-./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -force
-./bin/substrate adapter uninstall -restore -root "$HOME" -root /work -force -commit
+./bin/substrate adapter uninstall --root "$HOME" --root /work --force --yes
 ```
