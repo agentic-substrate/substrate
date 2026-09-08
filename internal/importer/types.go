@@ -98,6 +98,7 @@ type ApplyResult struct {
 	Proposed   []PlannedRow           `json:"proposed"`
 	Conflict   []PlannedRow           `json:"conflict"`
 	Memory     []PlannedRow           `json:"memory"`
+	Skipped    []Skipped              `json:"skipped,omitempty"`
 	ByHostname map[string]HostSummary `json:"by_hostname"`
 }
 
