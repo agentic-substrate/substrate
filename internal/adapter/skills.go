@@ -24,18 +24,31 @@ var harnessSkillDirs = []string{
 	".cursor/skills",
 }
 
-func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []string) error {
+// linkSkills returns the reason skills were not linked this cycle, empty when
+// they were. Neither reason is an error: a missing or unreachable skills repo
+// must not stop instructions rendering. Both are reported rather than swallowed
+// -- see SyncResult.SkillsSkipped.
+func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []string) (string, error) {
 	if cfg.SkillsRepo == "" {
-		return nil
+		// Deliberately not logged here. Run reports the whole SyncResult, and
+		// a second log line from this layer would make a test asserting the
+		// report pass whether or not Run actually reads the result.
+		return "skills repo not configured; no skills are linked on this machine", nil
 	}
 	skills, err := a.getSkillsManifest(ctx, remotes)
 	if err != nil {
-		return err
+		// A reason accompanies the error: Sync returns a populated result
+		// alongside its errors, and a result claiming no skip in the very case
+		// where skills definitively did not link is the lie that matters most.
+		return "skills manifest unavailable; no skills linked this cycle", err
 	}
 	mirror, err := ensureSkillsMirror(ctx, cfg)
 	if err != nil {
-		slog.Error("skills repo fetch failed; keeping last linked versions", "err", err)
-		return nil
+		// Not logged here: Report is the single emitter, so a test asserting
+		// the report cannot pass on a log line from this layer instead.
+		// git's own error echoes the remote, so it is redacted too.
+		return fmt.Sprintf("skills repo %s unreachable; keeping last linked versions: %s",
+			redactRemote(cfg.SkillsRepo), redactRemote(err.Error())), nil
 	}
 	keep := make(map[string]struct{}, len(skills))
 	for _, s := range skills {
@@ -44,7 +57,7 @@ func linkSkills(ctx context.Context, db *DB, a *api, cfg Config, remotes []strin
 		}
 		keep[s.Name] = struct{}{}
 	}
-	return pruneSkills(db, cfg, keep)
+	return "", pruneSkills(db, cfg, keep)
 }
 
 func ensureSkillsMirror(ctx context.Context, cfg Config) (string, error) {
@@ -284,4 +297,25 @@ func disableArchiveSubst(gitDir string) error {
 		return fmt.Errorf("adapter: git attributes: %w", err)
 	}
 	return nil
+}
+
+// credentialedRemote matches the userinfo in a URL-shaped remote. A bare git
+// mirror is credentialed exactly this way -- https://x-access-token:<PAT>@host
+// -- and cfg.SkillsRepo is handed straight to `git clone --bare`, so both the
+// configured URL and git's own error text carry the token.
+var credentialedRemote = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]*@`)
+
+// redactRemote strips userinfo from any URL-shaped remote in s, leaving enough
+// (scheme, host, path) for an operator to act on. scp-style remotes
+// (git@host:org/repo) are left alone: their "user" is a login name, not a
+// secret, and rewriting them would hide the host. A string that is URL-shaped
+// but unparseable is replaced wholesale rather than risking a partial leak.
+func redactRemote(s string) string {
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "://") {
+		return "(redacted remote)"
+	}
+	return credentialedRemote.ReplaceAllString(s, "$1")
 }
