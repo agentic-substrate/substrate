@@ -11,6 +11,17 @@ import (
 	"github.com/agentic-substrate/substrate/internal/render"
 )
 
+// RenderVersion identifies the shape of the render the adapter writes, not the
+// content. Bump it whenever a change to the rendering rules makes the correct
+// content of an already-managed file different -- as #111 did, when
+// home-scoped files stopped carrying every repo's instructions. Drift review
+// cannot catch that class: the file on disk still matches the hash the adapter
+// stored, so applyTarget falls straight through to the write and the operator
+// sees a smaller file with no diff and no warning (#112). Do not bump it for
+// an ordinary instruction change; every bump costs one backup per managed file
+// on every machine.
+const RenderVersion = 1
+
 // SyncResult reports remotes the server does not know, which must never
 // become a scope (EDD R18), and targets whose drift could not be proposed.
 type SyncResult struct {
@@ -33,6 +44,11 @@ type SyncResult struct {
 	// to prevent. deploy/server/configmap.yaml ships SUBSTRATE_SKILLS_REPO
 	// empty, so the unconfigured case is the default, not an edge case.
 	SkillsSkipped string
+	// Backups is the backup files written this cycle because the render rules
+	// changed shape under an already-managed file (#112). Empty on every
+	// steady-state cycle; non-empty exactly once per path per RenderVersion
+	// bump.
+	Backups []string
 }
 
 // Sync discovers checkouts, pulls /v1/render, files drift, then writes.
@@ -75,23 +91,28 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 		return SyncResult{}, err
 	}
 	var unproposed []string
+	var backups []string
 	var skillsSkipped string
 	res := func() SyncResult {
 		return SyncResult{
 			UnknownRemotes:  plan.unknown,
 			UnscopedRemotes: plan.unscoped,
 			UnproposedDrift: unproposed,
+			Backups:         backups,
 			SkillsSkipped:   skillsSkipped,
 		}
 	}
 	apply := func(tgt renderTarget, dests []destTarget) error {
 		for _, dest := range dests {
-			skipped, err := applyTarget(ctx, db, a, cfg, dest, tgt, now)
+			skipped, backup, err := applyTarget(ctx, db, a, cfg, dest, tgt, now)
 			if err != nil {
 				return err
 			}
 			if skipped {
 				unproposed = append(unproposed, dest.path)
+			}
+			if backup != "" {
+				backups = append(backups, backup)
 			}
 		}
 		return nil
@@ -278,22 +299,24 @@ func destTargets(cfg Config, serverPath string, checkouts []Workspace, repoKeys 
 }
 
 // applyTarget renders one target. It reports whether drift was detected but
-// could not be proposed, in which case the file on disk is left untouched.
+// could not be proposed, in which case the file on disk is left untouched, and
+// the path of any backup it took before overwriting.
 //
 // The POST-before-write ordering is load-bearing: the proposal is filed before
 // the local file is overwritten, and the write is refused when the POST fails,
 // so a hand edit is never destroyed without having been reported. A failure
 // degrades this one target; it must not stop the loop or the daemon (#59).
-func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarget, tgt renderTarget, now int64) (bool, error) {
+func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarget, tgt renderTarget, now int64) (bool, string, error) {
 	disk, err := os.ReadFile(dest.path) //nolint:gosec // dest is confined to Home or a discovered checkout
 	exists := err == nil
 	if err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("adapter: read %s: %w", dest.path, err)
+		return false, "", fmt.Errorf("adapter: read %s: %w", dest.path, err)
 	}
 	stored, hasStored, err := db.getManaged(dest.path)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
+	var backup string
 
 	// Compare with DriftHash, never a plain hash of the file (Gotcha 9).
 	// A missing managed_file row is drift, not a blank disk: first run over a
@@ -316,7 +339,7 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarge
 				slog.Error("drift not proposed: no scope for target; leaving file untouched",
 					"path", dest.path, "suppressed_cycles", suppressed)
 			}
-			return true, nil
+			return true, "", nil
 		}
 		diff := unifiedDiff(tgt.Path, string(disk), tgt.Content)
 		if err := a.postReview(ctx, dest.scope, dest.repo, dest.path, diff); err != nil {
@@ -325,20 +348,32 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarge
 					"path", dest.path, "scope", dest.scope, "repo", dest.repo,
 					"suppressed_cycles", suppressed, "err", err)
 			}
-			return true, nil
+			return true, "", nil
 		}
 		db.clearDriftBackoff(dest.path)
 		if err := AtomicWrite(dest.path, []byte(tgt.Content)); err != nil {
-			return false, err
+			return false, "", err
 		}
 	} else if !exists || string(disk) != tgt.Content {
+		// The rules changed under a file the adapter itself wrote, so the
+		// content about to be lost was never reviewed by anyone. Keep it
+		// where the operator can find it before overwriting (#112). Only the
+		// first cycle after a bump takes this path: the write below records
+		// the current RenderVersion, so the next cycle compares equal and
+		// Gotcha 9 still holds.
+		if exists && hasStored && stored.RenderVersion < RenderVersion {
+			backup = fmt.Sprintf("%s.v%d.bak", dest.path, stored.RenderVersion)
+			if err := AtomicWrite(backup, disk); err != nil {
+				return false, "", fmt.Errorf("adapter: backup %s: %w", dest.path, err)
+			}
+		}
 		if err := AtomicWrite(dest.path, []byte(tgt.Content)); err != nil {
-			return false, err
+			return false, "", err
 		}
 	}
 
 	sum := render.DriftHash(tgt.Content)
-	return false, db.upsertManaged(dest.path, targetName(tgt.Path), sum, now)
+	return false, backup, db.upsertManaged(dest.path, targetName(tgt.Path), sum, now)
 }
 
 // Report logs whatever this cycle did not manage. Sync returns nil for all of
@@ -355,6 +390,10 @@ func (r SyncResult) Report() {
 	}
 	if len(r.UnproposedDrift) > 0 {
 		slog.Warn("drift proposal failed; those files were left as found", "paths", r.UnproposedDrift)
+	}
+	if len(r.Backups) > 0 {
+		slog.Warn("the render changed shape; the previous content of those files was backed up before overwriting",
+			"backups", r.Backups, "render_version", RenderVersion)
 	}
 	if r.SkillsSkipped != "" {
 		slog.Warn("skills not linked this cycle", "reason", r.SkillsSkipped)
