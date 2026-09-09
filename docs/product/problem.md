@@ -1,43 +1,44 @@
-# Problem statement
+# Problem: project knowledge is scattered across tools
 
-**Last reviewed:** 2026-09-05 · **Re-read cadence:** at each phase exit
+**Last reviewed:** 2026-09-08 · **Re-read cadence:** at each phase exit
 
-## Job story
+## The job
 
-When I move a piece of work between AI coding harnesses (Claude Code, Codex, Cursor) or
-between machines (WSL laptop, Mac Mini, a Kubernetes pod), I want the agent on the far side to
-already hold the same instructions, preferences, and hard-won project facts, so I can pick the
-right tool and the right hardware for the task instead of the one that happens to remember.
+When work moves between coding harnesses or machines, the next session should receive the
+applicable instructions, working preferences, relevant facts, and approved procedures. It
+should eventually be able to continue from a checkpoint. The choice of tool or hardware should
+not depend on which one remembers the project.
 
-## What people do today instead
+## Where context gets lost
 
-| Today | Cost |
+| What happens today | What the next session loses |
 |---|---|
-| Hand-copy `CLAUDE.md` / `AGENTS.md` / `.cursor/rules` between machines | Silent drift; two machines disagree and neither is authoritative |
-| Re-explain the project at the start of each session | Minutes per session, every session, per agent |
-| Per-machine memory stores (Memorix and friends) | Knowledge is stranded on whichever laptop learned it |
-| Finish the task on the machine you started it on | Can't move a long job to the GPU box; can't hand off to a worker |
-| Trust whatever the agent remembers | Agents act confidently on facts the code stopped honoring months ago |
+| Rules are copied between `AGENTS.md`, `CLAUDE.md`, and Cursor rules | A clear answer about which version is authoritative |
+| Preferences are repeated in each harness | Consistent working choices across tools |
+| Decisions and lessons stay in chats or local memory stores | The reasoning and evidence behind earlier work |
+| Skill folders are copied or updated independently | A known, approved version of a reusable procedure |
+| A task stays inside one conversation | Progress and next steps when work moves elsewhere |
+| Old memories remain available after the code changes | A reliable distinction between current facts and stale claims |
 
-The cost recurs every session and grows multiplicatively with agents × machines × people.
+The cost repeats across sessions and grows with harnesses, machines, and people. File syncing
+addresses only part of it: matching bytes cannot establish whether a memory is verified or a
+skill is approved for a particular team.
 
-## The inversion
+## The product response
 
-Today the agent is treated as durable and its knowledge as disposable. Substrate flips it:
-**agents are disposable, accumulated intelligence is persistent.** The product is one function —
+Substrate makes context durable beneath interchangeable harnesses. It resolves applicable
+instructions and preferences, retrieves relevant memories, and distributes approved skills
+from shared authority. Observations return with scope and provenance. The long-term lifecycle
+adds verification, knowledge maintenance, skill proposals, and portable task continuity.
 
-```
-(principal + team + project + repo + branch + task + current code) → effective context
-```
+## What must hold
 
-— served to any harness on any machine, with what the harness learns flowing back under
-provenance and trust.
+1. Required instructions resolve deterministically and survive context-budget pressure.
+2. Memories carry evidence and status; agent observations cannot silently overwrite confirmed facts.
+3. Skill content stays in Git, with approval and active-version state in Substrate.
+4. Local harness files are caches; drift becomes a reviewable proposal.
+5. Context is permissioned. Sharing authority does not imply sharing every private memory.
+6. Planned continuity works from structured checkpoints even when transcript migration fails.
 
-## What must be true for this to be worth building
-
-1. Instructions resolve deterministically and are never dropped by retrieval or budget pressure.
-   A rule that is sometimes present is worse than no rule.
-2. Memory carries provenance and verification state, so a low-trust agent observation cannot
-   quietly overwrite a human-confirmed fact.
-3. Local files are a **cache**, not a source. Anything hand-edited is drift, and drift is a
-   reviewable event, not a merge.
+See the [vision](vision.md) for the full lifecycle and the [README](../../README.md) for what
+is implemented today.
