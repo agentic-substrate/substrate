@@ -62,6 +62,9 @@ func resolveTarget(d Deps, op, scopeFlag string, f scopeFlags) (resolvedTarget, 
 		}
 		return resolvedTarget{}, err
 	}
+	if err := requireWholeChain(op, s); err != nil {
+		return resolvedTarget{}, err
+	}
 	if path := scopePath(s); path != "" {
 		return resolvedTarget{Scope: path, Source: s.Source}, nil
 	}
@@ -72,5 +75,28 @@ func resolveTarget(d Deps, op, scopeFlag string, f scopeFlags) (resolvedTarget, 
 		What: op + ": no scope",
 		Why:  "the resolved scope named neither a chain nor a repo",
 		Next: "pass --scope org:acme, or run: substrate context use --org <org>",
+	}
+}
+
+// requireWholeChain refuses a headless chain. scopePath joins whatever is
+// non-empty, so --team eng with no --org renders the wire string `team:eng`,
+// which names no chain the server can resolve: the round trip is a 4xx that
+// reads as a server problem rather than the missing flag it is. Answering
+// locally with what/why/next costs no request and names the fix.
+func requireWholeChain(op string, s Scope) error {
+	missing := ""
+	switch {
+	case s.Org == "" && (s.Team != "" || s.Project != ""):
+		missing = "--org"
+	case s.Team == "" && s.Project != "":
+		missing = "--team"
+	default:
+		return nil
+	}
+	return &UserError{
+		What: op + ": incomplete scope chain",
+		Why: "the resolved scope is " + scopePath(s) + ", but a chain resolves " +
+			"org before team before project, so " + missing + " cannot be skipped",
+		Next: "re-run with " + missing + " <name>, or run: substrate context use " + missing + " <name>",
 	}
 }

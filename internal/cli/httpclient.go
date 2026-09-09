@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,13 +43,23 @@ func newAPIClient(d Deps, op, server, token string) (*apiClient, error) {
 	if server == "" || token == "" {
 		// auth login wrote these; falling back to them is what makes the
 		// login worth doing for the import/review/adapter verbs too.
-		if cfg, _, err := loadConfig(d); err == nil {
+		//
+		// Only "there is no config file" is swallowed. A 0644 config.json is
+		// refused by loadConfig, and discarding that refusal would tell the
+		// operator "no bearer token, run auth login" when the real news is
+		// that a never-expiring credential is world-readable (Gotcha 14).
+		cfg, _, err := loadConfig(d)
+		switch {
+		case err == nil:
 			if server == "" {
 				server = cfg.Server
 			}
 			if token == "" {
 				token = cfg.Token
 			}
+		case errors.Is(err, ErrNoConfig):
+		default:
+			return nil, err
 		}
 	}
 	if server == "" {

@@ -7,6 +7,7 @@ import (
 
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/agentic-substrate/substrate/internal/adapter"
@@ -121,6 +122,12 @@ func runCutover(ctx context.Context, d Deps, f *adapterCutoverFlags, commit bool
 		}
 	}
 	if commit {
+		// Echo before the prompt (Gotcha 18). A bare "type 'yes' to continue:"
+		// names neither the roots nor the files, so an operator in the wrong
+		// shell cannot tell this displacement from the one they meant.
+		if err := echoTargets(d, "displace", roots, replacementPaths(files)); err != nil {
+			return err
+		}
 		if err := confirm(d, op, f.yes); err != nil {
 			return err
 		}
@@ -161,16 +168,29 @@ func newAdapterUninstallCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			req := cutover.Request{
+				Roots:     roots,
+				Home:      roots[0],
+				Force:     f.force,
+				Installer: d.installer(),
+			}
+			// Plan first, echo, then prompt (Gotcha 18). --root defaults to
+			// the mount root silently, so a prompt that names nothing lets an
+			// operator in the wrong shell restore every *.pre-substrate under
+			// /work over a live tree with one "yes". Commit is false here, so
+			// the plan reads and classifies but writes nothing.
+			plan, err := cutover.Restore(req)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+			if err := echoTargets(d, "restore", roots, restorePaths(plan)); err != nil {
+				return err
+			}
 			if err := confirm(d, op, f.yes); err != nil {
 				return err
 			}
-			rep, err := cutover.Restore(cutover.Request{
-				Roots:     roots,
-				Home:      roots[0],
-				Commit:    true,
-				Force:     f.force,
-				Installer: d.installer(),
-			})
+			req.Commit = true
+			rep, err := cutover.Restore(req)
 			if err != nil {
 				return fmt.Errorf("%s: %w", op, err)
 			}
@@ -237,4 +257,46 @@ func fetchRenderTargets(ctx context.Context, api *apiClient, machine string) ([]
 		}
 	}
 	return parsed.Targets, nil
+}
+
+// echoTargets prints the roots a write will walk and the paths it will touch,
+// before the confirmation prompt asks about them.
+func echoTargets(d Deps, verb string, roots, paths []string) error {
+	if _, err := fmt.Fprintf(d.stdout(), "roots: %s\n", strings.Join(roots, ", ")); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(d.stdout(), "will %s %d file(s):\n", verb, len(paths)); err != nil {
+		return err
+	}
+	for _, p := range paths {
+		if _, err := fmt.Fprintf(d.stdout(), "  %s\n", p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replacementPaths(files []cutover.Replacement) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		out = append(out, f.Path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// restorePaths is every live path the plan would put a backup back over, plus
+// every generated file it would remove -- the two ways uninstall changes a
+// working tree.
+func restorePaths(rep *cutover.Report) []string {
+	if rep == nil {
+		return nil
+	}
+	out := make([]string, 0, len(rep.Renames)+len(rep.Created))
+	for _, r := range rep.Renames {
+		out = append(out, r.To)
+	}
+	out = append(out, rep.Created...)
+	sort.Strings(out)
+	return out
 }

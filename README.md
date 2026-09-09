@@ -223,12 +223,14 @@ resolved, then confirms — off a TTY it refuses without `--yes`.
 | `substrate review list` | Shows queued review items. |
 | `substrate review approve` / `reject` | Records one decision (this commits). The decision is the verb, so there is no `--decision`; `--reason` is required on `reject`. |
 | `substrate adapter status` | Classifies what `install` would displace. Writes nothing. |
-| `substrate adapter install` | Displaces harness files with rendered context and installs the adapter unit (this commits). |
-| `substrate adapter uninstall` | Restores every displaced `*.pre-substrate` file and removes the unit (this commits). `--force` discards live edits that no longer match the hash `install` wrote — the drift-recovery path in the runbook. |
+| `substrate adapter install` | Displaces harness files with rendered context and installs the adapter unit (this commits). Echoes the roots and every file it will displace, then confirms. |
+| `substrate adapter uninstall` | Restores every displaced `*.pre-substrate` file and removes the unit (this commits). Echoes the roots and every file it will restore or remove, then confirms. `--force` discards live edits that no longer match the hash `install` wrote — the drift-recovery path in the runbook. |
 | `substrate token mint` / `revoke` | Mints or revokes a principal token straight against Postgres. Requires the DSN. |
 
 Every command takes `--json` for machine-readable output and `--org/--team/--project` to
-override the saved scope for one invocation.
+override the saved scope for one invocation. A chain resolves org before team before
+project, so a partial chain — `--team eng` with no `--org` — is refused locally with the
+missing level named, rather than sent as a scope string no server can bind.
 
 ### Scope resolution
 
@@ -247,7 +249,7 @@ First hit wins, and `context show` names the winner:
 `context.json`. Both are written mode 0600 via a temp file that is `fsync`ed, renamed into
 place, and followed by an `fsync` of the directory — so a crash mid-write leaves either the
 previous file or the new one, never a truncated or zero-length credential. `config.json` is **refused on load** if any group or other bit
-is set — `chmod 600` it, the way ssh requires of a private key. Substrate never guesses `$HOME`:
+is set — `chmod 600` it, the way ssh requires of a private key. That refusal reaches you verbatim from every command that falls back to the saved credential, rather than being reported as a missing token: a world-readable credential is the more urgent news. Substrate never guesses `$HOME`:
 if `os.UserConfigDir()` fails, the error is propagated and the command stops.
 
 Note that a **user token does not expire**. `identity.Lookup` TTL-caps agent tokens only, so
@@ -384,7 +386,9 @@ that would be installed, and it writes nothing at all — not one installer call
 path is an error — that file is the one copy of an earlier cutover and is never
 overwritten. Nothing in this flow deletes (Gotcha 6); originals are renamed.
 Rendered replacements are compared with `render.DriftHash` (footer excluded).
-The dry-run and the real run share one code path.
+`status` and `install` differ only in whether the plan is applied, and `install`
+prints its roots and every file it is about to displace before it asks for
+confirmation.
 
 `substrate adapter uninstall` is the rollback, and it always restores — there
 was never a non-restore path, so the old `-restore` flag is gone rather than
@@ -392,9 +396,10 @@ required. `--root` is absolute and defaults to `/work` when omitted, exactly as
 `install` does, so a rollback cannot walk a different tree than the install it
 inverts. Pass the same roots install used
 (`--root "$HOME" --root /work`); restore does not discover extra trees. It
-renames `*.pre-substrate` back
-over the live paths, removes generated files that still match the written
-`DriftHash`, and uninstalls the unit. Live edits since install are refused
+plans the restore first and prints its roots and every file it will put back or
+remove, then confirms; only then does it rename `*.pre-substrate` back
+over the live paths, remove generated files that still match the written
+`DriftHash`, and uninstall the unit. Live edits since install are refused
 unless `--force` is set (printed as `DISCARD live edits`) — that is the
 drift-recovery path, and it survives. Uninstall prompts before restoring and
 requires `--yes` off a terminal. Run it
