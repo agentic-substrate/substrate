@@ -546,7 +546,7 @@ CREATE TABLE skill_link (name TEXT PRIMARY KEY, git_sha TEXT, linked_paths TEXT)
 ### 7.3 Hook shims
 
 `cp hook <event>` reads the harness's JSON on stdin and:
-- **Phase 1 (CAP-1a-capture, shipped):** `substrate-adapter hook posttooluse` appends a compact observation to `outbox` (tool, files, exit status, ≤ 500 chars). It is installed by merging a `PostToolUse` entry into `~/.claude/settings.json` — a user-owned file, so the merge is idempotent, preserves unrelated keys, copies the pre-existing file once to `*.pre-substrate`, and is undone by `substrate adapter uninstall -restore`. The payload names the checkout's **repo key** (the normalized `origin` remote) rather than a scope; the server resolves the key to the chain it bound and never returns that chain, exactly as `POST /v1/review` does (R18, #58). A cwd with no remote, an unparseable remote, or one the server has not bound is logged and skipped — there is no `global:` fallback, because no agent token may write there. This is the minimum capture needed to prove cross-machine sync (PRD SYNC-2).
+- **Phase 1 (CAP-1a-capture, shipped):** `substrate-adapter hook posttooluse` appends a compact observation to `outbox` (tool, files, exit status, ≤ 500 chars). It is installed by merging a `PostToolUse` entry into `~/.claude/settings.json` — a user-owned file, so the merge is idempotent, preserves unrelated keys, copies the pre-existing file once to `*.pre-substrate`, and is undone by `substrate adapter uninstall`. The payload names the checkout's **repo key** (the normalized `origin` remote) rather than a scope; the server resolves the key to the chain it bound and never returns that chain, exactly as `POST /v1/review` does (R18, #58). A cwd with no remote, an unparseable remote, or one the server has not bound is logged and skipped — there is no `global:` fallback, because no agent token may write there. This is the minimum capture needed to prove cross-machine sync (PRD SYNC-2).
 - **Phase 2 (CAP-1a-context, deferred):** `SessionStart` → `context.get` via server (or cache) → prints pack to stdout for injection. Deferred because no client path to `context.get` exists outside MCP and the offline cache holds memories, not instruction packs; Claude Code already auto-loads the rendered `CLAUDE.md`, so the outstanding value is retrieved memories and mandatory items.
 - **Phase 2:** `Stop` / `PreCompact` → server-side summarization to `episodic/unverified` plus a checkpoint (PRD CAP-1b, CONT-1). Not implemented in Phase 1 binaries.
 
@@ -597,7 +597,7 @@ Runs on a schedule and on push webhooks from the repos' host. For each memory wi
 cp import scan  [--roots /work,~]        → inventory.json (files, hashes, sizes, detected type, implied scope)
 cp import plan  inventory.json           → plan.json  (blocks classified, hash-dedup, conflicts)
 cp import apply plan.json --machine wsl  → POST /v1/import; creates instructions/preferences (status=proposed unless identical to existing active), skill import branches, memory rows (episodic/unverified), review items (import_conflict)
-cp import cutover                        → replaces local files with rendered ones, installs adapter, renames old stores to *.pre-acp
+cp adapter install                       → replaces local files with rendered ones, installs adapter, renames old stores to *.pre-acp
 ```
 
 Block classification: markdown headings and bullets are split into blocks; a block is a `preference` if it matches an allowlist of style keys (indentation, verbosity, language for comments) or comes from a user-global file and contains first-person phrasing; otherwise `instruction`. Keys are derived by a small heuristic + LLM-assisted labeling (sidecar, Phase 2) with human confirmation in the review UI. Memorix stores are read via `memorix transfer export --format json`.
@@ -682,7 +682,7 @@ Adapter distribution: GitHub Releases of static binaries; `cp adapter install` w
 3. **Week 3 — import.** Run `cp import` on the Mac Mini (most trusted), then WSL; resolve conflicts via `cp review`; cut both machines over. Keep Memorix/legacy stores read-only.
 4. **Week 4 — soak.** Watch drift and outbox metrics; fix renders; tune search. Phase 1 exit check.
 
-Rollback: adapter `cp adapter uninstall --restore` puts back `*.pre-acp` files; server data is additive and can be left in place.
+Rollback: adapter `cp adapter uninstall` puts back `*.pre-acp` files; server data is additive and can be left in place. There is no `--restore` flag: restoring is the only behaviour, so it is not optional.
 
 ---
 
