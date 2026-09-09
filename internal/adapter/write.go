@@ -8,12 +8,23 @@ import (
 
 // AtomicWrite writes content via a temp file in the same directory, then
 // rename. A crash leaves the old file or the new one, never a partial dest.
+// The mode is taken from the destination path itself when it already exists,
+// falling back to 0644 for a brand-new file. Use AtomicWriteMode when the
+// right mode is not the destination's own current mode -- a backup file does
+// not exist yet, so its mode must come from the file being backed up instead.
 func AtomicWrite(path string, content []byte) error {
-	dir := filepath.Dir(path)
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
+	return AtomicWriteMode(path, content, mode)
+}
+
+// AtomicWriteMode is AtomicWrite with an explicit mode. The temp file is
+// chmod'd to mode before the rename, so the file is never observable at path
+// with the wrong mode.
+func AtomicWriteMode(path string, content []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("adapter: mkdir %s: %w", dir, err)
 	}

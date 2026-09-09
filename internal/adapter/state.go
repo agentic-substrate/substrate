@@ -105,7 +105,8 @@ CREATE TABLE IF NOT EXISTS managed_file (
 	path TEXT PRIMARY KEY,
 	target TEXT NOT NULL,
 	sha256 TEXT NOT NULL,
-	rendered_at INTEGER NOT NULL
+	rendered_at INTEGER NOT NULL,
+	render_version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS workspace (
 	worktree_path TEXT PRIMARY KEY,
@@ -214,6 +215,10 @@ func openSQLite(path string, busy time.Duration) (*DB, error) {
 	}
 	// Existing adapter.sqlite files created before consecutive_4xx.
 	_, _ = sqlDB.Exec(`ALTER TABLE outbox ADD COLUMN consecutive_4xx INTEGER NOT NULL DEFAULT 0`)
+	// Existing rows predate the per-checkout render split (#111), so they
+	// default to 0 -- older than any RenderVersion the code knows. That
+	// default is what makes the first post-upgrade sync recognisable (#112).
+	_, _ = sqlDB.Exec(`ALTER TABLE managed_file ADD COLUMN render_version INTEGER NOT NULL DEFAULT 0`)
 	return &DB{sql: sqlDB}, nil
 }
 
@@ -228,11 +233,17 @@ func (db *DB) Close() error {
 type managedRow struct {
 	Target string
 	SHA256 string
+	// RenderVersion is the RenderVersion in force when this file was last
+	// written. A row older than the current one means the rules that produce
+	// the content changed underneath a file the adapter itself wrote, which
+	// drift review cannot see: disk still matches the stored hash (#112).
+	RenderVersion int
 }
 
 func (db *DB) getManaged(path string) (managedRow, bool, error) {
 	var row managedRow
-	err := db.sql.QueryRow(`SELECT target, sha256 FROM managed_file WHERE path = ?`, path).Scan(&row.Target, &row.SHA256)
+	err := db.sql.QueryRow(`SELECT target, sha256, render_version FROM managed_file WHERE path = ?`, path).
+		Scan(&row.Target, &row.SHA256, &row.RenderVersion)
 	if err == sql.ErrNoRows {
 		return managedRow{}, false, nil
 	}
@@ -244,13 +255,14 @@ func (db *DB) getManaged(path string) (managedRow, bool, error) {
 
 func (db *DB) upsertManaged(path, target, sum string, renderedAt int64) error {
 	_, err := db.sql.Exec(`
-		INSERT INTO managed_file (path, target, sha256, rendered_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO managed_file (path, target, sha256, rendered_at, render_version)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
 			target = excluded.target,
 			sha256 = excluded.sha256,
-			rendered_at = excluded.rendered_at
-	`, path, target, sum, renderedAt)
+			rendered_at = excluded.rendered_at,
+			render_version = excluded.render_version
+	`, path, target, sum, renderedAt, RenderVersion)
 	if err != nil {
 		return fmt.Errorf("adapter: managed_file upsert: %w", err)
 	}
