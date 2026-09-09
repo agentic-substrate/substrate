@@ -1,6 +1,6 @@
 # Roadmap
 
-**Last reviewed:** 2026-09-08
+**Last reviewed:** 2026-09-09
 
 The destination is a durable context layer for instructions, preferences, memories, skills,
 and task continuity. A lesson learned in one session should improve a later session on another
@@ -29,6 +29,8 @@ claim that everything listed is complete. Execution state lives on the [project 
 - An agent can ask *why* something is in its context — and why something else is not.
 - Memory that describes code gets flagged when that code changes.
 - Feedback from agents is recorded and weighted by trust, and never silently changes status.
+- A second machine gets a working credential without anyone handing it a database password, and
+  the CLI can say whose credential it is holding.
 
 ## Later
 
