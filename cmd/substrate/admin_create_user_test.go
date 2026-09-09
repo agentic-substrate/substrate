@@ -12,6 +12,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/cli"
 	"github.com/agentic-substrate/substrate/internal/identity"
+	"github.com/agentic-substrate/substrate/internal/pgtest"
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
@@ -39,7 +40,7 @@ func runCreateUser(t *testing.T, dsn string, args ...string) (string, error) {
 // there, and the command dies with "store: no principal on context" having
 // written zero rows.
 func TestAdminCreateUserWritesThroughTheRealCommand(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	out, err := runCreateUser(t, dsn, "--name", "ada", "--org", "realpath", "--team", "platform", "--machine", "box")
 	if err != nil {
 		t.Fatalf("admin create-user: %v\n%s", err, out)
@@ -73,7 +74,7 @@ func TestAdminCreateUserWritesThroughTheRealCommand(t *testing.T) {
 // Turn red by hardcoding 'admin' in the membership insert again: a user
 // created without --admin then silently holds team-admin rights.
 func TestAdminCreateUserRoleFollowsTheAdminFlag(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	if out, err := runCreateUser(t, dsn, "--name", "plain", "--org", "roleorg", "--team", "eng", "--machine", "box"); err != nil {
 		t.Fatalf("create-user without --admin: %v\n%s", err, out)
 	}
@@ -111,7 +112,7 @@ func TestAdminCreateUserRoleFollowsTheAdminFlag(t *testing.T) {
 // the second call then returns the ids it generated and threw away, which
 // name no row in either table.
 func TestCreateUserReturnsTheIDsOfTheRowsItReused(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	st, err := store.Open(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -152,7 +153,7 @@ func TestCreateUserReturnsTheIDsOfTheRowsItReused(t *testing.T) {
 // Turn red by dropping the Commit/Rollback pairing in store.TxBootstrap: a
 // failure partway through would then leave an org with no members behind.
 func TestTxBootstrapRollsBackEveryRow(t *testing.T) {
-	dsn, conn := startMigrated(t)
+	dsn, conn := pgtest.StartMigrated(t)
 	st, err := store.Open(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
