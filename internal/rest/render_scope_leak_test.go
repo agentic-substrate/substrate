@@ -12,48 +12,43 @@ import (
 	"github.com/agentic-substrate/substrate/internal/identity"
 )
 
-// bob is on team beta. The repo scope, its project and its team belong to team
-// alpha, and the `scope` table carries no RLS at all -- any repo key resolves
-// for anyone -- so /v1/render answers bob with 200 and merely filters the
-// content. It must not additionally hand him the chain: `global:/org:acme-.../
-// team:alpha/project:secret/repo:...` names an org, a team and a project he has
-// no rights to. Row RLS already covers the content; the naming is the leak.
+// The render response must never name the chain it compiled for. Since #109 a
+// non-member's repo key resolves to nothing and he is served the global chain
+// instead (see TestReadEndpointsRepoDenialIsIndistinguishable), so he never
+// reaches this chain at all; the guard that remains, for the member who does,
+// is the response shape itself: `global:/org:acme-.../team:alpha/project:secret`
+// names an org, a team and a project, and a client that is handed one learns
+// the naming of every scope above the repo it asked about. Re-adding a "scope"
+// field to the render response -- or echoing the repo key back -- turns this red.
 //
-// The team-visible instruction is asserted present for alice first, so this is
-// not passing merely because the fixture renders nothing.
-func TestRenderDoesNotLeakForeignChainNaming(t *testing.T) {
+// The team-visible instruction is asserted present first, so this is not
+// passing merely because the fixture renders nothing.
+func TestRenderDoesNotLeakChainNaming(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
 	h, _, _ := openREST(t, dsn, fakeGit{})
 	srv := serveREST(t, h, w)
 
-	alice := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "alice", nil)
-	defer func() { _ = alice.Body.Close() }()
-	aliceBody := readBody(t, alice)
-	if !strings.Contains(aliceBody, "ci.required") {
+	res := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "alice", nil)
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("/v1/render for alice = %d, want 200: %s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "ci.required") {
 		t.Fatal("alice's render lacks the team-visible instruction; the fixture cannot prove anything")
 	}
-
-	res := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "bob", nil)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("/v1/render for bob = %d, want 200 (this test is about what a 200 body says)", res.StatusCode)
-	}
-	body := readBody(t, res)
 
 	var out map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(body), &out); err != nil {
 		t.Fatalf("decode: %v\n%s", err, body)
 	}
 	if raw, ok := out["scope"]; ok {
-		t.Fatalf("render answered a non-member with the chain %s; the server must not tell a client which scope it may not read", raw)
+		t.Fatalf("render answered with the chain %s; the server must not tell a client which scopes it compiled from", raw)
 	}
 	for _, secret := range []string{w.pathStr, "team:alpha", "project:secret", w.repoKey} {
 		if strings.Contains(body, secret) {
-			t.Fatalf("render body leaks %q to a non-member of that team:\n%s", secret, body)
+			t.Fatalf("render body names the chain %q:\n%s", secret, body)
 		}
-	}
-	if strings.Contains(body, "ci.required") {
-		t.Fatal("bob (non-member) saw team-visible content; row RLS is not applied")
 	}
 }
 
@@ -108,9 +103,10 @@ func TestReviewCreateBindsScopeToRepoAndRLSRefusesForeignScope(t *testing.T) {
 		t.Fatalf("scope+repo = %d, want 400", both.StatusCode)
 	}
 
-	// bob is on team beta. The repo resolves for him -- `scope` has no RLS --
-	// and policy.Check passes on team membership alone, so only the INSERT
-	// policy's scope_writable stops the row.
+	// bob is on team beta. policy.Check passes on team membership alone, so the
+	// refusal is repoScope's scope_writable check (#109 left the write paths
+	// refusing; only the read paths fall back), with the INSERT policy's own
+	// scope_writable as the backstop underneath it.
 	denied := doJSON(t, srv, http.MethodPost, "/v1/review", "bob", proposal(map[string]any{"repo": w.repoKey}))
 	if denied.StatusCode != http.StatusForbidden {
 		t.Fatalf("bob repo proposal = %d, want 403: %s", denied.StatusCode, readBody(t, denied))

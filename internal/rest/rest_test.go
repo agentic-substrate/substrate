@@ -26,12 +26,12 @@ import (
 )
 
 type world struct {
-	alice, bob, lead                        string
+	alice, bob, lead, admin                 string
 	orgID, teamAID, teamBID                 string
 	global, org, teamA, teamB, projectA     string
 	projectOff                              string
 	userA, repo, repoKey                    string
-	aliceP, bobP, leadP                     *identity.Principal
+	aliceP, bobP, leadP, adminP             *identity.Principal
 	pathStr                                 string
 	skillID, skillName, skillGitPath        string
 	skillSHA                                string
@@ -58,6 +58,7 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 	}
 	w := world{
 		alice:         id(),
+		admin:         id(),
 		bob:           id(),
 		lead:          id(),
 		orgID:         id(),
@@ -88,8 +89,9 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 	w.skillName = "team/alpha/lint-" + w.skillID[:8]
 
 	exec(`INSERT INTO principal (id, kind, display_name, trust) VALUES
-		($1, 'user', 'alice', 'human'), ($2, 'user', 'bob', 'human'), ($3, 'user', 'lead', 'human')`,
-		w.alice, w.bob, w.lead)
+		($1, 'user', 'alice', 'human'), ($2, 'user', 'bob', 'human'), ($3, 'user', 'lead', 'human'),
+		($4, 'user', 'admin', 'human_admin')`,
+		w.alice, w.bob, w.lead, w.admin)
 	exec(`INSERT INTO org (id, name) VALUES ($1, $2)`, w.orgID, orgName)
 	exec(`INSERT INTO team (id, org_id, name) VALUES ($1, $2, 'alpha'), ($3, $2, 'beta')`,
 		w.teamAID, w.orgID, w.teamBID)
@@ -155,7 +157,7 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 		}
 		return u
 	}
-	aliceID, bobID, leadID := parse(w.alice), parse(w.bob), parse(w.lead)
+	aliceID, bobID, leadID, adminID := parse(w.alice), parse(w.bob), parse(w.lead), parse(w.admin)
 	orgID, teamA, teamB := parse(w.orgID), parse(w.teamAID), parse(w.teamBID)
 	caps := []string{"memory:write"}
 	w.aliceP = &identity.Principal{
@@ -169,6 +171,12 @@ func seedWorld(t *testing.T, conn *pgx.Conn) world {
 	w.leadP = &identity.Principal{
 		ID: leadID, Kind: identity.KindUser, Trust: identity.TrustHuman,
 		OrgID: orgID, TeamIDs: []uuid.UUID{teamA}, Capabilities: caps,
+	}
+	// human_admin with no membership anywhere: the only thing that may let it
+	// resolve a repo key is the is_admin bypass, never a team.
+	w.adminP = &identity.Principal{
+		ID: adminID, Kind: identity.KindUser, Trust: identity.TrustHumanAdmin,
+		OrgID: orgID, Capabilities: caps,
 	}
 	return w
 }
@@ -207,6 +215,8 @@ func serveREST(t *testing.T, h *Handler, w world) *httptest.Server {
 			return w.bobP, nil
 		case "lead":
 			return w.leadP, nil
+		case "admin":
+			return w.adminP, nil
 		default:
 			return nil, identity.ErrUnauthorized
 		}
@@ -342,18 +352,36 @@ func TestRenderTargetsMatchDriftHash(t *testing.T) {
 		t.Fatal("render missing team-visible ci.required; the test cannot prove RLS")
 	}
 
+	// bob is a member of team beta and cannot read this repo, so since #109 the
+	// key resolves to nothing and he is served the global chain (200), not a
+	// 403. The loop below only means something if it actually has targets to
+	// walk and if alice's identical request was proven to carry ci.required
+	// above -- a 403, or an empty target list, would satisfy it vacuously.
 	bob := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "bob", nil)
 	t.Cleanup(func() { _ = bob.Body.Close() })
+	if bob.StatusCode != http.StatusOK {
+		t.Fatalf("bob /v1/render with a foreign repo key = %d, want 200", bob.StatusCode)
+	}
 	var bobOut struct {
 		Targets []struct {
+			Path    string `json:"path"`
 			Content string `json:"content"`
 		} `json:"targets"`
 	}
 	decodeJSON(t, bob, &bobOut)
+	if len(bobOut.Targets) != len(wantPaths) {
+		t.Fatalf("bob got %d targets, want %d; the ci.required assertion below would be vacuous",
+			len(bobOut.Targets), len(wantPaths))
+	}
+	var checked int
 	for _, tgt := range bobOut.Targets {
+		checked++
 		if strings.Contains(tgt.Content, "ci.required") {
-			t.Fatal("bob (non-member) saw team-visible ci.required on /v1/render")
+			t.Fatalf("bob (non-member) saw team-visible ci.required on /v1/render at %s", tgt.Path)
 		}
+	}
+	if checked != len(wantPaths) {
+		t.Fatalf("examined %d of %d targets", checked, len(wantPaths))
 	}
 }
 

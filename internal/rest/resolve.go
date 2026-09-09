@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,28 +16,72 @@ import (
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
+// resolveRepoPaths maps repo keys to the chains the server bound them to, and
+// refuses any key this principal may not read.
+//
+// The scope_readable check is the gate and it lives here, next to the lookup,
+// because the `scope` table carries no RLS and policy.Check only asserts that a
+// repo-leaf principal has *some* team. This is the write-path resolution: a
+// caller that names a repo it cannot reach gets the same policyDenied a missing
+// key gets, so maskRepoDenial collapses the two into one 403 and the status code
+// cannot be used to enumerate the repo keys this control plane binds (#109).
+//
+// The read endpoints must not refuse — they use resolveReadableRepoPaths.
 func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.Path, error) {
+	paths, ok, err := resolveReadableRepoPaths(ctx, tx, repos)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		// Deliberately the same error whether the key is foreign or absent.
+		return nil, policyDenied(strings.Join(repos, ","))
+	}
+	return paths, nil
+}
+
+// resolveReadableRepoPaths maps repo keys to their chains for the read paths.
+//
+// It reports ok=false — never a distinguishable error — when any requested key
+// does not resolve to a chain this principal may read, whether because the key
+// is bound to another team or because it is not bound at all. The two cases are
+// indistinguishable to the caller because the caller is told nothing: the read
+// handlers fall back to the global chain and answer 200 with exactly the body
+// the same request would produce with no `?repos=` at all (#109).
+//
+// Falling back rather than refusing keeps `visibility='global'` content — an
+// explicit authoring decision that a row is readable by everyone — reaching the
+// readers it was published for, which a 403 would have taken away. The cost is
+// that a member who typos their own repo key silently receives global content
+// instead of an error; that is accepted, because any signal distinguishing
+// "your key did not resolve" from "you asked for nothing" reopens the very
+// oracle this closes for the caller who is probing rather than typing.
+func resolveReadableRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.Path, bool, error) {
 	if len(repos) == 0 {
-		return nil, nil
+		return nil, true, nil
 	}
 	q := store.New(tx)
 	out := make([]scope.Path, 0, len(repos))
 	for _, key := range repos {
 		var id uuid.UUID
-		err := tx.QueryRow(ctx, `SELECT id FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&id)
+		var readable bool
+		err := tx.QueryRow(ctx, `SELECT id, scope_readable(id, NULLIF(current_setting('substrate.actor_id', true), '')::uuid)
+                        FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&id, &readable)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, fmt.Errorf("%w: repo not found", policyDenied(key))
+				return nil, false, nil
 			}
-			return nil, fmt.Errorf("lookup repo %s: %w", key, err)
+			return nil, false, fmt.Errorf("lookup repo %s: %w", key, err)
+		}
+		if !readable {
+			return nil, false, nil
 		}
 		path, err := pathFromLeaf(ctx, q, pgtype.UUID{Bytes: id, Valid: true})
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out = append(out, path)
 	}
-	return out, nil
+	return out, true, nil
 }
 
 func policyDenied(key string) error {
