@@ -50,6 +50,7 @@ Then "substrate doctor" tells you whether any of it worked.`,
 		newReviewCmd(d),
 		newAdapterCmd(d),
 		newTokenCmd(d),
+		newCompletionCmd(d),
 	)
 	return root
 }

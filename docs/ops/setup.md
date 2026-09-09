@@ -56,6 +56,28 @@ Revoke either kind with `substrate token revoke` when it is no longer needed.
 Every command is a Cobra command; `-h` works on them and their subcommands, and all flags
 take the `--flag` form.
 
+This is the whole surface, and CI holds it to the binary: `scripts/check-cli-commands.sh`
+builds `cmd/substrate` and compares the block below against its `--help` tree in both
+directions, so a renamed or added verb cannot leave this page stale.
+
+<!-- command-map:start -->
+```
+substrate                          # command map, exit 0, mutates nothing
+substrate auth       login|status
+substrate admin      create-user            # requires the DSN
+substrate token      mint|revoke            # requires the DSN
+substrate context    show|use
+substrate import     scan|plan|apply
+substrate review     list|approve|reject
+substrate adapter    install|status|uninstall
+substrate doctor
+substrate completion bash|zsh|fish
+```
+<!-- command-map:end -->
+
+`substrate-adapter` and `substrate-server` are separate binaries and stay on stdlib `flag`;
+they are not subcommands of `substrate`.
+
 | Command | Purpose |
 |---|---|
 | `substrate admin create-user` | Create or reuse the named org and team, then create a user, membership, and token. `--admin` grants `human_admin` trust and team-admin membership; the default is a `human` member. |
@@ -64,6 +86,11 @@ take the `--flag` form.
 | `substrate context use` | Save an org, team, and optional project as the default scope. |
 | `substrate context show` | Print the resolved scope and which source supplied it. |
 | `substrate doctor` | Check configuration, credentials, server reachability, and scope, with a suggested fix for each failure. |
+| `substrate import scan` / `plan` / `apply` | Inventory harness files, merge inventories into a reviewable plan, then send that plan to `POST /v1/import`. `scan` and `plan` write nothing; `apply` commits. |
+| `substrate review list` / `approve` / `reject` | List queued review items and record one decision. The decision is the verb, so there is no `--decision`; `--reason` is required on `reject`. |
+| `substrate adapter status` / `install` / `uninstall` | Preview, apply, and roll back the per-machine adapter. `status` writes nothing; `install` and `uninstall` commit. |
+| `substrate token mint` / `revoke` | Mint or revoke a principal token straight against Postgres. Requires the DSN. |
+| `substrate completion` | Write a bash, zsh, or fish completion script to stdout, generated from this binary's own command tree so it cannot drift from the verbs above. |
 
 These commands accept `--json` for machine-readable output. Explicit `--org`, `--team`, and
 `--project` flags override the saved scope for one invocation.
@@ -77,6 +104,14 @@ crash-safe atomic writes and mode 0600. Substrate refuses a credential file with
 other permission bit set. If `os.UserConfigDir()` fails, commands stop rather than guessing a
 home directory. `substrate` with no arguments prints help; `substrate --version` prints the
 version; an unknown command exits non-zero with a suggestion.
+
+Shell completions are generated from that same command tree, so they never drift from it:
+
+```sh
+source <(./bin/substrate completion bash)
+./bin/substrate completion zsh  > "${fpath[1]}/_substrate"
+./bin/substrate completion fish > ~/.config/fish/completions/substrate.fish
+```
 
 ## Import, review, and cut over
 
