@@ -143,6 +143,7 @@ if [[ -n "$invocation_pairs" ]]; then
       # The verb exists; now the flags it is shown with. `--help` lists both
       # its own and its inherited flags, which is exactly the set a reader may
       # legitimately pass.
+      # shellcheck disable=SC2086  # $pair is "verb sub" and must word-split
       known=$("$BIN" $pair --help 2>&1 | grep -oE '(^|[[:space:]])--[a-z][a-z-]*' | tr -d ' ' | sort -u)
       for fl in $flags; do
         [[ -n "$fl" ]] || continue
