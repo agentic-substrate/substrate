@@ -110,6 +110,13 @@ makes a novel instance of the same trap recognizable.
     `govulncheck`'s scope: a scanner hit there is a dependency bump, not a code bug, and must not
     be "fixed" with a build tag — tagging it would force the tag onto every importing `_test.go`
     and break bare `go test ./...`.
+13. **An RLS refusal is not a gate for a request that never writes.** A read-only or dry-run
+    mode of a repo-keyed endpoint must check `scope_writable` on the resolved chain itself.
+    *Failure mode:* `scope` carries no RLS and resolves any repo key for anyone, so the only
+    denial for a foreign repo is `42501` at the INSERT. A preview skips the INSERT, answers 200,
+    and the status code alone tells an attacker which repo keys this control plane binds --
+    exactly the enumeration `maskRepoDenial` exists to prevent, and it passes any test that
+    only exercises the writing leg.
 
 ## Conventions
 

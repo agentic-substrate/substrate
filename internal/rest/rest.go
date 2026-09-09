@@ -565,8 +565,16 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 // repoScope resolves a repo key to the chain the server bound it to. The
 // result is used to place a row, never returned to the caller: resolveRepoPaths
 // reads the RLS-free `scope` table, so handing the chain back would disclose
-// another team's naming. Placement is still gated -- policy.Check runs on the
-// derived chain and the review_item INSERT policy calls scope_writable.
+// another team's naming.
+//
+// The scope_writable check is the gate, and it must live here rather than at
+// the write. For a repo leaf policy.Check only asserts the principal has some
+// team, so the real refusal for a foreign repo used to be RLS 42501 raised by
+// the INSERT. A caller that asks for a preview and never writes never reaches
+// that INSERT, so resolving alone would answer "this key exists here" with a
+// 200 and turn the endpoint into a repo-name enumeration oracle. Refusing at
+// resolve time makes a foreign repo and a nonexistent one indistinguishable
+// whether or not the request goes on to write anything.
 func (h *Handler) repoScope(ctx context.Context, st *store.Store, key string) (scope.Path, error) {
 	var out scope.Path
 	err := st.Tx(ctx, func(tx pgx.Tx) error {
@@ -575,6 +583,14 @@ func (h *Handler) repoScope(ctx context.Context, st *store.Store, key string) (s
 			return err
 		}
 		if len(paths) != 1 {
+			return policyDenied(key)
+		}
+		var writable bool
+		if err := tx.QueryRow(ctx, `SELECT scope_writable(id, NULLIF(current_setting('substrate.actor_id', true), '')::uuid)
+                        FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&writable); err != nil {
+			return fmt.Errorf("repo writability %s: %w", key, err)
+		}
+		if !writable {
 			return policyDenied(key)
 		}
 		out = paths[0]
