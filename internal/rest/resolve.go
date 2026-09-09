@@ -27,8 +27,16 @@ import (
 // cannot be used to enumerate the repo keys this control plane binds (#109).
 //
 // The read endpoints must not refuse — they use resolveReadableRepoPaths.
-func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.Path, error) {
-	paths, ok, err := resolveReadableRepoPaths(ctx, tx, repos)
+//
+// It returns the leaf id alongside the chain so the caller can gate on the very
+// row the chain was walked from. Looking the key up a second time is not
+// equivalent: `scope` is UNIQUE NULLS NOT DISTINCT (parent_id, kind, key)
+// (migrations/00002_schema.sql:38), so one key may be bound under two parents,
+// and under READ COMMITTED a second statement takes a fresh snapshot — a
+// concurrent bind committed between the two lookups flips an unordered LIMIT 1
+// onto the other row (#110).
+func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]repoRef, error) {
+	refs, ok, err := resolveRepoRefs(ctx, tx, repos)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +44,15 @@ func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.P
 		// Deliberately the same error whether the key is foreign or absent.
 		return nil, policyDenied(strings.Join(repos, ","))
 	}
-	return paths, nil
+	return refs, nil
+}
+
+// repoRef pairs a resolved repo leaf with the chain walked from it. The id and
+// the path must travel together: every later decision about this repo has to be
+// made against one row, not against whatever a fresh lookup of the key returns.
+type repoRef struct {
+	ID   uuid.UUID
+	Path scope.Path
 }
 
 // resolveReadableRepoPaths maps repo keys to their chains for the read paths.
@@ -56,11 +72,24 @@ func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.P
 // "your key did not resolve" from "you asked for nothing" reopens the very
 // oracle this closes for the caller who is probing rather than typing.
 func resolveReadableRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.Path, bool, error) {
+	refs, ok, err := resolveRepoRefs(ctx, tx, repos)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	paths := make([]scope.Path, 0, len(refs))
+	for _, r := range refs {
+		paths = append(paths, r.Path)
+	}
+	return paths, true, nil
+}
+
+// resolveRepoRefs is the single lookup both resolvers share.
+func resolveRepoRefs(ctx context.Context, tx pgx.Tx, repos []string) ([]repoRef, bool, error) {
 	if len(repos) == 0 {
 		return nil, true, nil
 	}
 	q := store.New(tx)
-	out := make([]scope.Path, 0, len(repos))
+	out := make([]repoRef, 0, len(repos))
 	for _, key := range repos {
 		var id uuid.UUID
 		var readable bool
@@ -79,7 +108,7 @@ func resolveReadableRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([
 		if err != nil {
 			return nil, false, err
 		}
-		out = append(out, path)
+		out = append(out, repoRef{ID: id, Path: path})
 	}
 	return out, true, nil
 }

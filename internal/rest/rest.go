@@ -590,22 +590,24 @@ func (h *Handler) reviewCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) repoScope(ctx context.Context, st *store.Store, key string) (scope.Path, error) {
 	var out scope.Path
 	err := st.Tx(ctx, func(tx pgx.Tx) error {
-		paths, err := resolveRepoPaths(ctx, tx, []string{key})
+		refs, err := resolveRepoPaths(ctx, tx, []string{key})
 		if err != nil {
 			return err
 		}
-		if len(paths) != 1 {
+		if len(refs) != 1 {
 			return policyDenied(key)
 		}
+		// Gate on the id the chain was walked from, never on a second lookup
+		// of the key: the two can name different rows (#110).
 		var writable bool
-		if err := tx.QueryRow(ctx, `SELECT scope_writable(id, NULLIF(current_setting('substrate.actor_id', true), '')::uuid)
-                        FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&writable); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT scope_writable($1, NULLIF(current_setting('substrate.actor_id', true), '')::uuid)`,
+			refs[0].ID).Scan(&writable); err != nil {
 			return fmt.Errorf("repo writability %s: %w", key, err)
 		}
 		if !writable {
 			return policyDenied(key)
 		}
-		out = paths[0]
+		out = refs[0].Path
 		return nil
 	})
 	if err != nil {
