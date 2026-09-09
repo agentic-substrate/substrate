@@ -7,6 +7,16 @@
 # message on the branch. The reason must be at least 30 characters, because a
 # free skip is always taken and a written justification is only taken when true.
 #
+# The CLI maps to two docs, not one: README.md is the quickstart, and
+# docs/ops/runbook.md carries the rollback commands someone runs during an
+# incident. #104's rename updated the README and left the runbook wrong with CI
+# green, because the runbook was only demanded for migrations/ and deploy/
+# changes (#114). Both cmd/* and internal/cli/* are listed, since the CLI moved
+# from the first to the second and a rule keyed on either alone goes quiet.
+#
+# This gate only asks whether a doc was touched. scripts/check-cli-commands.sh
+# is what checks the commands in it are real.
+#
 # Usage: scripts/check-docs.sh [base-ref]   (default: origin/main)
 set -euo pipefail
 
@@ -25,6 +35,9 @@ Makefile	CONTRIBUTING.md	it documents the verification commands contributors run
 .github/workflows/*	CONTRIBUTING.md	it documents what CI requires of a PR
 migrations/*	docs/ops/runbook.md	it documents the migration and restore procedure
 deploy/*	docs/ops/runbook.md	it documents how the system is deployed and recovered
+cmd/*	docs/ops/runbook.md	its command blocks are what an operator runs during an incident
+internal/cli/*	docs/ops/runbook.md	its command blocks are what an operator runs during an incident
+internal/cli/*	README.md	it documents the commands and the quickstart
 EOF
 )
 
