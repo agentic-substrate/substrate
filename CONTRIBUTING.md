@@ -30,6 +30,9 @@ make ko-push KO_DOCKER_REPO=<registry>   # builds, PUSHES, and prints repo/name@
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
 scripts/check-cli-commands.sh       # asserts docs/ops/setup.md's command map matches `substrate --help`
                                     # (CI gate, `docs` job — it builds cmd/substrate itself)
+                                    # `make check` also needs bash, zsh and fish on PATH: the
+                                    # completion tests syntax-check the generated scripts with the
+                                    # real shells, and a missing one fails naming the install command
 scripts/check-deploy-secrets.sh     # grep-based: no credential, token, or tailnet name under deploy/
                                     # (CI gate — it runs on every PR)
 scripts/restore-assert.sh N N N     # weekly restore job: zero rows on memory/instruction/audit is a failure

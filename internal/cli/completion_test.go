@@ -47,27 +47,20 @@ func TestCompletionIsGeneratedForThisBinary(t *testing.T) {
 	}
 }
 
-// TestCompletionFishIsWellFormed asserts the generated fish script structurally
-// rather than by invoking fish. fish is NOT part of the ubuntu-latest runner
-// image (bash and zsh are), so a `fish --no-execute` check would fail CI on
-// every run, and installing a shell just to lint a generated file is a worse
-// trade than asserting the generator's contract directly. The generator is
-// cobra's, so the risk being covered here is "did we call it and get a real
-// script", which these assertions cover exactly.
-func TestCompletionFishIsWellFormed(t *testing.T) {
+// TestCompletionFishParses asserts the generated fish script parses under
+// `fish --no-execute`. fish is not in the ubuntu-latest runner image, so CI
+// installs it explicitly (see .github/workflows/ci.yml) rather than dropping
+// the check -- a completion script that does not parse is a broken script, and
+// a check that silently does not run is worse than no check.
+func TestCompletionFishParses(t *testing.T) {
 	out, _, err := run(t, Deps{}, "completion", "fish")
 	if err != nil {
 		t.Fatalf("completion fish: %v", err)
 	}
-	if strings.TrimSpace(out) == "" {
-		t.Fatalf("fish completion script is empty")
-	}
 	if !strings.Contains(out, "complete -c substrate") {
 		t.Fatalf("fish completion script has no `complete -c substrate` directive:\n%s", out)
 	}
-	if strings.Count(out, "function ") == 0 {
-		t.Fatalf("fish completion script defines no functions; it is not a usable script:\n%s", out)
-	}
+	parseWith(t, "fish", out)
 }
 
 // TestCompletionBashParses asserts the generated bash script parses under
@@ -102,18 +95,24 @@ func TestCompletionNoDescriptions(t *testing.T) {
 	}
 }
 
-// parseWith runs `<shell> -n -` over script. A missing shell is a failure
-// naming the fix, never a skip: a skipped test is a silently missing check.
+// parseWith syntax-checks script with the real shell. A missing shell is a
+// failure naming the fix, never a skip: a skipped test is a silently missing
+// check, and CI installs every shell named here.
 func parseWith(t *testing.T, shell, script string) {
 	t.Helper()
 	if _, err := exec.LookPath(shell); err != nil {
 		t.Fatalf("%s is not installed, so the generated completion script is unverified; install it (e.g. `apt-get install -y %s`) — this check is not optional", shell, shell)
 	}
-	cmd := exec.Command(shell, "-n", "-") //nolint:gosec // test-only: shell is a fixed literal (bash/zsh) from this file's call sites, never external input
+	args := []string{"-n", "-"}
+	if shell == "fish" {
+		// fish has no `-n`; --no-execute parses without running.
+		args = []string{"--no-execute"}
+	}
+	cmd := exec.Command(shell, args...) //nolint:gosec // test-only: shell is a fixed literal (bash/zsh/fish) from this file's call sites, never external input
 	cmd.Stdin = strings.NewReader(script)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("%s -n: %v\n%s", shell, err, stderr.String())
+		t.Fatalf("%s %v: %v\n%s", shell, args, err, stderr.String())
 	}
 }

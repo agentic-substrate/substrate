@@ -56,6 +56,14 @@ jobs:
         with:
           version: v2.13.2
 
+      # The completion tests syntax-check the generated scripts with the real
+      # shells. ubuntu-latest ships bash only -- neither zsh nor fish is in the
+      # runner image -- and a generated completion script that does not parse is
+      # a broken script, so the dependency is installed rather than the check
+      # dropped. Tests never skip: without these, they fail naming this step.
+      - name: install completion shells
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+
       - name: test
         # pipefail is NOT on by default in Actions' `bash -e` shell: without it
         # `tee` supplies the exit code and a failing test reports success. A
