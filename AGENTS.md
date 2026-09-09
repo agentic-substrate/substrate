@@ -140,6 +140,19 @@ makes a novel instance of the same trap recognizable.
     fake `DBTX` straight into the domain function never reaches `store.Tx` at all. A bootstrap
     path must be tested end-to-end against a real Postgres.
 
+17. **The `substrate` CLI has no `-dry-run`/`-commit` pair; a preview is a verb.** `import
+    scan`/`plan` and `adapter status` are the read-only steps, and `import apply`, `review
+    approve|reject`, `adapter install|uninstall` all write. The wire protocol still carries
+    `dry_run` and `commit` — only the CLI surface lost them. *Failure mode:* a banner on stdout
+    with exit code 0 means a script that forgot `-commit` cannot tell a preview from a write,
+    so it reports success for work that never happened. Re-adding a preview flag to a writing
+    verb reintroduces exactly that.
+18. **A command that writes echoes its resolved scope and the source that resolved it, then
+    confirms.** Off a TTY it must refuse without `--yes`. *Failure mode:* scope now falls back
+    to the checkout's git remote, and `h.repoScope` deliberately never returns the resolved
+    chain, so an unconfirmed apply in the wrong checkout writes at a chain nobody saw and
+    nobody can read back.
+
 ## Conventions
 
 - **Errors:** wrap with `%w` and check with `errors.Is`/`As`. Policy denials return a
