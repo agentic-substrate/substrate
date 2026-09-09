@@ -359,6 +359,16 @@ resolves the key to the chain it bound, so no client is ever told, nor gets to c
 another team's org/team/project naming. Home-scoped targets such as `~/.claude/CLAUDE.md` have no repo,
 so their proposals use `-scope`; without one, drift is reported but the file is not restored.
 
+Each checkout is rendered on its own: the adapter issues one `GET /v1/render` per known
+remote and writes that answer only into the checkouts sharing that remote (SCOPE-1, INST-4).
+A machine with several repos therefore gets several different `AGENTS.md` / `CLAUDE.md`
+files, not one merged blob repeated everywhere. The home-scoped files -- `~/.codex/AGENTS.md`,
+`~/.claude/CLAUDE.md`, `~/.cursor/rules/substrate.mdc` -- come from a separate request naming
+no repo at all, which the server resolves to the global scope. There is exactly one of each
+per machine, so they carry only what is true machine-wide; a repo's own rules reach an agent
+through that repo's checked-out files. Branch scope is not part of render yet, so SCOPE-1
+stops at `repo`.
+
 `-scope` has **no default**. It applies only to targets that have no repo of their own —
 `~/.claude/CLAUDE.md` and outbox observations — and unset means those targets are skipped
 and logged. It used to default to `global:`, which was worse than having no default: an
