@@ -11,9 +11,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 	"unicode/utf8"
 
+	"github.com/agentic-substrate/substrate/internal/cli"
 	"github.com/agentic-substrate/substrate/internal/importer"
 )
 
@@ -321,7 +321,7 @@ func reviewRequest(method, server, token, path string, body []byte, op string) (
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := cli.NewHTTPClient()
 	res, err := client.Do(req) //nolint:gosec // G704: -server is the operator's control plane
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)

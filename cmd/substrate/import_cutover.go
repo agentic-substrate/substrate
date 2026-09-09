@@ -11,9 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/agentic-substrate/substrate/internal/adapter"
+	"github.com/agentic-substrate/substrate/internal/cli"
 	"github.com/agentic-substrate/substrate/internal/cutover"
 )
 
@@ -127,7 +127,7 @@ func fetchRenderTargets(ctx context.Context, server, token, machine string) ([]c
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := cli.NewHTTPClient()
 	res, err := client.Do(req) //nolint:gosec // G704: -server is the operator's control plane
 	if err != nil {
 		return nil, fmt.Errorf("import cutover: %w", err)

@@ -108,6 +108,36 @@ func (s *Store) TxReadOnly(ctx context.Context, fn func(pgx.Tx) error) error {
 	return fn(tx)
 }
 
+// TxBootstrap runs fn in one transaction with NO principal and no RLS session
+// settings. It exists for exactly one caller shape: a bootstrap command that
+// must create the first principal, which by definition cannot present one.
+// Tx and TxReadOnly return ErrNoPrincipal in that situation, so `substrate
+// admin create-user` would die before writing a row (AGENTS.md Gotcha 16).
+//
+// This is not a hole in RLS. The pool still operates as substrate_app, which
+// holds only SELECT/INSERT/UPDATE, and 00004_rls.sql enables row security on
+// the content tables only -- principal, org, team, membership and api_token
+// are not among them, so a session GUC would change nothing here. Never reach
+// for this from a request path: every request has a principal, and using it
+// there would silently bypass the session settings the content tables rely on.
+func (s *Store) TxBootstrap(ctx context.Context, fn func(pgx.Tx) error) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("store not configured")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin bootstrap: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
 // Tx runs fn in one transaction with RLS session settings applied from ctx
 // (EDD §8.2). Identity is loaded by middleware; this only SET LOCALs.
 func (s *Store) Tx(ctx context.Context, fn func(pgx.Tx) error) error {

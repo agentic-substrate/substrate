@@ -40,6 +40,13 @@ These are documented design positions. Reports on them will be closed with a poi
   status it may not set.
 - Token handling flaws: tokens are hashed at rest, per (principal, machine), revocable, and
   24-hour TTL for agent principals.
+- Anything that discloses the **user** token `substrate auth login` stores. User tokens do not
+  expire — `identity.Lookup` TTL-caps agent principals only — so
+  `${XDG_CONFIG_HOME:-~/.config}/substrate/config.json` is a long-lived credential on disk. It is
+  written mode 0600 via a temp file plus rename and is refused on load when any group or other
+  bit is set. A path that prints that token, logs it, writes it at a wider mode, or accepts it on
+  argv (where `ps` and shell history see it) is a vulnerability, not a papercut. Revoke with
+  `substrate token revoke`.
 - A memory containing a secret that the write-path scanner lets through.
 - Anything that lets an unapproved skill version become the active one.
 
