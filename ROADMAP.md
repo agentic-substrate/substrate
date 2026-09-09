@@ -1,14 +1,15 @@
 # Roadmap
 
-**Last reviewed:** 2026-09-05
+**Last reviewed:** 2026-09-08
 
-These are **confidence horizons, not time buckets**. An item moves left when we are more sure
-it is the right thing, not when a date arrives. This file holds no execution state — no
-percentages, no checkboxes, no owners. State lives on the [project board]; a file that stores
-no state cannot go stale.
+The destination is a durable context layer for instructions, preferences, memories, skills,
+and task continuity. A lesson learned in one session should improve a later session on another
+machine; a reviewed procedure should become an available skill; a checkpoint should carry work
+across harnesses. The [vision](docs/product/vision.md) describes that lifecycle.
 
-Items are phrased as outcomes. If you cannot tell whether an item is done by using the system,
-it is phrased wrong.
+These are **confidence horizons, not release dates**. Now identifies the current focus, not a
+claim that everything listed is complete. Execution state lives on the [project board]; the
+[README](README.md#available-now-and-ahead) summarizes implemented capabilities.
 
 ## Now — at most three
 
@@ -16,7 +17,8 @@ it is phrased wrong.
    copied by hand.** Schema, scope chain, `memory.write`/`search`/`supersede`, keyword retrieval.
 2. **Both machines generate identical instruction files from one authoritative source, and a
    hand edit becomes a review item rather than a merge.** Instruction/preference resolution,
-   deterministic rendering, `substrate-adapter` render + drift loops.
+   deterministic rendering, `substrate-adapter` render + drift loops. Approved skill versions
+   also reach the machines where their scope and visibility apply (SKILL-1, SKILL-2).
 3. **The drifted state of the existing machines is reconciled once, with conflicts shown rather
    than resolved by "last sync wins."** `substrate import` scan → plan → apply → cutover.
 
@@ -31,14 +33,16 @@ it is phrased wrong.
 ## Later
 
 - Raw session offload: stop on the laptop, resume the actual conversation in a pod.
-- Promotion, consolidation, and a human review queue with real throughput.
-- Skill proposals that open a PR and link nothing until approved.
+- Observations become useful long-term knowledge through evidence-based promotion,
+  consolidation, and a human review queue with real throughput.
+- Reusable lessons become skill proposals that open a PR and link nothing until approved.
+  Teams can inherit org skills and pin approved versions.
 - Tasks, leases, and GitHub-triggered workers.
 - A second team, OIDC, RLS leak tests, and a dashboard.
 
 ## Not doing
 
-See [`docs/product/non-goals.md`](docs/product/non-goals.md) for the reasoning. In short: not a
+See [`docs/product/non-goals.md`](docs/product/non-goals.md) for the reasoning: not a
 harness, not a tracker, not SaaS, not event-sourced, no auto-promotion to global scope, and no
 claim that prompt injection is solved.
 

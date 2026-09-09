@@ -1,60 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 346" width="820" height="346" role="img" aria-labelledby="t d">
-  <title id="t">Substrate</title>
-  <desc id="d">Disposable harnesses on top, one durable control plane beneath, every machine in sync.</desc>
-  <defs>
-    <style>
-      .f { font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; }
-      .cap { font-size: 10.5px; letter-spacing: 1.6px; fill: #94a3b8; }
-      .name { font-size: 15px; font-weight: 600; fill: #0f172a; }
-      .sub { font-size: 11.5px; fill: #64748b; }
-      .slab-name { font-size: 24px; font-weight: 700; letter-spacing: 0.5px; fill: #f8fafc; }
-      .slab-sub { font-size: 12.5px; fill: #94a3b8; }
-      .chain { font-size: 10.5px; fill: #7dd3fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    </style>
-    <marker id="a" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M0 0.5 L7 4 L0 7.5 z" fill="#0ea5e9"/>
-    </marker>
-  </defs>
-
-  <g class="f">
-    <text class="cap" x="40" y="16">HARNESSES · DISPOSABLE</text>
-
-    <g stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4" fill="#f8fafc">
-      <rect x="40"  y="26" width="200" height="56" rx="10"/>
-      <rect x="310" y="26" width="200" height="56" rx="10"/>
-      <rect x="580" y="26" width="200" height="56" rx="10"/>
-    </g>
-    <g text-anchor="middle">
-      <text class="name" x="140" y="50">Claude Code</text><text class="sub" x="140" y="68">CLAUDE.md</text>
-      <text class="name" x="410" y="50">Codex</text><text class="sub" x="410" y="68">AGENTS.md</text>
-      <text class="name" x="680" y="50">Cursor</text><text class="sub" x="680" y="68">~/.cursor/rules</text>
-    </g>
-
-    <g stroke="#0ea5e9" stroke-width="1.5" marker-end="url(#a)">
-      <path d="M140 84 V124"/><path d="M410 84 V124"/><path d="M680 84 V124"/>
-    </g>
-
-    <rect x="40" y="132" width="740" height="86" rx="12" fill="#0f172a"/>
-    <rect x="40" y="132" width="740" height="86" rx="12" fill="none" stroke="#0ea5e9" stroke-width="1.5"/>
-    <text class="slab-name" x="66" y="170">SUBSTRATE</text>
-    <text class="slab-sub" x="66" y="194">one durable control plane · instructions · memory · skills</text>
-    <text class="chain" x="754" y="170" text-anchor="end">global → org → team → project → repo</text>
-    <text class="chain" x="754" y="194" text-anchor="end">→ branch → task → session</text>
-
-    <g stroke="#0ea5e9" stroke-width="1.5" marker-end="url(#a)">
-      <path d="M140 220 V262"/><path d="M410 220 V262"/><path d="M680 220 V262"/>
-    </g>
-
-    <g stroke="#cbd5e1" stroke-width="1.5" fill="#ffffff">
-      <rect x="40"  y="270" width="200" height="56" rx="10"/>
-      <rect x="310" y="270" width="200" height="56" rx="10"/>
-      <rect x="580" y="270" width="200" height="56" rx="10"/>
-    </g>
-    <g text-anchor="middle">
-      <text class="name" x="140" y="294">laptop</text><text class="sub" x="140" y="312">in sync</text>
-      <text class="name" x="410" y="294">homelab server</text><text class="sub" x="410" y="312">in sync</text>
-      <text class="name" x="680" y="294">GPU box</text><text class="sub" x="680" y="312">in sync</text>
-    </g>
-    <text class="cap" x="40" y="342">MACHINES · ONE AUTHORITATIVE CONTEXT</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="620" viewBox="0 0 960 620" role="img" aria-labelledby="title desc">
+<title id="title">Substrate — context that outlives the session</title>
+<desc id="desc">Coding harnesses on laptops, workstations, and workers sit above Substrate. Blue arrows deliver scoped context and approved skills upward. Green arrows return observations and proposals through provenance and review. The durable layer holds instructions, preferences, memories, and skill state, with Postgres for context and state and Git for skill content. Checkpoints, knowledge maintenance, and skill proposals extend this foundation in the long-term vision.</desc>
+<defs>
+ <marker id="blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L9 5L1 9" fill="none" stroke="#075caf" stroke-width="1.6"/></marker>
+ <marker id="green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L9 5L1 9" fill="none" stroke="#147052" stroke-width="1.6"/></marker>
+ <style>text {font-family:DejaVu Sans,Arial,sans-serif} .title {font-size:29px;font-weight:700;fill:#152940} .label {font-size:15px;font-weight:700;fill:#152940} .body {font-size:13px;fill:#465d75} .eyebrow {font-size:11px;letter-spacing:2px;font-weight:700;fill:#075caf}</style>
+</defs>
+<rect width="960" height="620" rx="22" fill="#f5f8fc"/>
+<text x="40" y="38" class="eyebrow">ONE AUTHORITY · MANY HARNESSES</text>
+<text x="40" y="79" class="title">Context that outlives the session.</text>
+<text x="40" y="105" class="body">Instructions, knowledge, and reusable practice — wherever work happens.</text>
+<rect x="40" y="132" width="202" height="70" rx="12" fill="#ffffff" stroke="#b9cadd"/><text x="58" y="161" class="label">Claude Code</text><text x="58" y="184" class="body">Laptop</text>
+<rect x="266" y="132" width="202" height="70" rx="12" fill="#ffffff" stroke="#b9cadd"/><text x="284" y="161" class="label">Codex</text><text x="284" y="184" class="body">Workstation</text>
+<rect x="492" y="132" width="202" height="70" rx="12" fill="#ffffff" stroke="#b9cadd"/><text x="510" y="161" class="label">Cursor</text><text x="510" y="184" class="body">Desktop</text>
+<rect x="718" y="132" width="202" height="70" rx="12" fill="#ffffff" stroke="#b9cadd"/><text x="736" y="161" class="label">MCP client</text><text x="736" y="184" class="body">Headless worker</text>
+<path d="M200 285V214" fill="none" stroke="#075caf" stroke-width="2.5" marker-end="url(#blue)"/>
+<text x="222" y="241" fill="#075caf" font-size="14" font-weight="700">Context + approved skills</text>
+<text x="222" y="262" class="body">MCP · rendered files · skill links</text>
+<path d="M886 211V281" fill="none" stroke="#147052" stroke-width="2.5" marker-end="url(#green)"/>
+<text x="859" y="241" text-anchor="end" fill="#147052" font-size="14" font-weight="700">Observations + proposals</text>
+<text x="859" y="262" text-anchor="end" class="body">Provenance · status · review</text>
+<rect x="40" y="289" width="880" height="207" rx="16" fill="#e3effc" stroke="#075caf"/>
+<text x="64" y="328" class="title">Substrate</text>
+<text x="896" y="326" text-anchor="end" class="body">SELF-HOSTED CONTEXT LAYER</text>
+<rect x="64" y="350" width="199" height="76" rx="10" fill="#ffffff"/><text x="78" y="379" class="label">Instructions</text><text x="78" y="404" class="body">Deterministic rules</text>
+<rect x="275" y="350" width="199" height="76" rx="10" fill="#ffffff"/><text x="289" y="379" class="label">Preferences</text><text x="289" y="404" class="body">Personal working choices</text>
+<rect x="486" y="350" width="199" height="76" rx="10" fill="#ffffff"/><text x="500" y="379" class="label">Memories</text><text x="500" y="404" class="body">Knowledge with evidence</text>
+<rect x="697" y="350" width="199" height="76" rx="10" fill="#ffffff"/><text x="711" y="379" class="label">Skills</text><text x="711" y="404" class="body">Approved Git versions</text>
+<text x="64" y="455" class="body">Scoped delivery · permission checks · context budgets · retained history</text>
+<text x="64" y="478" class="body">Postgres: context + skill state</text><text x="896" y="478" text-anchor="end" class="body">Git: skill content + versions</text>
+<text x="40" y="532" class="eyebrow">THE LONG-TERM GOAL</text>
+<text x="40" y="558" class="label">Learn across sessions. Improve shared skills. Continue work anywhere.</text>
+<text x="40" y="584" class="body">Planned: knowledge maintenance · skill proposals · checkpoints and handoffs</text>
 </svg>
