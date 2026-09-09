@@ -70,37 +70,66 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	}
 
 	a := newAPI(cfg)
-	targets, known, unknown, unscoped, repoKeys, err := fetchTargets(ctx, a, cfg, remotes)
+	plan, err := fetchTargets(ctx, a, cfg, remotes)
 	if err != nil {
 		return SyncResult{}, err
 	}
-	applyTo := checkoutsWithRemotes(checkouts, known)
 	var unproposed []string
 	var skillsSkipped string
 	res := func() SyncResult {
 		return SyncResult{
-			UnknownRemotes:  unknown,
-			UnscopedRemotes: unscoped,
+			UnknownRemotes:  plan.unknown,
+			UnscopedRemotes: plan.unscoped,
 			UnproposedDrift: unproposed,
 			SkillsSkipped:   skillsSkipped,
 		}
 	}
-	for _, tgt := range targets {
-		dests, err := destTargets(cfg, tgt.Path, applyTo, repoKeys)
-		if err != nil {
-			return res(), err
-		}
+	apply := func(tgt renderTarget, dests []destTarget) error {
 		for _, dest := range dests {
 			skipped, err := applyTarget(ctx, db, a, cfg, dest, tgt, now)
 			if err != nil {
-				return res(), err
+				return err
 			}
 			if skipped {
 				unproposed = append(unproposed, dest.path)
 			}
 		}
+		return nil
 	}
-	skillsSkipped, err = linkSkills(ctx, db, a, cfg, known)
+	// Each checkout is written from the render compiled for its own repo, and
+	// from no other (SCOPE-1, INST-4). Asking about every remote at once and
+	// fanning the one answer out gave every repo on the machine every other
+	// repo's instructions, with first-occurrence-wins deciding which of two
+	// conflicting rules a project actually got.
+	for _, rr := range plan.repos {
+		mine := checkoutsWithRemotes(checkouts, []string{rr.remote})
+		for _, tgt := range rr.targets {
+			if isHomePath(tgt.Path) {
+				continue
+			}
+			dests, err := destTargets(cfg, tgt.Path, mine, plan.repoKeys)
+			if err != nil {
+				return res(), err
+			}
+			if err := apply(tgt, dests); err != nil {
+				return res(), err
+			}
+		}
+	}
+	// Every target of the machine-wide render is validated, including the
+	// repo-relative ones: with no checkouts they yield no destination and are
+	// written nowhere, but an unsafe path must still be refused on a machine
+	// that happens to have discovered nothing.
+	for _, tgt := range plan.home {
+		dests, err := destTargets(cfg, tgt.Path, nil, nil)
+		if err != nil {
+			return res(), err
+		}
+		if err := apply(tgt, dests); err != nil {
+			return res(), err
+		}
+	}
+	skillsSkipped, err = linkSkills(ctx, db, a, cfg, plan.known)
 	if err != nil {
 		// Assigned before the check, not after: an error here means skills were
 		// definitively not linked, and a result reporting no skip would be a
@@ -110,41 +139,76 @@ func Sync(ctx context.Context, db *DB, cfg Config) (SyncResult, error) {
 	return res(), nil
 }
 
-// fetchTargets probes each remote on its own so an unknown one is isolated
-// (R18: logged, never auto-created), and records the repo key a drift proposal
-// about that checkout must name. The key is the normalized remote itself; the
-// chain behind it belongs to the server and is never sent to the adapter.
+// repoRender is one checkout-scoped render: the remote it was compiled for and
+// the targets the server returned for that remote alone.
+type repoRender struct {
+	remote  string
+	targets []renderTarget
+}
+
+// renderPlan is everything one cycle needs to write: one render per known
+// remote, plus the machine-wide render behind the home-scoped files.
+type renderPlan struct {
+	repos    []repoRender
+	home     []renderTarget
+	known    []string
+	unknown  []string
+	unscoped []string
+	repoKeys map[string]string
+}
+
+// isHomePath reports whether a server target path is the machine-wide copy
+// rather than a per-checkout file. The server returns both in one flat array
+// (EDD §6), so the split is made here, by path.
+func isHomePath(serverPath string) bool { return strings.HasPrefix(serverPath, "~/") }
+
+// fetchTargets renders each remote on its own so an unknown one is isolated
+// (R18: logged, never auto-created), so its content reaches only its own
+// checkouts, and so the repo key a drift proposal must name is recorded. The
+// key is the normalized remote itself; the chain behind it belongs to the
+// server and is never sent to the adapter.
+//
+// The home-scoped files get their own request naming no repo at all, which the
+// server resolves to the global scope. There is exactly one of each per
+// machine, so they cannot carry any one repo's rules — and Claude Code loads
+// ~/.claude/CLAUDE.md on every session, which makes a merged blob there the
+// most damaging instance of the defect, not the mildest. Global is the only
+// content that is true on the whole machine.
 //
 // A remote the server accepts but ParseRemote cannot key is returned in
 // `unscoped` rather than dropped: an unmanaged checkout must be visible in the
 // result, not only in a log line.
-func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) ([]renderTarget, []string, []string, []string, map[string]string, error) {
-	var known, unknown, unscoped []string
-	repoKeys := map[string]string{}
+func fetchTargets(ctx context.Context, a *api, cfg Config, remotes []string) (renderPlan, error) {
+	plan := renderPlan{repoKeys: map[string]string{}}
 	for _, r := range remotes {
-		_, code, err := a.getRender(ctx, cfg.Machine, []string{r})
+		res, code, err := a.getRender(ctx, cfg.Machine, []string{r})
 		if err != nil && deniedStatus(code) {
-			unknown = append(unknown, r)
+			plan.unknown = append(plan.unknown, r)
 			continue
 		}
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return renderPlan{}, err
 		}
 		id, ok := ParseRemote(r)
 		if !ok {
 			// The checkout is not managed: its repo key is never guessed at
 			// and never defaulted to global.
-			unscoped = append(unscoped, r)
+			plan.unscoped = append(plan.unscoped, r)
 			continue
 		}
-		repoKeys[r] = id.Key
-		known = append(known, r)
+		plan.repoKeys[r] = id.Key
+		plan.known = append(plan.known, r)
+		plan.repos = append(plan.repos, repoRender{remote: r, targets: res.Targets})
 	}
-	res, _, err := a.getRender(ctx, cfg.Machine, known)
+	res, _, err := a.getRender(ctx, cfg.Machine, nil)
 	if err != nil {
-		return nil, known, unknown, unscoped, repoKeys, err
+		return renderPlan{
+			known: plan.known, unknown: plan.unknown,
+			unscoped: plan.unscoped, repoKeys: plan.repoKeys,
+		}, err
 	}
-	return res.Targets, known, unknown, unscoped, repoKeys, nil
+	plan.home = res.Targets
+	return plan, nil
 }
 
 func checkoutsWithRemotes(checkouts []Workspace, remotes []string) []Workspace {
