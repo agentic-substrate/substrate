@@ -121,3 +121,103 @@ func TestSteadyStateRerenderTakesNoBackup(t *testing.T) {
 		t.Fatalf("a backup file exists beside a steady-state render: %v", err)
 	}
 }
+
+// A managed_file row surviving at a stale RenderVersion after its file was
+// deleted from disk must not cause a spurious empty backup on the next sync:
+// there is no content on disk to preserve, so `exists` must gate the backup
+// guard independently of `hasStored`.
+func TestDeletedManagedFileTakesNoBackupOnRenderVersionBump(t *testing.T) {
+	root := t.TempDir()
+	alpha := filepath.Join(root, "alpha")
+	initRepo(t, alpha, "https://github.com/acme/alpha.git")
+
+	const body = "first body\n"
+	srv := newPerRepoFake(t, func([]string) string { return body })
+
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Roots = []string{root}
+
+	claude := filepath.Join(home, ".claude/CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(claude), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// No file on disk, but a managed_file row exists at a stale version --
+	// e.g. the operator deleted the file by hand after an earlier sync.
+	if err := db.upsertManaged(claude, "claude", "deadbeef", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE managed_file SET render_version = 0 WHERE path = ?`, claude); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Sync(t.Context(), db, cfg)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if got := readFile(t, claude); got != body {
+		t.Fatalf("~/.claude/CLAUDE.md = %q, want %q", got, body)
+	}
+	if len(res.Backups) != 0 {
+		t.Fatalf("SyncResult.Backups = %v, want none: the file did not exist, there was nothing to back up", res.Backups)
+	}
+	if _, err := os.Stat(claude + ".v0.bak"); !os.IsNotExist(err) {
+		t.Fatalf("a spurious empty backup file was written for a file that did not exist: %v", err)
+	}
+}
+
+// The backup written for a RenderVersion bump must inherit the SOURCE file's
+// mode. A stat of the not-yet-existing backup path falls back to 0644, which
+// would widen a 0600 credential-bearing file's backup to world-readable.
+func TestRenderVersionBackupInheritsSourceMode(t *testing.T) {
+	root := t.TempDir()
+	alpha := filepath.Join(root, "alpha")
+	initRepo(t, alpha, "https://github.com/acme/alpha.git")
+
+	const globalBody = "global-only rules\n"
+	const mergedBlob = "rules for github.com/acme/alpha\nrules for github.com/acme/beta\n"
+	srv := newPerRepoFake(t, func(repos []string) string {
+		if len(repos) == 0 {
+			return globalBody
+		}
+		return "rules for " + repos[0] + "\n"
+	})
+
+	home := t.TempDir()
+	state := filepath.Join(home, "adapter.sqlite")
+	db := openDB(t, state)
+	cfg := testConfig(home, state, srv.URL)
+	cfg.Roots = []string{root}
+
+	claude := filepath.Join(home, ".claude/CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(claude), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the file at 0600, the realistic mode for a home file holding the
+	// operator's private instructions.
+	if err := os.WriteFile(claude, []byte(mergedBlob), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.upsertManaged(claude, "claude", render.DriftHash(mergedBlob), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`UPDATE managed_file SET render_version = 0 WHERE path = ?`, claude); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Sync(t.Context(), db, cfg); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	backup := claude + ".v0.bak"
+	info, err := os.Stat(backup)
+	if err != nil {
+		t.Fatalf("stat backup: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("backup mode = %v, want %v (the source file's mode)", got, want)
+	}
+}

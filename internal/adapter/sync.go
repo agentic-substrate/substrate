@@ -363,7 +363,15 @@ func applyTarget(ctx context.Context, db *DB, a *api, cfg Config, dest destTarge
 		// Gotcha 9 still holds.
 		if exists && hasStored && stored.RenderVersion < RenderVersion {
 			backup = fmt.Sprintf("%s.v%d.bak", dest.path, stored.RenderVersion)
-			if err := AtomicWrite(backup, disk); err != nil {
+			// The backup must inherit the SOURCE file's mode, not whatever a
+			// stat of the not-yet-existing backup path would fall back to
+			// (0644) -- a 0600 credential-bearing file must not get a
+			// world-readable backup (Gotcha 14).
+			srcMode := os.FileMode(0o600)
+			if info, statErr := os.Stat(dest.path); statErr == nil {
+				srcMode = info.Mode().Perm()
+			}
+			if err := AtomicWriteMode(backup, disk, srcMode); err != nil {
 				return false, "", fmt.Errorf("adapter: backup %s: %w", dest.path, err)
 			}
 		}
