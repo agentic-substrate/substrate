@@ -138,7 +138,13 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 	repos := splitCSV(r.URL.Query().Get("repos"))
 	cfg, _, err := h.effectiveConfig(r.Context(), st, repos)
 	if err != nil {
-		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
+		// Not masked. Since #109 a repo key this principal cannot read never
+		// reaches here -- it falls back to the global chain and answers 200 --
+		// so the only errors left are policy.Check on a chain the caller has
+		// already been shown it may read, and store.ErrNoPrincipal. Masking
+		// those would replace a true reason with a false one and protect
+		// nothing.
+		writePolicy(w, err)
 		return
 	}
 	targets := make([]renderTarget, 0, 5)
@@ -171,7 +177,11 @@ func (h *Handler) effectiveConfig(ctx context.Context, st *store.Store, repos []
 	cfg.GeneratedAt = h.now().UTC().Format(time.RFC3339)
 	var used scope.Path
 	err := st.Tx(ctx, func(tx pgx.Tx) error {
-		paths, err := resolveRepoPaths(ctx, tx, repos)
+		// A key this principal cannot read -- foreign or nonexistent alike --
+		// resolves to nothing and falls through to the global chain below, so
+		// both answer 200 with the body this request would have produced with
+		// no ?repos= at all (#109).
+		paths, _, err := resolveReadableRepoPaths(ctx, tx, repos)
 		if err != nil {
 			return err
 		}
@@ -268,11 +278,11 @@ func (h *Handler) skillsManifest(w http.ResponseWriter, r *http.Request) {
 	err = st.Tx(r.Context(), func(tx pgx.Tx) error {
 		var paths []scope.Path
 		if len(repos) > 0 {
-			var err error
-			paths, err = resolveRepoPaths(r.Context(), tx, repos)
+			got, _, err := resolveReadableRepoPaths(r.Context(), tx, repos)
 			if err != nil {
 				return err
 			}
+			paths = got
 			for _, path := range paths {
 				if err := policy.Check("skills.manifest", path, *p); err != nil {
 					return err
@@ -312,7 +322,8 @@ func (h *Handler) skillsManifest(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
+		// Not masked: see the note in render.
+		writePolicy(w, err)
 		return
 	}
 	if out == nil {
@@ -407,7 +418,7 @@ func (h *Handler) memoryCache(w http.ResponseWriter, r *http.Request) {
 	err = st.Tx(r.Context(), func(tx pgx.Tx) error {
 		allow := map[uuid.UUID]struct{}{}
 		if len(repos) > 0 {
-			paths, err := resolveRepoPaths(r.Context(), tx, repos)
+			paths, _, err := resolveReadableRepoPaths(r.Context(), tx, repos)
 			if err != nil {
 				return err
 			}
@@ -452,7 +463,8 @@ func (h *Handler) memoryCache(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
+		// Not masked: see the note in render.
+		writePolicy(w, err)
 		return
 	}
 	if out == nil {

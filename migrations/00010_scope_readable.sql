@@ -6,13 +6,24 @@
 -- resolved for anyone and the status code alone enumerated which repo keys
 -- this control plane binds (#109; AGENTS.md Gotcha 13).
 --
+-- The read paths do not refuse on a false result. resolveReadableRepoPaths
+-- returns no chain, and the handler falls back to the global chain and answers
+-- 200 with the byte-identical body that request would produce with no ?repos=
+-- at all. A repo bound to another team and a repo bound nowhere therefore give
+-- the same answer, which is what kills the oracle -- not that both are denied.
+-- Refusing instead would also kill it, but would take content authored with
+-- visibility='global' (an explicit decision that a row is readable by everyone)
+-- away from readers who were legitimately receiving it. The write paths still
+-- refuse: h.repoScope keeps its scope_writable check and its masked 403.
+--
 -- scope_writable is the wrong predicate to reuse by name on a read path -- a
--- principal that may read but not write must not be refused -- but it is the
--- right predicate by extension today: member_role is ('member','lead','admin')
--- and scope_writable already admits every project_grant role, so no grant
--- confers read without write. Delegating keeps the two exactly in step now and
--- gives a read-only role, if one is ever added, one function to widen instead
--- of a read path that silently stayed at write strength.
+-- principal that may read but not write must not be dropped to the global
+-- chain -- but it is the right predicate by extension today: member_role is
+-- ('member','lead','admin') and scope_writable already admits every
+-- project_grant role, so no grant confers read without write. Delegating keeps
+-- the two exactly in step now and gives a read-only role, if one is ever added,
+-- one function to widen instead of a read path that silently stayed at write
+-- strength.
 --
 -- Delegation also inherits the substrate.is_admin short-circuit, so a
 -- human_admin resolves every repo key exactly as it does today.

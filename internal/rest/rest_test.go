@@ -352,18 +352,36 @@ func TestRenderTargetsMatchDriftHash(t *testing.T) {
 		t.Fatal("render missing team-visible ci.required; the test cannot prove RLS")
 	}
 
+	// bob is a member of team beta and cannot read this repo, so since #109 the
+	// key resolves to nothing and he is served the global chain (200), not a
+	// 403. The loop below only means something if it actually has targets to
+	// walk and if alice's identical request was proven to carry ci.required
+	// above -- a 403, or an empty target list, would satisfy it vacuously.
 	bob := doJSON(t, srv, http.MethodGet, "/v1/render?machine=wsl&repos="+w.repoKey, "bob", nil)
 	t.Cleanup(func() { _ = bob.Body.Close() })
+	if bob.StatusCode != http.StatusOK {
+		t.Fatalf("bob /v1/render with a foreign repo key = %d, want 200", bob.StatusCode)
+	}
 	var bobOut struct {
 		Targets []struct {
+			Path    string `json:"path"`
 			Content string `json:"content"`
 		} `json:"targets"`
 	}
 	decodeJSON(t, bob, &bobOut)
+	if len(bobOut.Targets) != len(wantPaths) {
+		t.Fatalf("bob got %d targets, want %d; the ci.required assertion below would be vacuous",
+			len(bobOut.Targets), len(wantPaths))
+	}
+	var checked int
 	for _, tgt := range bobOut.Targets {
+		checked++
 		if strings.Contains(tgt.Content, "ci.required") {
-			t.Fatal("bob (non-member) saw team-visible ci.required on /v1/render")
+			t.Fatalf("bob (non-member) saw team-visible ci.required on /v1/render at %s", tgt.Path)
 		}
+	}
+	if checked != len(wantPaths) {
+		t.Fatalf("examined %d of %d targets", checked, len(wantPaths))
 	}
 }
 

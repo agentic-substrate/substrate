@@ -13,9 +13,10 @@ import (
 )
 
 // The render response must never name the chain it compiled for. Since #109 a
-// non-member is refused at resolve time (see
-// TestReadEndpointsRepoDenialIsIndistinguishable), so the remaining guard is
-// the response shape itself: `global:/org:acme-.../team:alpha/project:secret`
+// non-member's repo key resolves to nothing and he is served the global chain
+// instead (see TestReadEndpointsRepoDenialIsIndistinguishable), so he never
+// reaches this chain at all; the guard that remains, for the member who does,
+// is the response shape itself: `global:/org:acme-.../team:alpha/project:secret`
 // names an org, a team and a project, and a client that is handed one learns
 // the naming of every scope above the repo it asked about. Re-adding a "scope"
 // field to the render response -- or echoing the repo key back -- turns this red.
@@ -103,8 +104,9 @@ func TestReviewCreateBindsScopeToRepoAndRLSRefusesForeignScope(t *testing.T) {
 	}
 
 	// bob is on team beta. policy.Check passes on team membership alone, so the
-	// refusals are scope_readable at resolve time (#109) with the INSERT
-	// policy's scope_writable as the backstop underneath it.
+	// refusal is repoScope's scope_writable check (#109 left the write paths
+	// refusing; only the read paths fall back), with the INSERT policy's own
+	// scope_writable as the backstop underneath it.
 	denied := doJSON(t, srv, http.MethodPost, "/v1/review", "bob", proposal(map[string]any{"repo": w.repoKey}))
 	if denied.StatusCode != http.StatusForbidden {
 		t.Fatalf("bob repo proposal = %d, want 403: %s", denied.StatusCode, readBody(t, denied))
