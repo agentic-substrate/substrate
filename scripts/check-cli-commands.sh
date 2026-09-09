@@ -89,7 +89,82 @@ if [[ -n "$missing_from_readme" ]]; then
   status=1
 fi
 
+# --- every invocation the docs tell an operator to run ---------------------
+# The command map above covers one block in one file. The runbook's rollback
+# commands live in fenced blocks in another, and a rename that leaves them
+# stale is the failure this gate exists for (#114): the runbook is what someone
+# reads during an incident, and #104's rename left it wrong with CI green.
+#
+# Only FENCED blocks are scanned. Prose names old commands on purpose --
+# runbook.md explains that `substrate import cutover` is now `adapter install`
+# -- and a gate failing on documented history would teach people to delete the
+# history rather than fix the command.
+invocation_pairs=$(
+  for f in README.md $(find docs -name '*.md' | sort); do
+    awk -v file="$f" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      !fence { next }
+      {
+        line = $0
+        sub(/^[[:space:]]*\$[[:space:]]+/, "", line)      # a leading shell prompt
+        # The substrate binary itself, never substrate-adapter or -server.
+        if (match(line, /(^|[[:space:]]|\/)substrate([[:space:]]|$)/) == 0) next
+        rest = substr(line, RSTART + RLENGTH)
+        n = split(rest, tok, /[[:space:]]+/)
+        verb = ""; sub_ = ""
+        for (i = 1; i <= n; i++) {
+          if (tok[i] == "" || tok[i] ~ /^-/) continue
+          if (verb == "") { verb = tok[i]; continue }
+          sub_ = tok[i]; break
+        }
+        if (verb == "" || verb !~ /^[a-z][a-z-]*$/) next
+        if (sub_ !~ /^[a-z][a-z-]*$/) sub_ = ""
+        flags = ""
+        for (i = 1; i <= n; i++) {
+          f_ = tok[i]
+          sub(/=.*$/, "", f_)
+          # A multi-character single-dash flag is always wrong under cobra: it
+          # parses as a run of shorthands. This is the #104 shape (-root, -commit).
+          if (f_ ~ /^-[a-z][a-z-]+$/ || f_ ~ /^--[a-z][a-z-]*$/) flags = flags " " f_
+        }
+        print (sub_ == "" ? verb : verb " " sub_) "\t" file "\t" flags
+      }' "$f"
+  done | sort -u
+)
+
+if [[ -n "$invocation_pairs" ]]; then
+  unknown=$(
+    while IFS=$'\t' read -r pair file flags; do
+      [[ -n "$pair" ]] || continue
+      if ! grep -qxF "$pair" <<<"$runtime_pairs"; then
+        echo "  substrate $pair   ($file)"
+        continue
+      fi
+      # The verb exists; now the flags it is shown with. `--help` lists both
+      # its own and its inherited flags, which is exactly the set a reader may
+      # legitimately pass.
+      known=$("$BIN" $pair --help 2>&1 | grep -oE '(^|[[:space:]])--[a-z][a-z-]*' | tr -d ' ' | sort -u)
+      for fl in $flags; do
+        [[ -n "$fl" ]] || continue
+        if [[ "$fl" != --* ]]; then
+          echo "  substrate $pair $fl   ($file) -- single-dash flag; cobra reads it as shorthands"
+          continue
+        fi
+        grep -qxF -- "$fl" <<<"$known" || echo "  substrate $pair $fl   ($file) -- no such flag"
+      done
+    done <<<"$invocation_pairs" | sort -u
+  )
+  if [[ -n "$unknown" ]]; then
+    echo "check-cli-commands: the docs show commands or flags substrate does not expose:" >&2
+    echo "$unknown" >&2
+    echo "  Fix the invocation, or move the reference out of a fenced block if it" >&2
+    echo "  is deliberately naming a command that no longer exists." >&2
+    status=1
+  fi
+fi
+
 if [[ $status -eq 0 ]]; then
   echo "check-cli-commands: command map in $DOC matches substrate --help ($(echo "$runtime_pairs" | wc -l | tr -d ' ') commands)"
+  echo "check-cli-commands: $(echo "$invocation_pairs" | grep -c .) documented invocation(s) across README.md and docs/ all resolve"
 fi
 exit $status

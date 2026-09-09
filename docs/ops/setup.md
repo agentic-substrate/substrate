@@ -262,18 +262,18 @@ superset — took blocks from 271 *up* to 459 while conflicts fell from 71 to 22
 more blocks, better corpus.
 
 ```sh
-./bin/substrate import scan -root "$HOME" -hostname wsl -out /abs/path/inventory.json \
-    -exclude '.nvm/**' \
-    -exclude '**/node_modules/**' \
-    -exclude '**/eval-*/**' \
-    -exclude '**/fixtures/**' \
-    -exclude 'worktrees/**' \
-    -exclude '**/worktrees/**' \
-    -exclude '**/.worktrees/**' \
-    -exclude '**/.git-worktrees/**' \
-    -exclude 'repos/*-worktrees/**' \
-    -exclude 'repos/.wt/**' -exclude 'repos/.wt-*/**' \
-    -exclude 'repos/*-wt/**' -exclude 'repos/*-wt-*/**' -exclude 'repos/wt-*/**'
+./bin/substrate import scan --root "$HOME" --hostname wsl --out /abs/path/inventory.json \
+    --exclude '.nvm/**' \
+    --exclude '**/node_modules/**' \
+    --exclude '**/eval-*/**' \
+    --exclude '**/fixtures/**' \
+    --exclude 'worktrees/**' \
+    --exclude '**/worktrees/**' \
+    --exclude '**/.worktrees/**' \
+    --exclude '**/.git-worktrees/**' \
+    --exclude 'repos/*-worktrees/**' \
+    --exclude 'repos/.wt/**' --exclude 'repos/.wt-*/**' \
+    --exclude 'repos/*-wt/**' --exclude 'repos/*-wt-*/**' --exclude 'repos/wt-*/**'
 ```
 
 ### Verify the survivors by hand — the glob list will not catch everything
@@ -296,10 +296,10 @@ jq -r '.files[].path' /abs/path/inventory.json | while read -r f; do
 done
 ```
 
-Do that before `--commit`. Nothing downstream will tell you a worktree copy got imported.
+Do that before `import apply`. Nothing downstream will tell you a worktree copy got imported.
 
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
-requires `-root` (repeatable), `-hostname`, and `-out`; plan requires `-out` and one or
+requires `--root` (repeatable), `--hostname`, and `--out`; plan requires `--out` and one or
 more inventory files. `-root` and `-out` must be absolute paths — there is no `$HOME`
 default, and the command will not guess one. `-out` is rejected if it falls inside any
 `-root` (scan) or equals any inventoried `Path` (plan), and the written file is always
@@ -312,7 +312,7 @@ If that flag is omitted the source is skipped with a logged reason and the rest 
 scan still succeeds. An unreadable directory under a root is recorded in `skipped` and the
 walk continues, so one permission error cannot abort a scan of a real home. Dependency and
 plugin caches are never inventoried — a `CLAUDE.md` in the Go module cache or an `AGENTS.md`
-in a vendored crate belongs to its upstream author, not to this machine. `-exclude <glob>`
+in a vendored crate belongs to its upstream author, not to this machine. `--exclude <glob>`
 (repeatable) drops anything matching a glob against the root-relative path, where `**` spans
 separators; a pattern that is not a valid glob is an error rather than a filter that
 silently matches nothing. Plan splits markdown into blocks, **dedupes by content hash**, then

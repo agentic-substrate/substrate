@@ -28,7 +28,9 @@ make ko-push KO_DOCKER_REPO=<registry>   # builds, PUSHES, and prints repo/name@
                                          # the digest that goes in deployment.yaml
 
 scripts/check-docs.sh origin/main   # the docs-currency gate CI also runs
-scripts/check-cli-commands.sh       # asserts docs/ops/setup.md's command map matches `substrate --help`
+scripts/check-cli-commands.sh       # asserts docs/ops/setup.md's command map matches `substrate --help`,
+                                    # and that every `substrate …` invocation in a fenced block under
+                                    # README.md or docs/ names a command the binary actually exposes
                                     # (CI gate, `docs` job — it builds cmd/substrate itself)
                                     # `make check` also needs bash, zsh and fish on PATH: the
                                     # completion tests syntax-check the generated scripts with the
