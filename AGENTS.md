@@ -118,19 +118,19 @@ makes a novel instance of the same trap recognizable.
     exactly the enumeration `maskRepoDenial` exists to prevent, and it passes any test that
     only exercises the writing leg.
 
-12. **A user token never expires; an agent token dies at 24h.** `identity.Lookup` TTL-caps
+14. **A user token never expires; an agent token dies at 24h.** `identity.Lookup` TTL-caps
     `kind='agent'` only (`lookup.go`), and `api_token.expires_at` is nullable, so
     `admin create-user` writes a NULL expiry deliberately. *Failure mode:* treating
     `~/.config/substrate/config.json` as a short-lived cache — it is a long-lived credential, so
     it is written 0600 via temp-file-plus-rename and **refused on load** when `mode&0077 != 0`.
     Relaxing that check to a warning silently accepts a leaked token forever.
-13. **`internal/cli` has no package-level command, flag or client.** Every command is
+15. **`internal/cli` has no package-level command, flag or client.** Every command is
     `newXCmd(Deps) *cobra.Command` with its flags in a closure struct, and `Deps` carries stdout,
     stderr, stdin, env, getwd, HTTP client, installer, config dir and clock. *Failure mode:* a
     package-level `rootCmd` or flag var makes two roots share state, which `-race` reports as an
     intermittent failure in an unrelated test rather than as the aliasing bug it is.
 
-14. **A bootstrap command cannot use `store.Tx`.** `Tx` and `TxReadOnly` return `ErrNoPrincipal`
+16. **A bootstrap command cannot use `store.Tx`.** `Tx` and `TxReadOnly` return `ErrNoPrincipal`
     when `identity.FromContext(ctx)` is nil, and nothing in `cmd/` ever puts a principal there —
     `substrate admin create-user` is the command that creates the first one, so by definition it
     has none. It uses `store.TxBootstrap` (no principal, no session GUCs, still one atomic

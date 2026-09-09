@@ -82,7 +82,7 @@ it 0600, and revoke it with "substrate token revoke" when the machine retires.`,
 			// One transaction: CreateUser writes five tables, and a partial
 			// failure must leave zero rows rather than an org with no members.
 			// TxBootstrap, not Tx: Tx requires a principal on the context, and
-			// this is the command that creates the first one (Gotcha 12).
+			// this is the command that creates the first one (Gotcha 16).
 			err = st.TxBootstrap(ctx, func(tx pgx.Tx) error {
 				var terr error
 				res, terr = identity.CreateUser(ctx, tx, identity.CreateUserInput{

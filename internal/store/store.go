@@ -112,7 +112,7 @@ func (s *Store) TxReadOnly(ctx context.Context, fn func(pgx.Tx) error) error {
 // settings. It exists for exactly one caller shape: a bootstrap command that
 // must create the first principal, which by definition cannot present one.
 // Tx and TxReadOnly return ErrNoPrincipal in that situation, so `substrate
-// admin create-user` would die before writing a row (AGENTS.md Gotcha 12).
+// admin create-user` would die before writing a row (AGENTS.md Gotcha 16).
 //
 // This is not a hole in RLS. The pool still operates as substrate_app, which
 // holds only SELECT/INSERT/UPDATE, and 00004_rls.sql enables row security on
