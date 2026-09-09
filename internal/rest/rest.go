@@ -138,7 +138,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request) {
 	repos := splitCSV(r.URL.Query().Get("repos"))
 	cfg, _, err := h.effectiveConfig(r.Context(), st, repos)
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
 		return
 	}
 	targets := make([]renderTarget, 0, 5)
@@ -312,7 +312,7 @@ func (h *Handler) skillsManifest(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
 		return
 	}
 	if out == nil {
@@ -452,7 +452,7 @@ func (h *Handler) memoryCache(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writePolicy(w, err)
+		writePolicy(w, maskRepoDenial(err, len(repos) > 0))
 		return
 	}
 	if out == nil {

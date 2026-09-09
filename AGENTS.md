@@ -110,13 +110,16 @@ makes a novel instance of the same trap recognizable.
     `govulncheck`'s scope: a scanner hit there is a dependency bump, not a code bug, and must not
     be "fixed" with a build tag — tagging it would force the tag onto every importing `_test.go`
     and break bare `go test ./...`.
-13. **An RLS refusal is not a gate for a request that never writes.** A read-only or dry-run
-    mode of a repo-keyed endpoint must check `scope_writable` on the resolved chain itself.
-    *Failure mode:* `scope` carries no RLS and resolves any repo key for anyone, so the only
-    denial for a foreign repo is `42501` at the INSERT. A preview skips the INSERT, answers 200,
-    and the status code alone tells an attacker which repo keys this control plane binds --
-    exactly the enumeration `maskRepoDenial` exists to prevent, and it passes any test that
-    only exercises the writing leg.
+13. **An RLS refusal is not a gate for a request that never writes.** Every repo-keyed
+    endpoint checks the resolved chain itself: `resolveRepoPaths` gates on `scope_readable`,
+    and `h.repoScope` adds `scope_writable` on top for the writing verbs. Never reuse
+    `scope_writable` as the read gate by name -- a read-only grant role would then be refused
+    on the read path with no test naming why. *Failure mode:* `scope` carries no RLS and
+    resolves any repo key for anyone, so the only denial for a foreign repo is `42501` at the
+    INSERT. A read or preview skips the INSERT, answers 200, and the status code alone tells an
+    attacker which repo keys this control plane binds -- exactly the enumeration
+    `maskRepoDenial` exists to prevent, and it passes any test that only exercises the writing
+    leg, and any test that asserts "both are 403" without a positive control.
 
 14. **A user token never expires; an agent token dies at 24h.** `identity.Lookup` TTL-caps
     `kind='agent'` only (`lookup.go`), and `api_token.expires_at` is nullable, so

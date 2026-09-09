@@ -15,6 +15,16 @@ import (
 	"github.com/agentic-substrate/substrate/internal/store"
 )
 
+// resolveRepoPaths maps repo keys to the chains the server bound them to.
+//
+// The scope_readable check is the gate and it lives here, next to the lookup,
+// because the `scope` table carries no RLS and policy.Check only asserts that a
+// repo-leaf principal has *some* team. Every read path that resolves a key
+// without writing -- render, the skills manifest, the memory cache -- would
+// otherwise answer 200 for a foreign repo and 403 for a nonexistent one, and
+// the status code alone enumerates the repo keys this control plane binds
+// (#109). Denying at resolve time returns the same policyDenied a missing key
+// returns, so maskRepoDenial collapses the two into one 403.
 func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.Path, error) {
 	if len(repos) == 0 {
 		return nil, nil
@@ -23,12 +33,17 @@ func resolveRepoPaths(ctx context.Context, tx pgx.Tx, repos []string) ([]scope.P
 	out := make([]scope.Path, 0, len(repos))
 	for _, key := range repos {
 		var id uuid.UUID
-		err := tx.QueryRow(ctx, `SELECT id FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&id)
+		var readable bool
+		err := tx.QueryRow(ctx, `SELECT id, scope_readable(id, NULLIF(current_setting('substrate.actor_id', true), '')::uuid)
+                        FROM scope WHERE kind = 'repo' AND key = $1 LIMIT 1`, key).Scan(&id, &readable)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, fmt.Errorf("%w: repo not found", policyDenied(key))
 			}
 			return nil, fmt.Errorf("lookup repo %s: %w", key, err)
+		}
+		if !readable {
+			return nil, policyDenied(key)
 		}
 		path, err := pathFromLeaf(ctx, q, pgtype.UUID{Bytes: id, Valid: true})
 		if err != nil {
