@@ -11,10 +11,20 @@
 -- 200 with the byte-identical body that request would produce with no ?repos=
 -- at all. A repo bound to another team and a repo bound nowhere therefore give
 -- the same answer, which is what kills the oracle -- not that both are denied.
--- Refusing instead would also kill it, but would take content authored with
--- visibility='global' (an explicit decision that a row is readable by everyone)
--- away from readers who were legitimately receiving it. The write paths still
--- refuse: h.repoScope keeps its scope_writable check and its masked 403.
+--
+-- That fallback only preserves content the global chain itself reaches. On
+-- /v1/memory/cache, whose no-?repos= path applies no scope filter and relies
+-- on RLS alone, that is every visibility='global' row regardless of where it
+-- was authored. On /v1/render and /v1/skills/manifest, whose no-?repos= path
+-- still resolves a scoped (global-only) chain, a visibility='global' row
+-- authored below global -- reachable only through the named repo's chain --
+-- is withheld from a caller who cannot read that chain, exactly as a 403
+-- would have withheld it; the fallback changes the status code there, not the
+-- content. Serving that below-global content to such a caller would require
+-- querying the chain to find it, which reopens the oracle -- so the remaining
+-- withholding on those two endpoints is inherent to the design, not a
+-- shortfall of it. The write paths still refuse: h.repoScope keeps its
+-- scope_writable check and its masked 403.
 --
 -- scope_writable is the wrong predicate to reuse by name on a read path -- a
 -- principal that may read but not write must not be dropped to the global

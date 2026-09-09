@@ -77,7 +77,17 @@ func TestReadEndpointsRepoDenialIsIndistinguishable(t *testing.T) {
 // readable by everyone. bob is not a member of team alpha and still receives it
 // through the foreign repo key. Refusing the key with a 403 -- the shape this
 // PR carried before review -- turns this red.
-func TestReadEndpointsFallbackPreservesGlobalVisibility(t *testing.T) {
+//
+// This property holds only for /v1/memory/cache: its no-?repos= path applies
+// no scope filter and relies on RLS alone, so the fallback's global chain
+// still reaches every visibility='global' row. /v1/render and
+// /v1/skills/manifest are deliberately excluded -- both resolve a scoped
+// chain even with no ?repos=, so a visibility='global' row authored below
+// global (like python.version at team alpha's project, see
+// TestRenderTargetsMatchDriftHash) is withheld from a caller who cannot read
+// that chain exactly as the old 403 withheld it. The fallback there changes
+// the status code, not the content.
+func TestMemoryCacheFallbackPreservesGlobalVisibility(t *testing.T) {
 	dsn, conn := startMigrated(t)
 	w := seedWorld(t, conn)
 	h, _, _ := openREST(t, dsn, fakeGit{})
@@ -110,6 +120,15 @@ func TestReadEndpointsStillServeAMember(t *testing.T) {
 	srv := serveREST(t, h, w)
 
 	// One marker per endpoint, each only reachable through the repo chain.
+	//
+	// The cache leg cannot use a plain presence marker: RLS alone (independent
+	// of any scope filter) already grants alice team-secret-fact through her
+	// team-alpha membership, so that assertion cannot tell a real chain filter
+	// from no filter at all. off-chain-fact is seeded at projectOff -- a
+	// sibling project under the same team, so alice's RLS would show it too --
+	// but it is not on the repo's chain (repo -> projectA -> teamA -> org ->
+	// global). Its absence therefore proves the chain filter itself is
+	// narrowing the result, not merely that RLS ran.
 	want := []string{"python.version", w.skillName, "team-secret-fact"}
 	for i, path := range repoReadPaths(w.repoKey) {
 		res := doJSON(t, srv, http.MethodGet, path, "alice", nil)
@@ -119,6 +138,9 @@ func TestReadEndpointsStillServeAMember(t *testing.T) {
 		}
 		if !strings.Contains(body, want[i]) {
 			t.Fatalf("%s as a member is missing %q:\n%s", path, want[i], body)
+		}
+		if i == 2 && strings.Contains(body, "off-chain-fact") {
+			t.Fatalf("%s as a member returned off-chain-fact, a row not on the repo's chain -- the chain filter did not apply:\n%s", path, body)
 		}
 	}
 }
@@ -133,6 +155,9 @@ func TestReadEndpointsResolveRepoForAdmin(t *testing.T) {
 	h, _, _ := openREST(t, dsn, fakeGit{})
 	srv := serveREST(t, h, w)
 
+	// See TestReadEndpointsStillServeAMember for why the cache leg also checks
+	// off-chain-fact's absence: is_admin bypasses RLS, so a presence marker
+	// alone proves nothing about the chain filter for admin either.
 	want := []string{"python.version", w.skillName, "team-secret-fact"}
 	for i, path := range repoReadPaths(w.repoKey) {
 		res := doJSON(t, srv, http.MethodGet, path, "admin", nil)
@@ -143,6 +168,9 @@ func TestReadEndpointsResolveRepoForAdmin(t *testing.T) {
 		if !strings.Contains(body, want[i]) {
 			t.Fatalf("%s as human_admin is missing %q; the is_admin bypass did not resolve the key:\n%s",
 				path, want[i], body)
+		}
+		if i == 2 && strings.Contains(body, "off-chain-fact") {
+			t.Fatalf("%s as human_admin returned off-chain-fact, a row not on the repo's chain -- the chain filter did not apply:\n%s", path, body)
 		}
 	}
 }
