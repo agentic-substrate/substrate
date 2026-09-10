@@ -133,12 +133,13 @@ func newImportPlanCmd(d Deps) *cobra.Command {
 
 func newImportApplyCmd(d Deps) *cobra.Command {
 	var f struct {
-		machine string
-		trusted string
-		server  string
-		token   string
-		scope   string
-		yes     bool
+		machine   string
+		trusted   string
+		server    string
+		token     string
+		scope     string
+		inventory []string
+		yes       bool
 	}
 	cmd := &cobra.Command{
 		Use:   "apply plan.json",
@@ -164,6 +165,39 @@ func newImportApplyCmd(d Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The plan is an operator artifact; the inventory is the scan's own
+			// product. Apply admits a block only because the inventory contains
+			// it (#95), so --inventory is required: without it there is nothing
+			// to check the plan against and the apply is refused server-side
+			// anyway.
+			if len(f.inventory) == 0 {
+				return &UserError{
+					What: op + ": no --inventory",
+					Why:  "apply admits only blocks the scan recorded, and the plan alone cannot prove what the scan saw",
+					Next: "re-run with --inventory for every inventory.json that import plan consumed",
+				}
+			}
+			invs := make([]importer.Inventory, 0, len(f.inventory))
+			for _, p := range f.inventory {
+				inv, err := readInventory(op, p)
+				if err != nil {
+					return err
+				}
+				invs = append(invs, inv)
+			}
+			witness, err := importer.WitnessInventories(invs)
+			if err != nil {
+				return fmt.Errorf("%s: %w", op, err)
+			}
+			// Refuse locally too, so the operator sees the offending block
+			// named beside the files it came from rather than a bare 403.
+			if err := importer.CheckPlanWitness(plan, witness); err != nil {
+				return &UserError{
+					What: op + ": the plan does not match the inventory",
+					Why:  err.Error(),
+					Next: "regenerate the plan from these inventories with substrate import plan, and treat an unexplained block as a planted one",
+				}
+			}
 			// Echo before the prompt, not after: the scope and the source
 			// that won are the only thing the operator can review, and
 			// GET /v1/import never discloses the chain afterwards.
@@ -178,9 +212,10 @@ func newImportApplyCmd(d Deps) *cobra.Command {
 				"trusted_machine": f.trusted,
 				// The wire protocol keeps both fields; only the CLI surface
 				// lost them. The server re-derives from this pair.
-				"dry_run": false,
-				"commit":  true,
-				"plan":    plan,
+				"dry_run":           false,
+				"commit":            true,
+				"plan":              plan,
+				"inventory_witness": witness,
 			}
 			if target.Scope != "" {
 				payload["scope"] = target.Scope
@@ -211,6 +246,7 @@ func newImportApplyCmd(d Deps) *cobra.Command {
 	cmd.Flags().StringVar(&f.server, "server", "", "control plane base URL (default $SUBSTRATE_URL)")
 	cmd.Flags().StringVar(&f.token, "token", "", "bearer token (default $SUBSTRATE_TOKEN)")
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope path for imported rows; without it, the context file then the git remote decide")
+	cmd.Flags().StringArrayVar(&f.inventory, "inventory", nil, "inventory.json the plan was built from (repeatable; required; apply admits only blocks it contains)")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "skip the confirmation prompt; required when stdin is not a terminal")
 	return cmd
 }

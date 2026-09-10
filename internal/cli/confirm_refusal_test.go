@@ -27,7 +27,8 @@ func TestImportApplyOffTTYWithoutYesWritesNothing(t *testing.T) {
 	if err := os.WriteFile(plan, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	_, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan,
+	inv := emptyInventory(t)
+	_, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan, "--inventory", inv,
 		"--machine", "m", "--trusted", "m", "--scope", "org:acme",
 		"--server", srv.URL, "--token", "t")
 	if err == nil {
@@ -168,7 +169,8 @@ func TestPartialScopeChainIsRefusedLocally(t *testing.T) {
 	if err := os.WriteFile(plan, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	_, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan,
+	inv := emptyInventory(t)
+	_, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan, "--inventory", inv,
 		"--machine", "m", "--trusted", "m", "--team", "eng",
 		"--server", srv.URL, "--token", "t", "--yes")
 	if err == nil {

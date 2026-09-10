@@ -135,13 +135,39 @@ func twoMachinePlan() Plan {
 }
 
 func applyReq(w importWorld, machine string, commit bool) ApplyRequest {
-	return ApplyRequest{
+	return witnessed(ApplyRequest{
 		Plan:           twoMachinePlan(),
 		Machine:        machine,
 		TrustedMachine: "mac",
 		Scope:          w.pathStr,
 		Commit:         commit,
+	})
+}
+
+// witnessed stands in for the scan for the tests that are not about #95's
+// binding: it attests to exactly the plan it is handed, which is what a real
+// inventory would have done for a plan nobody edited. The binding itself is
+// exercised against a real Inventory in plan_binding_test.go and must never be
+// tested through this helper -- attesting to the plan is precisely the hole #95
+// closed.
+func witnessed(req ApplyRequest) ApplyRequest {
+	if req.Plan.InventoryDigest == "" {
+		req.Plan.InventoryDigest = "test-inventory"
 	}
+	w := InventoryWitness{Digest: req.Plan.InventoryDigest}
+	for _, b := range req.Plan.Blocks {
+		w.Blocks = append(w.Blocks, BlockRef{Rel: b.Rel, Heading: b.Heading, Ordinal: b.Ordinal, Hash: b.Hash})
+	}
+	for _, c := range req.Plan.Conflicts {
+		for _, side := range c.Pair {
+			w.Blocks = append(w.Blocks, BlockRef{Hash: side.Hash})
+		}
+	}
+	for _, m := range req.Plan.Memories {
+		w.Memories = append(w.Memories, MemoryRef{Hostname: m.Hostname, Hash: m.Hash})
+	}
+	req.Witness = w
+	return req
 }
 
 func openStore(t *testing.T, dsn string) *store.Store {
@@ -626,7 +652,7 @@ func TestApplyFlippedTrustedDoesNotActivateLaterHost(t *testing.T) {
 	}
 	req := applyReq(w, "wsl", true)
 	req.TrustedMachine = "wsl"
-	_, err := Apply(ctx, st, req)
+	_, err := Apply(ctx, st, witnessed(req))
 	got := countByBodyStatus(t, conn, "instruction", w.project)
 	if got["Use modules."] == "active" {
 		t.Fatalf("flipped -trusted made the later host's block active; row map %#v", got)
@@ -694,10 +720,10 @@ func TestApplyDiscoversSlotConflictAcrossSeparatePlans(t *testing.T) {
 	}}}
 	macReq := ApplyRequest{Plan: macPlan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
 	wslReq := ApplyRequest{Plan: wslPlan, Machine: "wsl", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
-	if _, err := Apply(ctx, st, macReq); err != nil {
+	if _, err := Apply(ctx, st, witnessed(macReq)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Apply(ctx, st, wslReq); err != nil {
+	if _, err := Apply(ctx, st, witnessed(wslReq)); err != nil {
 		t.Fatal(err)
 	}
 	got := countByBodyStatus(t, conn, "instruction", w.project)
@@ -743,7 +769,7 @@ func TestApplyRefusesDistinctHashesSharingSlotWithoutConflict(t *testing.T) {
 			Sources: []Source{{Hostname: "mac"}},
 		},
 	}}
-	_, err := Apply(ctx, st, ApplyRequest{Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true})
+	_, err := Apply(ctx, st, witnessed(ApplyRequest{Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}))
 	if err == nil {
 		t.Fatal("accepted distinct hashes at one slot with no conflict pair")
 	}
@@ -766,7 +792,7 @@ func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.ClientID = id1.String()
-	if _, err := Apply(ctx, st, first); err != nil {
+	if _, err := Apply(ctx, st, witnessed(first)); err != nil {
 		t.Fatal(err)
 	}
 	before := tableCounts(t, conn)
@@ -776,7 +802,7 @@ func TestApplyFreshClientIDDoesNotDuplicatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.ClientID = id2.String()
-	res, err := Apply(ctx, st, second)
+	res, err := Apply(ctx, st, witnessed(second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,12 +840,12 @@ func TestApplyReviewItemUsesLeafScopeTeam(t *testing.T) {
 
 	req := applyReq(w, "mac", true)
 	req.Scope = scopePath
-	if _, err := Apply(ctx, st, req); err != nil {
+	if _, err := Apply(ctx, st, witnessed(req)); err != nil {
 		t.Fatal(err)
 	}
 	req = applyReq(w, "wsl", true)
 	req.Scope = scopePath
-	if _, err := Apply(ctx, st, req); err != nil {
+	if _, err := Apply(ctx, st, witnessed(req)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -847,9 +873,9 @@ func TestApplySkipsBlocksAlreadyInConflict(t *testing.T) {
 		Kind: "preference", Rel: ".claude/CLAUDE.md",
 		Sources: []Source{{Hostname: "mac"}},
 	})
-	if _, err := Apply(ctx, st, ApplyRequest{
+	if _, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -875,9 +901,9 @@ func TestApplyRejectsConflictSideWithEmptyHostname(t *testing.T) {
 
 	plan := twoMachinePlan()
 	plan.Conflicts[0].Pair[0].Hostnames = nil
-	_, err := Apply(ctx, st, ApplyRequest{
+	_, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err == nil {
 		t.Fatal("accepted a conflict side with empty hostnames")
 	}

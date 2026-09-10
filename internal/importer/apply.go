@@ -48,6 +48,14 @@ func Apply(ctx context.Context, st *store.Store, req ApplyRequest) (*ApplyResult
 	if err := policy.Check("import.apply", sc, *p); err != nil {
 		return nil, err
 	}
+	// Before the transaction, so it holds identically on the trusted and the
+	// untrusted machine paths and cannot be reached past by any write (#95).
+	// validatePlanSlots below asks whether the plan is internally consistent;
+	// this asks the prior question of whether the scanner ever saw these
+	// blocks on disk.
+	if err := CheckPlanWitness(req.Plan, req.Witness); err != nil {
+		return nil, err
+	}
 
 	run := func(tx pgx.Tx) (*ApplyResult, error) {
 		res, err := planWrites(ctx, tx, p, req, sc)

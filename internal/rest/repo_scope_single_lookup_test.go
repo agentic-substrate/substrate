@@ -61,7 +61,7 @@ func TestRepoScopeGatesTheRowItResolved(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		commit := true
-		res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(w.repoKey, "", &commit))
+		res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, w.repoKey, "", &commit))
 		done <- result{res.StatusCode, readBody(t, res)}
 	}()
 

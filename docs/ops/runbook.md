@@ -255,6 +255,13 @@ the adapter to treat as drift and overwrite. Passing `--root "$HOME"` does
 **not** add `/work`; include both if harness files live under home and
 checkouts live under the mount root.
 
+`import apply` additionally requires `--inventory /abs/path/inventory.json` (repeatable) for
+every inventory its plan was built from. The plan is an editable operator artifact; the
+inventory is the scan's own product, and apply admits only blocks the inventory contains
+(#95), naming any it does not before sending anything. If an apply is refused for a block you
+do not recognise, treat it as planted: regenerate the plan from those inventories with
+`substrate import plan` rather than removing the check.
+
 `install`, `uninstall`, `import apply` and `review approve|reject` echo what
 they are about to do and then confirm. On a terminal that is an interactive
 prompt; off a terminal — a script, a CronJob, an `ssh host '…'` — they refuse

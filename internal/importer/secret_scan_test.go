@@ -38,9 +38,9 @@ func TestApplyRejectsSecretShapesInInstructionBody(t *testing.T) {
 					Sources: []Source{{Hostname: "mac"}},
 				}},
 			}
-			res, err := Apply(ctx, st, ApplyRequest{
+			res, err := Apply(ctx, st, witnessed(ApplyRequest{
 				Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,9 +75,9 @@ func TestApplyRejectsSecretInPreferenceBody(t *testing.T) {
 			Sources: []Source{{Hostname: "mac"}},
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +109,9 @@ func TestApplyRejectsSecretShapesInMemoryBody(t *testing.T) {
 			Kind: "observation", Hostname: "mac",
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,9 +145,9 @@ func TestApplyRejectsSecretInMemoryHostname(t *testing.T) {
 			Kind: "fact", Hostname: host,
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: host, TrustedMachine: host, Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,9 +195,9 @@ func TestApplyImportsCleanRowsWhenOneHasSecret(t *testing.T) {
 			},
 		},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,9 +233,9 @@ func TestApplyScansPostTransformBytes(t *testing.T) {
 			Sources: []Source{{Hostname: "mac"}},
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,9 +267,9 @@ func TestApplyScansDefaultedMemoryTitle(t *testing.T) {
 			Kind: "observation", Hostname: "mac",
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,9 +312,9 @@ func TestApplyRejectsSecretInHeadingSlot(t *testing.T) {
 			Sources: []Source{{Hostname: "mac"}},
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,9 +362,9 @@ func TestApplyRejectsSecretHostnameOnConflictPath(t *testing.T) {
 			Sources: []Source{{Hostname: host}},
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: host, TrustedMachine: host, Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,9 +417,9 @@ func TestApplySanitizesNULInHeadingSlot(t *testing.T) {
 			Sources: []Source{{Hostname: "mac"}},
 		}},
 	}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NUL in heading aborted import: %v", err)
 	}

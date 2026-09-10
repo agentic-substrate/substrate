@@ -15,31 +15,17 @@ import (
 // different depth: plannedTarget files a preference at the team scope and an
 // instruction at the leaf, so a preview that reports the depth has two
 // distinct answers to report.
-func previewBody(repo, scopePath string) map[string]any {
+func previewBody(t *testing.T, repo, scopePath string) map[string]any {
+	t.Helper()
+	plan, witness := importScan(t)
 	return map[string]any{
-		"machine":         "wsl",
-		"trusted_machine": "wsl",
-		"client_id":       uuid.NewString(),
-		"repo":            repo,
-		"scope":           scopePath,
-		"plan": importer.Plan{Blocks: []importer.Block{
-			{
-				Hash:    importBlockHash,
-				Heading: "Style",
-				Body:    "Always run gofmt.",
-				Kind:    "instruction",
-				Rel:     ".claude/CLAUDE.md",
-				Sources: []importer.Source{{Hostname: "wsl", Path: "/w/.claude/CLAUDE.md", Rel: ".claude/CLAUDE.md"}},
-			},
-			{
-				Hash:    "2a1b0c9d8e7f60514233445566778899aabbccddeeff00112233445566aabbcc",
-				Heading: "Editor",
-				Body:    "I prefer tabs over spaces.",
-				Kind:    "preference",
-				Rel:     ".claude/CLAUDE.md",
-				Sources: []importer.Source{{Hostname: "wsl", Path: "/w/.claude/CLAUDE.md", Rel: ".claude/CLAUDE.md"}},
-			},
-		}},
+		"machine":           "wsl",
+		"trusted_machine":   "wsl",
+		"client_id":         uuid.NewString(),
+		"repo":              repo,
+		"scope":             scopePath,
+		"plan":              plan,
+		"inventory_witness": witness,
 	}
 }
 
@@ -71,7 +57,7 @@ func TestImportRepoPreviewReportsLeafKind(t *testing.T) {
 	h, _, _ := openREST(t, dsn, fakeGit{})
 	srv := serveREST(t, h, w)
 
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", previewBody(w.repoKey, ""))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", previewBody(t, w.repoKey, ""))
 	body := readBody(t, res)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("repo-keyed dry run = %d, want 200: %s", res.StatusCode, body)
@@ -109,7 +95,7 @@ func TestImportScopePathPreviewReportsLeafKind(t *testing.T) {
 	h, _, _ := openREST(t, dsn, fakeGit{})
 	srv := serveREST(t, h, w)
 
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", previewBody("", w.pathStr))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", previewBody(t, "", w.pathStr))
 	body := readBody(t, res)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("scope-path dry run = %d, want 200: %s", res.StatusCode, body)
@@ -135,7 +121,7 @@ func TestImportPreviewAddsNoRepoOracle(t *testing.T) {
 	srv := serveREST(t, h, w)
 
 	post := func(repo string) (int, string) {
-		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", previewBody(repo, ""))
+		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", previewBody(t, repo, ""))
 		return res.StatusCode, readBody(t, res)
 	}
 	foreignCode, foreignBody := post(w.repoKey)

@@ -22,7 +22,13 @@ type importApplyRequest struct {
 	DryRun         bool          `json:"dry_run"`
 	Commit         *bool         `json:"commit"`
 	Plan           importer.Plan `json:"plan"`
-	ClientID       string        `json:"client_id"`
+	// Witness is what `import scan` recorded, derived by the caller from
+	// inventory.json and never from the plan (#95). The server has no view of
+	// the operator's disk, so this is the only thing that can tell a block the
+	// scanner saw from one an editor of plan.json added; an apply without it
+	// is refused rather than trusted.
+	Witness  importer.InventoryWitness `json:"inventory_witness"`
+	ClientID string                    `json:"client_id"`
 }
 
 func (h *Handler) importApply(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +70,7 @@ func (h *Handler) importApply(w http.ResponseWriter, r *http.Request) {
 	commit := in.Commit != nil && *in.Commit && !in.DryRun
 	res, err := importer.Apply(r.Context(), st, importer.ApplyRequest{
 		Plan:           in.Plan,
+		Witness:        in.Witness,
 		Machine:        in.Machine,
 		TrustedMachine: in.TrustedMachine,
 		Scope:          scopePath,
@@ -73,6 +80,14 @@ func (h *Handler) importApply(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrNoPrincipal) {
 			writeErr(w, http.StatusUnauthorized, err)
+			return
+		}
+		// A plan the inventory does not account for (#95) is a caller mistake,
+		// not a server fault: answering 500 would report it as one and spend
+		// the 5xx error budget on it, the same reasoning as the missing-scope
+		// 400 above.
+		if errors.Is(err, importer.ErrPlanNotWitnessed) {
+			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
 		writePolicy(w, maskRepoDenial(err, in.Repo != ""))

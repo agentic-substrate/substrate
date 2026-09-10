@@ -9,7 +9,52 @@ import (
 // BuildPlan classifies inventory blocks after deduping them by content hash.
 // Passing a non-nil Classifier is how tests prove that order: classify is
 // invoked once per unique hash, not once per source block.
+//
+// The plan records the digest of the inventories it was built from (#95).
+// That digest is what `apply` re-derives from the inventory on disk before it
+// admits a single block, so "the operator supplied it" means "the scanner saw
+// it". The digest is not a signature and is not secret: it detects a plan
+// paired with the wrong inventory, and it is the inventory-side recomputation,
+// never the recorded value, that decides what is admissible.
 func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
+	slotOrder, bySlot, err := deriveBlocks(invs, classify)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := &Plan{InventoryDigest: DigestInventories(invs)}
+	for _, k := range slotOrder {
+		blocks := bySlot[k]
+		if len(blocks) == 1 || !slotHasDistinctOrigins(blocks) {
+			for _, b := range blocks {
+				plan.Blocks = append(plan.Blocks, *b)
+			}
+			continue
+		}
+		c := Conflict{Slot: k.rel + "#" + k.heading}
+		for _, b := range blocks {
+			c.Pair = append(c.Pair, ConflictSide{
+				Hash:      b.Hash,
+				Hostnames: hostnames(b.Sources),
+				Body:      b.Body,
+				Ordinal:   b.Ordinal,
+			})
+		}
+		plan.Conflicts = append(plan.Conflicts, c)
+	}
+	sort.Slice(plan.Blocks, func(i, j int) bool { return plan.Blocks[i].Hash < plan.Blocks[j].Hash })
+	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Slot < plan.Conflicts[j].Slot })
+	plan.Memories = extractMemories(invs)
+	return plan, nil
+}
+
+type slotKey struct{ rel, heading string }
+
+// deriveBlocks is the half of planning that turns inventories into ordinal-keyed
+// blocks, before the conflict split. It is shared with WitnessInventories so the
+// admissible set apply checks against is derived by the same code that builds a
+// plan — a second, parallel derivation would drift and start refusing real files.
+func deriveBlocks(invs []Inventory, classify Classifier) ([]slotKey, map[slotKey][]*Block, error) {
 	if classify == nil {
 		classify = Classify
 	}
@@ -68,7 +113,6 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 		byHash[h].Note = c.Note
 	}
 
-	type slotKey struct{ rel, heading string }
 	bySlot := make(map[slotKey][]*Block)
 	slotOrder := make([]slotKey, 0)
 	seenSlot := make(map[slotKey]struct{})
@@ -87,31 +131,7 @@ func BuildPlan(invs []Inventory, classify Classifier) (*Plan, error) {
 			b.Ordinal = i
 		}
 	}
-
-	plan := &Plan{}
-	for _, k := range slotOrder {
-		blocks := bySlot[k]
-		if len(blocks) == 1 || !slotHasDistinctOrigins(blocks) {
-			for _, b := range blocks {
-				plan.Blocks = append(plan.Blocks, *b)
-			}
-			continue
-		}
-		c := Conflict{Slot: k.rel + "#" + k.heading}
-		for _, b := range blocks {
-			c.Pair = append(c.Pair, ConflictSide{
-				Hash:      b.Hash,
-				Hostnames: hostnames(b.Sources),
-				Body:      b.Body,
-				Ordinal:   b.Ordinal,
-			})
-		}
-		plan.Conflicts = append(plan.Conflicts, c)
-	}
-	sort.Slice(plan.Blocks, func(i, j int) bool { return plan.Blocks[i].Hash < plan.Blocks[j].Hash })
-	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Slot < plan.Conflicts[j].Slot })
-	plan.Memories = extractMemories(invs)
-	return plan, nil
+	return slotOrder, bySlot, nil
 }
 
 type memorixFile struct {

@@ -42,10 +42,15 @@ type Skipped struct {
 }
 
 // Plan is the plan.json product: unique blocks plus conflict pairs.
+//
+// InventoryDigest names the inventory the plan was built from (#95). Apply
+// refuses a plan whose digest does not match the inventory witness it is given,
+// and refuses any block that witness does not contain.
 type Plan struct {
-	Blocks    []Block      `json:"blocks"`
-	Conflicts []Conflict   `json:"conflicts"`
-	Memories  []MemoryItem `json:"memories,omitempty"`
+	InventoryDigest string       `json:"inventory_digest,omitempty"`
+	Blocks          []Block      `json:"blocks"`
+	Conflicts       []Conflict   `json:"conflicts"`
+	Memories        []MemoryItem `json:"memories,omitempty"`
 }
 
 // MemoryItem is one memorix-exported memory. SourceStatus is what the export
@@ -60,8 +65,13 @@ type MemoryItem struct {
 }
 
 // ApplyRequest is one POST /v1/import (or CLI apply) invocation.
+//
+// Witness is what the scan saw on disk, derived from inventory.json by the
+// caller and never from the plan. It is the only reason a block in Plan is
+// admissible (#95); an empty witness refuses the whole apply.
 type ApplyRequest struct {
 	Plan           Plan
+	Witness        InventoryWitness
 	Machine        string
 	TrustedMachine string
 	Scope          string

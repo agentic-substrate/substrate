@@ -32,7 +32,7 @@ func TestApplyProposedPathRefusesSlugCollidingSlots(t *testing.T) {
 		Scope:          w.pathStr,
 		Commit:         true,
 	}
-	if _, err := Apply(ctx, st, seed); err != nil {
+	if _, err := Apply(ctx, st, witnessed(seed)); err != nil {
 		t.Fatalf("seed apply: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestApplyProposedPathRefusesSlugCollidingSlots(t *testing.T) {
 		Scope:          w.pathStr,
 		Commit:         true,
 	}
-	_, err := Apply(ctx, st, req)
+	_, err := Apply(ctx, st, witnessed(req))
 	if err == nil {
 		t.Fatal("proposed-path apply admitted two slug-colliding slots with distinct bodies")
 	}
