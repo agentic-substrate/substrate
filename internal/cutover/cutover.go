@@ -1,5 +1,5 @@
 // Package cutover displaces harness files and stores during import cutover
-// and puts them back with `adapter uninstall --restore` (EDD §9, §15).
+// and puts them back with `substrate adapter uninstall` (EDD §9, §15).
 // Nothing in this flow deletes: displaced paths are renamed to
 // *.pre-substrate, and restore renames them back (Gotcha 6).
 package cutover

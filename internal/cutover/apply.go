@@ -185,7 +185,7 @@ func applyCutover(rep *Report, req Request) error {
 			return errWithPlan(rep, fmt.Errorf("cutover: missing content for %s", w.Path))
 		}
 		if err := write(w.Path, []byte(body), w.Mode); err != nil {
-			return errWithPlan(rep, fmt.Errorf("cutover: write %s: %w (run adapter uninstall --restore to put files back)", w.Path, err))
+			return errWithPlan(rep, fmt.Errorf("cutover: write %s: %w (run substrate adapter uninstall to put files back, and --force when the tree has drifted)", w.Path, err))
 		}
 	}
 	hashes := map[string]string{}

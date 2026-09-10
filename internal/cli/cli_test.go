@@ -3,15 +3,21 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/agentic-substrate/substrate/internal/cutover"
+	"github.com/spf13/pflag"
 )
 
 // run drives the real command tree the way main does, with a piped (non-TTY)
@@ -253,6 +259,73 @@ func TestAdapterUninstallRestoresAndKeepsForce(t *testing.T) {
 	if _, _, err := run(t, Deps{Installer: &cutover.FakeInstaller{}},
 		"adapter", "uninstall", "--root", root, "--restore", "--yes"); err == nil {
 		t.Fatal("--restore must be gone")
+	}
+}
+
+// TestCutoverStringsDoNotRecommendUndefinedUninstallFlags asserts that any
+// user-facing string in internal/cutover that recommends running `adapter uninstall`
+// only names flags that `adapter uninstall` actually defines.
+//
+// Baseline: issue #122. Epic #97 removed --restore from `adapter uninstall`,
+// but internal/cutover/apply.go:188 still recommended `adapter uninstall --restore`.
+// The test pins that no future flag rename or deletion leaves stale advice in
+// cutover error paths.
+//
+// Mutation that turns this red: re-introducing --restore, or adding any undefined
+// flag to cutover strings, or dropping --force while cutover still recommends it.
+func TestCutoverStringsDoNotRecommendUndefinedUninstallFlags(t *testing.T) {
+	cmd := newAdapterUninstallCmd(Deps{})
+	validFlags := make(map[string]bool)
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		validFlags["--"+f.Name] = true
+		if f.Shorthand != "" {
+			validFlags["-"+f.Shorthand] = true
+		}
+	})
+
+	fset := token.NewFileSet()
+	cutoverDir := filepath.Join("..", "cutover")
+	entries, err := os.ReadDir(cutoverDir)
+	if err != nil {
+		t.Fatalf("read cutover dir: %v", err)
+	}
+
+	flagRe := regexp.MustCompile(`--[a-z][a-z-]*`)
+	scannedStrings := 0
+
+	for _, e := range entries {
+		if e.IsDir() || strings.HasSuffix(e.Name(), "_test.go") || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		path := filepath.Join(cutoverDir, e.Name())
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			val, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				return true
+			}
+			if strings.Contains(val, "adapter uninstall") {
+				scannedStrings++
+				for _, flag := range flagRe.FindAllString(val, -1) {
+					if !validFlags[flag] {
+						t.Errorf("%s:%d recommends flag %q for adapter uninstall, but adapter uninstall does not define it",
+							path, fset.Position(lit.Pos()).Line, flag)
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	if scannedStrings == 0 {
+		t.Fatal("found no string literals in internal/cutover referencing 'adapter uninstall'; check test path or string format")
 	}
 }
 
