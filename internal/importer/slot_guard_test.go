@@ -73,3 +73,24 @@ func TestValidatePlanSlotsDoesNotConflateDifferentSlotsAtSameOrdinal(t *testing.
 		t.Fatalf("distinct files at the same ordinal wrongly refused: %v", err)
 	}
 }
+
+// #96: the guard compared the raw Rel/Heading strings while rowKey slugs both
+// before joining them. "CLAUDE.md" and "CLAUDE!md" are two distinct slots to
+// this guard but slug() maps both to "claude-md", so rowKey computes one key
+// for both — the guard has to agree with rowKey about what "the same slot"
+// means, or it admits exactly the collision it exists to catch. Mutating
+// either block's Rel back to an identical string (removing the "!") turns
+// this red for the wrong reason (same-hash dedup) rather than the right one.
+func TestValidatePlanSlotsRefusesSlugCollidingSlots(t *testing.T) {
+	plan := Plan{Blocks: []Block{
+		{Hash: sha256Hex([]byte("legit")), Rel: "CLAUDE.md", Heading: "Alpha", Ordinal: 0, Body: "legit"},
+		{Hash: sha256Hex([]byte("forged")), Rel: "CLAUDE!md", Heading: "Alpha", Ordinal: 0, Body: "forged"},
+	}}
+	err := validatePlanSlots(plan)
+	if err == nil {
+		t.Fatal("two blocks whose Rel differs only in a character slug() strips were accepted as distinct slots")
+	}
+	if !strings.Contains(err.Error(), "CLAUDE.md#Alpha") || !strings.Contains(err.Error(), "CLAUDE!md#Alpha") {
+		t.Fatalf("error does not name both raw colliding slots: %v", err)
+	}
+}
