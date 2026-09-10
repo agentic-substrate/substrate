@@ -180,10 +180,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 			continue
 		}
 		body := sanitizeStored(b.Body)
-		kind := b.Kind
-		if kind == "" {
-			kind = Classify(b).Kind
-		}
+		kind := blockKind(b)
 		if match, ok := identicalActive(body, activeIns, activePref); ok {
 			// Hash-only source: rel/heading have not been secret-scanned yet.
 			identicalSkip(res, skipSourceHashOnly(kind, b.Hash), match)
@@ -253,7 +250,7 @@ func planWrites(ctx context.Context, tx pgx.Tx, _ *identity.Principal, req Apply
 				continue
 			}
 			body := sanitizeStored(side.Body)
-			kind := Classify(Block{Heading: heading, Body: body, Rel: rel}).Kind
+			kind := blockKind(Block{Heading: heading, Body: body, Rel: rel})
 			if match, ok := identicalActive(body, activeIns, activePref); ok {
 				identicalSkip(res, skipSourceHashOnly(kind, side.Hash), match)
 				continue
@@ -666,23 +663,32 @@ func validatePlanSlots(plan Plan) error {
 	// on a single machine. Keying on the slot refused every such plan — which
 	// is to say almost every real file (#93). What the guard is actually for is
 	// two different bodies claiming one identity, and identity is the ordinal.
-	type slotOrd struct {
-		slot    string
-		ordinal int
+	//
+	// Identity here MUST be the same rowKey that will actually be written
+	// (#96): rowKey slugs kind/rel/heading before joining them, so two blocks
+	// whose raw Rel or Heading differ only in characters slug() strips (case,
+	// punctuation) land on one row downstream even though their raw strings
+	// look distinct. Comparing raw strings here let that pair sail through the
+	// guard and then collide on the actual key. Computing rowKey itself, not a
+	// second hand-rolled normalization, keeps identity defined in one place.
+	type slotSeen struct {
+		hash string
+		raw  string
 	}
-	slotHash := map[slotOrd]string{}
+	seen := map[string]slotSeen{}
 	for _, b := range plan.Blocks {
-		k := slotOrd{slot: b.Rel + "#" + b.Heading, ordinal: b.Ordinal}
-		prev, ok := slotHash[k]
+		key := rowKey(blockKind(b), b.Rel, b.Heading, b.Ordinal)
+		raw := b.Rel + "#" + b.Heading
+		prev, ok := seen[key]
 		if !ok {
-			slotHash[k] = b.Hash
+			seen[key] = slotSeen{hash: b.Hash, raw: raw}
 			continue
 		}
-		if prev == b.Hash {
+		if prev.hash == b.Hash {
 			continue
 		}
-		if !inConflict[prev] || !inConflict[b.Hash] {
-			return fmt.Errorf("import apply: slot %q ordinal %d has distinct hashes not listed in conflicts", k.slot, k.ordinal)
+		if !inConflict[prev.hash] || !inConflict[b.Hash] {
+			return fmt.Errorf("import apply: slots %q and %q ordinal %d compute the same key %q with distinct hashes not listed in conflicts", prev.raw, raw, b.Ordinal, key)
 		}
 	}
 	return nil
@@ -876,6 +882,18 @@ func aliasClientID(req ApplyRequest) (uuid.UUID, bool) {
 
 func machineClientID(host, scope string) uuid.UUID {
 	return uuid.NewSHA1(importNS, []byte("substrate-import-machine/"+host+"/"+scope))
+}
+
+// blockKind is the one place that derives a row's kind when the block did not
+// arrive with one already classified. Both the write path (planWrites) and the
+// slot-identity guard (validatePlanSlots) call this — and only this — before
+// handing kind to rowKey, so the two routes cannot drift on what "kind" means
+// for a given block (#96).
+func blockKind(b Block) string {
+	if b.Kind != "" {
+		return b.Kind
+	}
+	return Classify(b).Kind
 }
 
 // rowKey keys an imported row by where it came from, not by what it says: a
