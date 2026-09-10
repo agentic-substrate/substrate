@@ -13,7 +13,7 @@ func TestCutoverPartialWriteLeavesRestoreableTree(t *testing.T) {
 	// Ignoring Request.WriteFile, or Uninstall returning a "unit not loaded"
 	// error after restore has already renamed files back, is the change that
 	// makes this red. A disk-full / Ctrl-C / chmod at write N of M must leave
-	// *.pre-substrate backups and --restore must put the tree back even though
+	// *.pre-substrate backups and restore must put the tree back even though
 	// the unit was never installed.
 	root := t.TempDir()
 	originals := map[string]string{
@@ -65,6 +65,12 @@ func TestCutoverPartialWriteLeavesRestoreableTree(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "injected: disk full") {
 		t.Fatalf("cutover error %v, want injected writer failure", err)
+	}
+	if strings.Contains(err.Error(), "--restore") {
+		t.Fatalf("cutover error %v still recommends obsolete flag --restore", err)
+	}
+	if !strings.Contains(err.Error(), "substrate adapter uninstall") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("cutover error %v must recommend 'substrate adapter uninstall' and '--force'", err)
 	}
 
 	var leftover int

@@ -232,7 +232,7 @@ func TestRestoreForceDiscardsLiveEdits(t *testing.T) {
 func TestRestoreDoesNotRemoveEditedGeneratedFile(t *testing.T) {
 	// os.Remove of a Created path without checking render.DriftHash is the
 	// change that makes this red. Operator edits to a file cutover created
-	// must survive --restore.
+	// must survive restore.
 	root := t.TempDir()
 	created := filepath.Join(root, ".cursor", "rules", "substrate.mdc")
 	rendered := renderedClaude("2026-09-07T00:00:00Z")
