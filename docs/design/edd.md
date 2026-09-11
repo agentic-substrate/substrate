@@ -595,12 +595,14 @@ Runs on a schedule and on push webhooks from the repos' host. For each memory wi
 
 ```
 cp import scan  [--roots /work,~]        → inventory.json (files, hashes, sizes, detected type, implied scope)
-cp import plan  inventory.json           → plan.json  (blocks classified, hash-dedup, conflicts)
-cp import apply plan.json --machine wsl  → POST /v1/import; creates instructions/preferences (status=proposed unless identical to existing active), skill import branches, memory rows (episodic/unverified), review items (import_conflict)
+cp import plan  inventory.json           → plan.json  (blocks classified, hash-dedup, conflicts, digest of the inventories it was built from)
+cp import apply plan.json --machine wsl --inventory inventory.json  → POST /v1/import; admits only blocks the named inventory contains; creates instructions/preferences (status=proposed unless identical to existing active), skill import branches, memory rows (episodic/unverified), review items (import_conflict)
 cp adapter install                       → replaces local files with rendered ones, installs adapter, renames old stores to *.pre-acp
 ```
 
 Block classification: markdown headings and bullets are split into blocks; a block is a `preference` if it matches an allowlist of style keys (indentation, verbosity, language for comments) or comes from a user-global file and contains first-person phrasing; otherwise `instruction`. Keys are derived by a small heuristic + LLM-assisted labeling (sidecar, Phase 2) with human confirmation in the review UI. Memorix stores are read via `memorix transfer export --format json`.
+
+Plan-to-scan binding: `plan.json` is an operator artifact anyone who can write the file can edit, so `apply` admits a block only because the inventory contains it, matched on `(rel, heading, ordinal, hash)` with the body re-hashed rather than trusted. `apply` therefore requires the inventory the plan was built from, and refuses — before any write, on both the trusted and untrusted machine paths — any block, conflict side or memory the scan did not observe. This binds the plan to the scan product, not to the disk at apply time: whoever can rewrite `inventory.json`, edit the harness files before the scan, or call `POST /v1/import` directly still controls what "the scanner saw".
 
 Ordering: most-trusted machine first (its identical blocks become `active`); subsequent machines only add proposals and conflicts.
 

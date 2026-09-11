@@ -26,9 +26,9 @@ func TestApplySkipIsVisibleWhenBodyCoincidesWithAnActiveRow(t *testing.T) {
 		Kind: "instruction", Rel: "AGENTS.md", Ordinal: 0,
 		Sources: []Source{{Hostname: "mac"}},
 	}}}
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}

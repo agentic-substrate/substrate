@@ -18,21 +18,43 @@ import (
 // non-pointer bool fails to compile here.
 var _ *bool = importApplyRequest{}.Commit
 
-const importBlockHash = "1f0c9a8b7d6e5f40312233445566778899aabbccddeeff00112233445566aabb"
+// importCLAUDE is the file the fake machine "wsl" was scanned from. POST
+// /v1/import admits only blocks the inventory contains (#95), so these bodies
+// have to come from a real inventory rather than from hand-written hashes.
+const importCLAUDE = "## Style\n\n- Always run gofmt.\n\n## Editor\n\n- I prefer tabs over spaces.\n"
 
-func importBody(repo, scopePath string, commit *bool) map[string]any {
+// importScan runs the plan half of the real pipeline over one machine's file
+// and returns both artifacts the wire body now carries.
+func importScan(t *testing.T) (importer.Plan, importer.InventoryWitness) {
+	t.Helper()
+	invs := []importer.Inventory{{
+		Hostname: "wsl",
+		Roots:    []string{"/w"},
+		Files: []importer.File{{
+			Rel: ".claude/CLAUDE.md", Path: "/w/.claude/CLAUDE.md",
+			DetectedType: "claude", ImpliedScope: "user", Content: importCLAUDE,
+		}},
+	}}
+	plan, err := importer.BuildPlan(invs, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	witness, err := importer.WitnessInventories(invs)
+	if err != nil {
+		t.Fatalf("WitnessInventories: %v", err)
+	}
+	return *plan, witness
+}
+
+func importBody(t *testing.T, repo, scopePath string, commit *bool) map[string]any {
+	t.Helper()
+	plan, witness := importScan(t)
 	body := map[string]any{
-		"machine":         "wsl",
-		"trusted_machine": "wsl",
-		"client_id":       uuid.NewString(),
-		"plan": importer.Plan{Blocks: []importer.Block{{
-			Hash:    importBlockHash,
-			Heading: "Style",
-			Body:    "Always run gofmt.",
-			Kind:    "instruction",
-			Rel:     ".claude/CLAUDE.md",
-			Sources: []importer.Source{{Hostname: "wsl", Path: "/w/.claude/CLAUDE.md", Rel: ".claude/CLAUDE.md"}},
-		}}},
+		"machine":           "wsl",
+		"trusted_machine":   "wsl",
+		"client_id":         uuid.NewString(),
+		"plan":              plan,
+		"inventory_witness": witness,
 	}
 	if repo != "" {
 		body["repo"] = repo
@@ -58,7 +80,7 @@ func TestImportBindsScopeToRepo(t *testing.T) {
 	srv := serveREST(t, h, w)
 
 	commit := true
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(w.repoKey, "", &commit))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, w.repoKey, "", &commit))
 	body := readBody(t, res)
 	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
 		t.Fatalf("repo-keyed import = %d, want 200 or 201: %s", res.StatusCode, body)
@@ -91,7 +113,7 @@ func TestImportRejectsScopeAndRepoTogether(t *testing.T) {
 	srv := serveREST(t, h, w)
 
 	commit := true
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(w.repoKey, w.pathStr, &commit))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, w.repoKey, w.pathStr, &commit))
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("scope+repo = %d, want 400", res.StatusCode)
@@ -109,7 +131,7 @@ func TestImportRepoDenialIsIndistinguishable(t *testing.T) {
 
 	commit := true
 	post := func(repo string, commit *bool) (int, string) {
-		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", importBody(repo, "", commit))
+		res := doJSON(t, srv, http.MethodPost, "/v1/import", "bob", importBody(t, repo, "", commit))
 		return res.StatusCode, readBody(t, res)
 	}
 	// Both legs matter. The commit leg is denied by RLS at the write; the
@@ -169,7 +191,7 @@ func TestImportNilCommitIsDryRun(t *testing.T) {
 		return n
 	}
 
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(w.repoKey, "", nil))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, w.repoKey, "", nil))
 	body := readBody(t, res)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("import without commit = %d, want 200: %s", res.StatusCode, body)
@@ -182,7 +204,7 @@ func TestImportNilCommitIsDryRun(t *testing.T) {
 	}
 
 	commit := true
-	res = doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(w.repoKey, "", &commit))
+	res = doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, w.repoKey, "", &commit))
 	body = readBody(t, res)
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("import with commit = %d, want 201: %s", res.StatusCode, body)
@@ -201,7 +223,7 @@ func TestImportWithoutScopeOrRepoIsBadRequest(t *testing.T) {
 	h, _, _ := openREST(t, dsn, fakeGit{})
 	srv := serveREST(t, h, w)
 
-	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody("", "", nil))
+	res := doJSON(t, srv, http.MethodPost, "/v1/import", "alice", importBody(t, "", "", nil))
 	body := readBody(t, res)
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("import with neither scope nor repo = %d, want 400: %s", res.StatusCode, body)

@@ -86,7 +86,7 @@ they are not subcommands of `substrate`.
 | `substrate context use` | Save an org, team, and optional project as the default scope. |
 | `substrate context show` | Print the resolved scope and which source supplied it. |
 | `substrate doctor` | Check configuration, credentials, server reachability, and scope, with a suggested fix for each failure. |
-| `substrate import scan` / `plan` / `apply` | Inventory harness files, merge inventories into a reviewable plan, then send that plan to `POST /v1/import`. `scan` and `plan` write nothing; `apply` commits. |
+| `substrate import scan` / `plan` / `apply` | Inventory harness files, merge inventories into a reviewable plan, then send that plan to `POST /v1/import`. `scan` and `plan` write nothing; `apply` commits, and requires `--inventory` for every inventory the plan was built from. |
 | `substrate review list` / `approve` / `reject` | List queued review items and record one decision. The decision is the verb, so there is no `--decision`; `--reason` is required on `reject`. |
 | `substrate adapter status` / `install` / `uninstall` | Preview, apply, and roll back the per-machine adapter. `status` writes nothing; `install` and `uninstall` commit. |
 | `substrate token mint` / `revoke` | Mint or revoke a principal token straight against Postgres. Requires the DSN. |
@@ -127,6 +127,7 @@ read the [exclusion guidance](#exclude-the-corpus-that-should-never-be-imported)
     --out /abs/path/inventory.json
 ./bin/substrate import plan --out /abs/path/plan.json /abs/path/inventory.json
 ./bin/substrate import apply --machine wsl --trusted wsl \
+    --inventory /abs/path/inventory.json \
     --server "$SUBSTRATE_URL" --token "$TOKEN" \
     --scope 'global:/org:acme/team:core/project:plotlens' \
     /abs/path/plan.json
@@ -297,6 +298,22 @@ done
 ```
 
 Do that before `import apply`. Nothing downstream will tell you a worktree copy got imported.
+
+### The plan is checked against the inventory
+
+`import apply` takes `--inventory` (repeatable) naming every `inventory.json` the plan was
+built from, and admits only blocks that inventory contains. `import plan` records the
+inventory's digest in `plan.json`; apply re-derives the same set from the inventory files and
+refuses, by name, any block, conflict side, or memory the scan did not observe — before it
+sends anything. That is what makes "the operator supplied it" mean "the scanner saw it on
+disk": on the trusted machine an imported instruction becomes **active**, which is to say a
+directive rendered to agents, so a block nobody scanned must never get there.
+
+This binds the plan to the scan, not to the disk at the moment of apply. An attacker who can
+also rewrite `inventory.json`, edit the harness files before the scan runs, or call
+`POST /v1/import` directly with a matching pair is not stopped by it — they control the scan
+product itself. Keep both artifacts under the same trust as the machine they describe, and
+regenerate rather than hand-edit a plan.
 
 `substrate import scan` and `substrate import plan` are read-only (SYNC-5, EDD §9). Scan
 requires `--root` (repeatable), `--hostname`, and `--out`; plan requires `--out` and one or

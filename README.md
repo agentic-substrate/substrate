@@ -122,7 +122,10 @@ The smoke check starts the real server without a database: `/healthz` returns 20
 `/readyz` returns 503. It verifies process startup, not a configured context store.
 
 Follow [Setup and reference](docs/ops/setup.md) for server configuration, tokens, MCP access,
-import reconciliation, adapter installation, and rollback. The [operations runbook](docs/ops/runbook.md)
+import reconciliation, adapter installation, and rollback. Import is a three-step flow —
+`substrate import scan` inventories a machine, `import plan` merges inventories into a
+reviewable `plan.json`, and `import apply --inventory inventory.json` commits only the blocks
+that inventory contains, so an edited plan cannot introduce a rule the scan never saw. The [operations runbook](docs/ops/runbook.md)
 covers deployment, database roles, backups, and failure recovery. Optional Ollama embeddings
 run locally; keyword-only retrieval is supported.
 

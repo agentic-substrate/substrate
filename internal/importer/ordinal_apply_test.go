@@ -33,7 +33,7 @@ func TestApplyNewOrdinalInSlotIsNotAConflict(t *testing.T) {
 
 	for i, body := range []string{"alpha rule.", "beta rule.", "gamma rule."} {
 		req := ApplyRequest{Plan: ordinalPlan("mac", body, i), Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
-		if _, err := Apply(ctx, st, req); err != nil {
+		if _, err := Apply(ctx, st, witnessed(req)); err != nil {
 			t.Fatalf("apply %q: %v", body, err)
 		}
 	}
@@ -65,12 +65,12 @@ func TestApplyEditPairsAgainstItsOwnOrdinal(t *testing.T) {
 
 	for i, body := range []string{"alpha rule.", "beta rule."} {
 		req := ApplyRequest{Plan: ordinalPlan("mac", body, i), Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
-		if _, err := Apply(ctx, st, req); err != nil {
+		if _, err := Apply(ctx, st, witnessed(req)); err != nil {
 			t.Fatalf("apply %q: %v", body, err)
 		}
 	}
 	edit := ApplyRequest{Plan: ordinalPlan("wsl", "beta rule, reworded.", 1), Machine: "wsl", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
-	if _, err := Apply(ctx, st, edit); err != nil {
+	if _, err := Apply(ctx, st, witnessed(edit)); err != nil {
 		t.Fatalf("apply edit: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestApplyStoresOrdinalDerivedKey(t *testing.T) {
 
 	for i, body := range []string{"alpha rule.", "beta rule."} {
 		req := ApplyRequest{Plan: ordinalPlan("mac", body, i), Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true}
-		if _, err := Apply(ctx, st, req); err != nil {
+		if _, err := Apply(ctx, st, witnessed(req)); err != nil {
 			t.Fatalf("apply %q: %v", body, err)
 		}
 	}
@@ -148,9 +148,9 @@ func TestApplyMultiBulletSingleMachineFileLandsEveryBullet(t *testing.T) {
 		t.Fatalf("BuildPlan produced %d blocks, want 3", len(plan.Blocks))
 	}
 
-	res, err := Apply(ctx, st, ApplyRequest{
+	res, err := Apply(ctx, st, witnessed(ApplyRequest{
 		Plan: *plan, Machine: "mac", TrustedMachine: "mac", Scope: w.pathStr, Commit: true,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("apply a single-machine multi-bullet plan: %v", err)
 	}

@@ -133,7 +133,8 @@ func TestImportApplyEchoesScopeAndSourceBeforeWriting(t *testing.T) {
 	if err := os.WriteFile(plan, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	out, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan,
+	inv := emptyInventory(t)
+	out, _, err := run(t, Deps{HTTP: srv.Client()}, "import", "apply", plan, "--inventory", inv,
 		"--machine", "m", "--trusted", "m", "--scope", "org:acme",
 		"--server", srv.URL, "--token", "t", "--yes")
 	if err != nil {
@@ -162,8 +163,9 @@ func TestImportApplyFallsBackToGitRemote(t *testing.T) {
 	if err := os.WriteFile(plan, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
+	inv := emptyInventory(t)
 	out, _, err := run(t, Deps{HTTP: srv.Client(), Getwd: func() (string, error) { return repo, nil }},
-		"import", "apply", plan, "--machine", "m", "--trusted", "m",
+		"import", "apply", plan, "--inventory", inv, "--machine", "m", "--trusted", "m",
 		"--server", srv.URL, "--token", "t", "--yes")
 	if err != nil {
 		t.Fatalf("import apply: %v", err)
@@ -355,4 +357,17 @@ func gitCheckout(t *testing.T, remote string) string {
 		}
 	}
 	return dir
+}
+
+// emptyInventory writes the scan product for a machine with no harness files.
+// `import apply` requires the inventory its plan was built from (#95); these
+// tests exercise scope resolution over an empty plan, which has nothing for the
+// inventory to disagree with.
+func emptyInventory(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "inventory.json")
+	if err := os.WriteFile(path, []byte(`{"hostname":"m","files":[]}`), 0o600); err != nil {
+		t.Fatalf("write inventory: %v", err)
+	}
+	return path
 }

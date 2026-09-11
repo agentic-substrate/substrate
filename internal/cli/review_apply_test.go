@@ -204,6 +204,7 @@ func importBothMachines(t *testing.T, srv *httptest.Server, token, pathStr strin
 	}
 	for _, machine := range []string{"mac", "wsl"} {
 		if _, _, err := run(t, d, "import", "apply", planPath,
+			"--inventory", invMac, "--inventory", invWsl,
 			"--machine", machine, "--trusted", "mac",
 			"--server", srv.URL, "--token", token, "--scope", pathStr, "--yes"); err != nil {
 			t.Fatalf("apply %s as %s: %v", machine, token, err)
@@ -593,6 +594,7 @@ func TestImportApplyRepoKeyReachesTheMergedHandler(t *testing.T) {
 		t.Fatalf("plan: %v", err)
 	}
 	out, _, err := run(t, d, "import", "apply", planPath,
+		"--inventory", inv,
 		"--machine", "mac", "--trusted", "mac",
 		"--server", srv.URL, "--token", "alice", "--yes")
 	if err != nil {
