@@ -8,14 +8,27 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'substrate_app') THEN
     CREATE ROLE substrate_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-  ELSE
+  -- Pre-created roles (CNPG managed.roles) are the normal case, and the
+  -- migrating user is then a plain database owner without CREATEROLE. ALTER
+  -- ROLE and GRANT role both need CREATEROLE or ADMIN, so only issue them when
+  -- there is something to change; a role that has BYPASSRLS, or a missing
+  -- membership, still fails loudly here.
+  ELSIF (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'substrate_app') THEN
     ALTER ROLE substrate_app NOBYPASSRLS;
+  END IF;
+  IF NOT pg_has_role(CURRENT_USER, 'substrate_migrate', 'MEMBER') THEN
+    GRANT substrate_migrate TO CURRENT_USER;
+  END IF;
+  IF NOT pg_has_role(CURRENT_USER, 'substrate_app', 'MEMBER') THEN
+    GRANT substrate_app TO CURRENT_USER;
   END IF;
 END $$;
 -- +goose StatementEnd
 
-GRANT substrate_migrate TO CURRENT_USER;
-GRANT substrate_app TO CURRENT_USER;
+-- ALTER ... OWNER TO needs the new owner to hold CREATE on the schema. Since
+-- PG15 public grants no CREATE by default, and only a superuser skips that
+-- check — which is why a superuser-run migration never needed this line.
+GRANT USAGE, CREATE ON SCHEMA public TO substrate_migrate;
 
 -- +goose StatementBegin
 DO $$
@@ -75,5 +88,6 @@ END $$;
 
 DROP OWNED BY substrate_app;
 REASSIGN OWNED BY substrate_migrate TO CURRENT_USER;
+REVOKE USAGE, CREATE ON SCHEMA public FROM substrate_migrate;
 DROP ROLE IF EXISTS substrate_app;
 DROP ROLE IF EXISTS substrate_migrate;

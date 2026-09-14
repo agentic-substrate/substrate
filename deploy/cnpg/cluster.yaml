@@ -37,6 +37,17 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS ltree;
   managed:
     roles:
+      # The initdb owner is who SUBSTRATE_DSN connects as, and it is not a
+      # superuser. Migration 00003 hands table ownership to substrate_migrate
+      # and the server SETs ROLE substrate_app, so `app` must be a member of
+      # both — and granting that needs a superuser, which only CNPG is. No
+      # passwordSecret: CNPG keeps the password it generated into substrate-pg-app.
+      - name: app
+        ensure: present
+        login: true
+        inRoles:
+          - substrate_migrate
+          - substrate_app
       - name: substrate_migrate
         ensure: present
         login: false
