@@ -319,14 +319,28 @@ func TestNetworkPolicyDefaultDeniesIngress(t *testing.T) {
 // A `maxUnavailable: 0` PDB is how an accidental `kubectl drain` is stopped
 // from evicting the only replica of a single-instance database.
 //
-// Red when: deploy/server/pdb.yaml is deleted or dropped from kustomization.
+// Postgres gets its drain block from CNPG's own `<cluster>-primary` PDB
+// (enablePDB, default true). CNPG also owns the bare `<cluster>` name for its
+// replica PDB and deletes it when instances < 3, so a PDB of ours by that name
+// is removed on every reconcile and a GitOps selfHeal re-creates it forever.
+//
+// Red when: deploy/server/pdb.yaml is deleted or dropped from kustomization,
+// a PDB selects the CNPG cluster, or cluster.yaml disables enablePDB.
 func TestPodDisruptionBudgetsBlockAccidentalDrain(t *testing.T) {
+	for _, c := range docsOfKind(t, "deploy/cnpg/cluster.yaml", "Cluster") {
+		if v, ok := asMap(t, c["spec"], "spec")["enablePDB"]; ok && v == false {
+			t.Error("cluster.yaml sets enablePDB: false; CNPG's primary PDB is the only drain block for Postgres")
+		}
+	}
 	pdbs := docsOfKind(t, "deploy/server/pdb.yaml", "PodDisruptionBudget")
-	if len(pdbs) < 2 {
-		t.Fatalf("want a PDB for both substrate-server and substrate-pg, got %d", len(pdbs))
+	if len(pdbs) != 1 {
+		t.Fatalf("want exactly one PDB (substrate-server), got %d", len(pdbs))
 	}
 	for _, p := range pdbs {
 		name := str(t, nested(t, p, "metadata", "name"), "pdb.metadata.name")
+		if name != "substrate-server" {
+			t.Errorf("PDB %q: only substrate-server's PDB belongs here; CNPG owns and deletes PDBs for its cluster", name)
+		}
 		spec := asMap(t, p["spec"], "spec")
 		v, ok := spec["maxUnavailable"]
 		if !ok {
