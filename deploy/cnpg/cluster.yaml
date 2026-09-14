@@ -5,7 +5,10 @@ metadata:
   namespace: substrate
 spec:
   instances: 1
-  # Built from deploy/cnpg/Dockerfile. Substitute the image the operator loaded.
+  # Built from deploy/cnpg/Dockerfile. Substitute `repo/substrate-pg:16-pgvector@sha256:…`
+  # — tag AND digest. CNPG's webhook rejects a bare digest ("can't detect
+  # upgrades") and reads the PG major from the tag's leading number, so a tag
+  # like a git SHA (`4f51f44`) would parse as major 4.
   imageName: "<substrate-pg-image>"
   # enableSuperuserAccess is deliberately absent. CNPG defaults it to false and
   # that default is the right one: nothing at runtime connects as `postgres`.
