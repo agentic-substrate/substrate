@@ -1,8 +1,14 @@
 # Not high availability — the opposite. One replica is the design (EDD §1.1),
 # and `maxUnavailable: 0` is precisely how you stop an accidental
-# `kubectl drain` from evicting the only substrate-server pod, or CNPG's only
-# Postgres instance, without a human noticing. A voluntary disruption now
-# blocks and says so instead of silently taking the service down.
+# `kubectl drain` from evicting the only substrate-server pod without a human
+# noticing. A voluntary disruption now blocks and says so instead of silently
+# taking the service down.
+#
+# Postgres has no PDB here on purpose. CNPG creates `substrate-pg-primary`
+# (enablePDB, default on), which blocks the same drain, and it owns the bare
+# `substrate-pg` name for its replica PDB — deleting it on every reconcile of a
+# cluster with fewer than 3 instances. A PDB of ours by that name is deleted
+# and, under GitOps selfHeal, re-created forever.
 #
 # Consequence, stated on purpose: a node drain will hang until the operator
 # deletes these PDBs (or the pods). That is the intended prompt.
@@ -16,14 +22,3 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: substrate-server
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: substrate-pg
-  namespace: substrate
-spec:
-  maxUnavailable: 0
-  selector:
-    matchLabels:
-      cnpg.io/cluster: substrate-pg
