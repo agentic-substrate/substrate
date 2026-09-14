@@ -7,7 +7,14 @@
 # change between one `docker build` and the next without anything saying so,
 # and this is the one image in the repo we actually build. Substitute with
 # ghcr.io/cloudnative-pg/postgresql@sha256:… — resolve the digest with
-# `docker buildx imagetools inspect ghcr.io/cloudnative-pg/postgresql:16-standard-trixie`.
+# `docker buildx imagetools inspect ghcr.io/cloudnative-pg/postgresql:16-system-trixie`.
+#
+# `system`, not `standard`: only the system flavor ships barman-cloud, and the
+# in-tree spec.backup.barmanObjectStore in cluster.yaml execs it. On standard,
+# WAL archiving fails with `barman-cloud-check-wal-archive: executable file
+# not found` while the Cluster still reports healthy. Both the system flavor
+# and in-tree barman are deprecated; they go together when backups move to
+# the barman-cloud plugin (required before CNPG 1.30).
 FROM <cnpg-base-image-digest>
 USER root
 RUN apt-get update \
