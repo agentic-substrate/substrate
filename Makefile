@@ -43,7 +43,7 @@ sqlc:
 ## anything that is going into deploy/server/deployment.yaml.
 KO_DOCKER_REPO ?= ko.local
 ko-build:
-	@command -v ko >/dev/null || { echo "ko-build: ko not installed. Fix: go install github.com/ko-build/ko@latest"; exit 1; }
+	@command -v ko >/dev/null || { echo "ko-build: ko not installed. Fix: go install github.com/google/ko@latest"; exit 1; }
 	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build --local ./cmd/substrate-server
 
 ## ko-push: build and PUSH substrate-server, printing repo/name@sha256:… on
@@ -51,7 +51,7 @@ ko-build:
 ## KO_DOCKER_REPO; it refuses to run against the ko.local default so this
 ## target can never push somewhere by accident.
 ko-push:
-	@command -v ko >/dev/null || { echo "ko-push: ko not installed. Fix: go install github.com/ko-build/ko@latest"; exit 1; }
+	@command -v ko >/dev/null || { echo "ko-push: ko not installed. Fix: go install github.com/google/ko@latest"; exit 1; }
 	@if [ "$(KO_DOCKER_REPO)" = "ko.local" ]; then \
 		echo "ko-push: set KO_DOCKER_REPO to a real registry, e.g. make ko-push KO_DOCKER_REPO=ghcr.io/you"; exit 1; \
 	fi
