@@ -50,7 +50,7 @@ func seedTwoTeams(t *testing.T, conn *pgx.Conn) rlsWorld {
 		memGranted:     newID(t, conn),
 		reviewA:        newID(t, conn),
 	}
-	global := newID(t, conn)
+	global := globalScopeID(t, conn)
 	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust) VALUES
 		($1, 'user', 'alice', 'human'),
 		($2, 'user', 'bob', 'human'),
@@ -72,7 +72,6 @@ func seedTwoTeams(t *testing.T, conn *pgx.Conn) rlsWorld {
 		($1, 'user', NULL, $2, 0, 'placeholder'),
 		($3, 'user', NULL, $4, 0, 'placeholder')`,
 		w.aliceUser, w.alice, w.bobUser, w.bob)
-	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'global', NULL, '', 0, 'placeholder')`, global)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'org', $2, 'acme-rls', 0, 'placeholder')`, w.orgScope, global)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES
 		($1, 'team', $2, 'alpha', 0, 'placeholder', $3),

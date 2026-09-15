@@ -111,6 +111,17 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// globalScopeID returns the global scope migration 00011 seeds. There is exactly
+// one (scope_single_global), so fixtures reuse it rather than inserting their own.
+func globalScopeID(t *testing.T, conn *pgx.Conn) string {
+	t.Helper()
+	var id string
+	if err := conn.QueryRow(t.Context(), `SELECT id::text FROM scope WHERE kind = 'global'`).Scan(&id); err != nil {
+		t.Fatalf("global scope: %v", err)
+	}
+	return id
+}
+
 func newID(t *testing.T, conn *pgx.Conn) string {
 	t.Helper()
 	var id string
@@ -139,7 +150,7 @@ func seedChain(t *testing.T, conn *pgx.Conn) chain {
 		teamID:    newID(t, conn),
 	}
 	mustExec(t, conn, `INSERT INTO principal (id, kind, display_name, trust) VALUES ($1, 'user', 'test', 'human')`, c.actor)
-	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'global', NULL, '', 0, 'placeholder')`, c.global)
+	c.global = globalScopeID(t, conn)
 	mustExec(t, conn, `INSERT INTO org (id, name) VALUES ($1, 'acme')`, c.orgID)
 	mustExec(t, conn, `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'org', $2, 'acme', 0, 'placeholder')`, c.org, c.global)
 	mustExec(t, conn, `INSERT INTO team (id, org_id, name) VALUES ($1, $2, 'core')`, c.teamID, c.orgID)
