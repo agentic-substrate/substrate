@@ -78,6 +78,15 @@ func insertChain(t *testing.T, conn *pgx.Conn, wire string) bool {
 		}
 		name = strings.ReplaceAll(name, "%2F", "/")
 		var id string
+		if kind == "global" {
+			// Migration 00011 seeds the only global scope (scope_single_global);
+			// the chain under test hangs off it rather than inserting a second.
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM scope WHERE kind = 'global'`).Scan(&id); err != nil {
+				return false
+			}
+			parent = id
+			continue
+		}
 		if err := tx.QueryRow(ctx, "SELECT gen_random_uuid()::text").Scan(&id); err != nil {
 			t.Fatalf("gen_random_uuid: %v", err)
 		}

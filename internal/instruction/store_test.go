@@ -50,7 +50,9 @@ func seedResolveWorld(t *testing.T, conn *pgx.Conn) fixture {
 	exec(`INSERT INTO org (id, name) VALUES ($1, 'acme')`, f.orgID)
 	exec(`INSERT INTO team (id, org_id, name) VALUES ($1, $2, 'core')`, f.teamID, f.orgID)
 	exec(`INSERT INTO membership (principal_id, team_id, role) VALUES ($1, $2, 'member')`, f.actor, f.teamID)
-	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'global', NULL, '', 0, 'placeholder')`, f.global)
+	if err := conn.QueryRow(t.Context(), `SELECT id::text FROM scope WHERE kind = 'global'`).Scan(&f.global); err != nil {
+		t.Fatalf("global scope: %v", err)
+	}
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'org', $2, 'acme', 0, 'placeholder')`, f.org, f.global)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES ($1, 'team', $2, 'core', 0, 'placeholder', $3)`, f.team, f.org, f.teamID)
 	exec(`INSERT INTO scope (id, kind, parent_id, key, depth, path, team_id) VALUES ($1, 'project', $2, 'plotlens', 0, 'placeholder', $3)`, f.project, f.team, f.teamID)

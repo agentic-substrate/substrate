@@ -121,12 +121,9 @@ var (
 func EnsureGlobal(t *testing.T, conn *pgx.Conn) string {
 	t.Helper()
 	globalOnce.Do(func() {
+		// Migration 00011 seeds the single global scope; reuse it.
 		var id string
-		if err := conn.QueryRow(context.Background(), "SELECT gen_random_uuid()::text").Scan(&id); err != nil {
-			globalErr = err
-			return
-		}
-		if _, err := conn.Exec(context.Background(), `INSERT INTO scope (id, kind, parent_id, key, depth, path) VALUES ($1, 'global', NULL, '', 0, 'placeholder')`, id); err != nil {
+		if err := conn.QueryRow(context.Background(), `SELECT id::text FROM scope WHERE kind = 'global'`).Scan(&id); err != nil {
 			globalErr = err
 			return
 		}
