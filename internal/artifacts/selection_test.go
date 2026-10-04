@@ -379,3 +379,34 @@ func TestInvalidUTF8ApprovalOperationIsDeniedBeforeReceipt(t *testing.T) {
 		t.Fatal("invalid UTF-8 approval operation acknowledged")
 	}
 }
+
+func TestApprovalValidatesAllTextBeforeRetryFingerprint(t *testing.T) {
+	f := setup(t)
+	r := gitCandidate(t, f, "first", "", "", "first")
+	owner, _ := registered(t, f, r, "source", "build", false)
+	approved := Approval{OperationID: "approved", ArtifactID: r.ArtifactID, RevisionID: r.RevisionID}
+	if _, err := owner.Approve(approved); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"artifact", "revision", "expected", "overrides", "override-revision"} {
+		invalid := approved
+		value := string([]byte{'x', 0xff})
+		switch field {
+		case "artifact":
+			invalid.ArtifactID = value
+		case "revision":
+			invalid.RevisionID = value
+		case "expected":
+			invalid.ExpectedRevision = value
+		case "overrides":
+			invalid.Overrides = value
+			invalid.OverrideRevision = r.RevisionID
+		case "override-revision":
+			invalid.Overrides = r.ArtifactID
+			invalid.OverrideRevision = value
+		}
+		if _, err := owner.Approve(invalid); !errors.Is(err, ErrConflict) {
+			t.Fatalf("%s validated after receipt fingerprint: %v", field, err)
+		}
+	}
+}
