@@ -74,3 +74,5 @@ and TypeScript use source extraction without a manual build. The documentation t
 checks use the standard runner's grep command and do not require a ripgrep installation.
 GitHub alerts, reporting, tag protection, and the required check are separate
 repository settings that must be read back and canary-tested after publication.
+
+This temporary verification change exercises the repository action pinning policy.
