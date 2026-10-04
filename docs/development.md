@@ -21,8 +21,8 @@ dependency is missing. No test opt-out or coverage threshold is configured.
 Use tests where they protect behavior that can fail. The routing suite checks the boundary
 between client navigation and API errors. The browser flow checks connection failure,
 keyboard retry with retained focus, error-state accessibility, and narrow-screen reflow. The docs guard suite
-checks enforcement and its written-reason escape hatch. None of these establishes artifact
-functionality or cross-harness compatibility.
+checks enforcement and its written-reason escape hatch. The artifact tests cover local capture/inspection and revision persistence; they do not
+establish cross-harness compatibility, device-failure durability, or complete recovery.
 
 ## Local development and previews
 
@@ -94,3 +94,31 @@ The repository's `skills/substrate-security/SKILL.md` is the reusable security p
 workflow referenced by `AGENTS.md` and, through it, `CLAUDE.md`. Repo-specific memory entries
 and personal skill installations should link to these maintained contracts; they are reminders,
 not independent policy or control evidence.
+
+## Local SQLite development
+
+The artifact store uses `github.com/ncruces/go-sqlite3` v0.35.6 with the driver's supported
+FTS5 connection initializer; an ordinary driver import alone does not enable FTS5. Its pinned
+SQLite build reports version 3.53.4 in the capability check. There is no cgo, external SQLite
+installation, or FTS5 build tag. The module lock records the accompanying generated Wasm-to-Go
+SQLite module and other runtime dependencies. Revisit this choice with the
+[artifact persistence contract](architecture/artifacts.md#selected-local-persistence-contract)
+when changing versions or indexing behavior. No benchmark or resource target is claimed.
+
+`internal/artifacts` splits schema/private-file access, revisions/receipts, scoped inspection,
+and immutable Git reads. Storage sessions authenticate on every operation; ordinary serialized
+context is not a storage credential. A single connection per store bounds connection count,
+and SQLite's immediate transactions and five-second busy timeout coordinate separate command
+processes. Pending work is committed with content; there is no consumer or pause/resume control
+yet. Existing receipts survive retries, while retirement remains authoritative for later reads.
+Schema version 1 is created transactionally and unknown versions fail before contribution.
+Do not edit the database directly or treat copying a live file as an application backup.
+
+After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
+failed commit, receipt rollback, stale edits, retirement, authorization, private placement,
+Git replacement/source, and CLI checks. The full `make check` still supplies the race detector,
+web accessibility flows, static checks, and built-document validation. Tests use synthetic data.
+Their temporary roots must be outside every Git checkout; an ancestor `.git` marker causes
+intentional fail-closed placement denial, even if its Git metadata is broken. Select a clean
+`TMPDIR` in that case. The issue #6 local verification used `TMPDIR=/var/tmp` because this host
+has an unrelated `/tmp/.git` marker. That environment choice is not a source-code exception.

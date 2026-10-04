@@ -1,6 +1,6 @@
 # Installation and node lifecycle
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each platform, install, or release decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each platform, install, or release decision
 
 **Status:** CLI, MCP, and a Vite + React admin UI embedded in Go are agreed for the first
 usable release. Initial platform coverage is Linux and WSL 2; macOS and native Windows follow
@@ -94,3 +94,13 @@ architectures, service packaging, credentials, release tooling, and update compa
 contracts remain open implementation details.
 
 See [delivery](delivery.md), [deployment](deployment.md), and [onboarding](onboarding.md).
+
+## Initial local command access
+
+The current CLI opens the shared private authority directory and artifact database directly.
+SQLite immediate transactions coordinate concurrent command processes and preserve atomic
+receipts; the browser server still exposes no artifact API. This is the selected initial
+local persistence path, preceding the proposed node-attachment/service model above. It does
+not establish singleton node startup, service integration, complete backups, or migration
+recovery. Keep data on the local Linux/WSL filesystem and re-evaluate this access path when
+introducing indexing workers, MCP, background services, or recovery.

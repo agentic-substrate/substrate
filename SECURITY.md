@@ -13,8 +13,12 @@ there is no guaranteed response deadline at this stage.
 
 The current server is intended for a trusted Linux or WSL user and accepts loopback listeners.
 It serves an anonymous status page and a credentialed read-only session context endpoint.
-Trusted local CLI setup provides owner, space, checkout, and scoped session records; artifact
-storage, network enrollment, pairing, and MCP tools remain unavailable. Plaintext owner-only
+Trusted local CLI setup provides owner, space, checkout, and scoped session records. Local
+artifact capture/inspection/retirement authenticate each operation and filter owner, space,
+and repository before disclosure. Network enrollment, pairing, publication, and MCP remain
+unavailable. SQLite commits revisions, retry receipts, and pending work atomically; failed
+commits return no success receipt, and stale edits cannot undo retirement. Git source imports
+remain immutable candidates rather than approved or executable content. Plaintext owner-only
 state files do not protect against the owner’s OS account, root, or endpoint compromise.
 Future artifact authorization must apply to every read, search, list, mutation, delivery, and
 publication surface. Repository contents and model-supplied arguments cannot grant authority.

@@ -27,9 +27,10 @@ The [vision](docs/product/vision.md) describes the full learning and continuity 
 
 ## Available today
 
-This checkout is the bootstrap foundation. It builds a Go executable with an embedded
-Vite/React status page. Artifact storage, retrieval, MCP tools, and synchronization are roadmap
-work; the status page does not claim those capabilities are available.
+This checkout builds a Go executable with an embedded Vite/React status and session-context
+page. Trusted CLI setup binds sessions to explicit spaces and repositories. The CLI can save,
+inspect, and retire local memory observations with durable revisions and retry receipts.
+Retrieval, approved Git version selection, MCP tools, and synchronization remain roadmap work.
 
 ## Try the foundation
 
@@ -42,9 +43,10 @@ make build
 ./bin/substrate serve
 ```
 
-Open <http://127.0.0.1:9842>. Stop the process with Ctrl+C. The only configuration currently
-available is the `serve -listen` flag, which accepts a numeric loopback address. The executable
-needs neither Node.js nor a model runtime to run.
+Open <http://127.0.0.1:9842>. Stop the process with Ctrl+C. The `serve -listen` flag accepts
+a numeric loopback address. Use the getting started guide for trusted setup, state-directory
+selection, and scoped capture commands. The executable needs neither Node.js nor a model
+runtime to run.
 
 ```sh
 ./bin/substrate serve -listen 127.0.0.1:9843
@@ -64,8 +66,9 @@ The [first release contract](docs/product/first-release.md) describes the accept
 
 The selected direction is Go, SQLite on each node, CLI plus MCP, and an embedded Vite/React
 administrative interface. Initial retrieval uses text and explicit associations. Embeddings,
-Tailscale, PostgreSQL, and pgvector are not requirements. The SQLite driver and other runtime
-libraries will be selected when implementing their contracts.
+Tailscale, PostgreSQL, and pgvector are not requirements. Local storage uses the pinned
+cgo-free SQLite driver documented in the [artifact contract](docs/architecture/artifacts.md#selected-local-persistence-contract);
+other runtime libraries will be selected when implementing their contracts.
 
 Read the [roadmap](ROADMAP.md), [public Project](https://github.com/orgs/agentic-substrate/projects/2), and
 [architecture decisions](docs/architecture/index.md). The whole project is licensed under

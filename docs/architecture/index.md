@@ -2,8 +2,9 @@
 
 **Last reviewed:** 2026-10-04. Re-read before changing an accepted boundary or filing its implementation.
 
-These decisions describe the agreed direction. The bootstrap status server does not implement
-artifact storage, authorization, MCP, or synchronization. Implementation acceptance lives in
+These decisions describe the agreed direction. Trusted local bindings and scoped artifact
+persistence are implemented; broader policy, retrieval, MCP, and synchronization remain future
+work. The browser exposes status/context inspection only. Implementation acceptance lives in
 the [first release contract](../product/first-release.md).
 
 The [vision](../product/vision.md) explains the purpose and intended experience. These pages

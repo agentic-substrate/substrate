@@ -1,14 +1,15 @@
 # Context retrieval
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each retrieval or storage decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each retrieval or storage decision
 
 **Status:** the agreed initial retrieval direction combines ranked text, exact identifiers
 and scope, and explicit semantic associations without neural inference. Learned embeddings
 are an optional candidate subject to relevance and resource evaluation, not a mandatory
 dependency or local default. Useful hybrid recall and battery-conscious interactive work
 remain product goals. SQLite is selected for local nodes and the initial single coordinator.
-The Go driver, scoring/index details, resource budgets, and any optional vector backend or
-model/provider remain open.
+The [local persistence contract](artifacts.md#selected-local-persistence-contract) selects
+the pinned Go driver and FTS5 initialization. Scoring/index details, resource budgets, and
+any optional vector backend or model/provider remain open.
 
 Artifacts means memories, skills, and agent definitions. The agreed
 [artifact contract](artifacts.md) defines eligibility before ranking, effective versions,

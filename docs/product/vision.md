@@ -12,8 +12,9 @@ leave behind evidence and improvements, and let the next session build on them. 
 spend less time repeating project briefings and reconciling copied configuration. Administrators
 should be able to explain and control that flow without managing every harness separately.
 
-This is the destination. Today the repository contains a runnable bootstrap status shell;
-artifact storage, retrieval, MCP tools, and synchronization are not implemented. The
+This is the destination. Today the repository provides status/context inspection, trusted
+local bindings, and repository-scoped artifact persistence through the CLI. Retrieval,
+approved Git version selection, MCP tools, and synchronization are not implemented. The
 [getting started guide](../getting-started.md) describes current behavior, while the
 [first release contract](first-release.md) defines the first usable product.
 

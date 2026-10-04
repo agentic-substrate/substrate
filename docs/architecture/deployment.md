@@ -17,9 +17,10 @@ interactive work is a product constraint; optional enrichment must be resource-a
 Shared offline access uses administrator-controlled finite grants, with online-only sensitive
 artifacts and independent wholly owned local Personal operation. Grant durations and enforcement
 mechanisms remain open.
-SQLite is selected for local nodes and the initial single coordinator. Driver, vector backend,
-embedding runtime/model, credential protocols and identity-provider integrations, and
-synchronization mechanisms remain under discussion.
+SQLite is selected for local nodes and the initial single coordinator. The
+[local persistence contract](artifacts.md#selected-local-persistence-contract) selects its Go
+driver. Vector backends, embedding runtimes/models, network credential protocols and
+identity-provider integrations, and synchronization mechanisms remain under discussion.
 
 Future peer-to-peer and hub-and-spoke transfer of permitted customer/internal context is
 confirmed direction. A hub may provide authoritative management and metrics, and enterprise
@@ -109,8 +110,8 @@ evolution; its stable-server membership and failover require a separate design.
 Automatic peer discovery, multi-peer reconciliation, failover mechanisms, future coordinator storage, and
 offline grant durations and enforcement still need explicit decisions before implementation.
 Application synchronization uses HTTPS initially; its record format and reconciliation
-protocol remain open. SQLite is the initial durable database; vector storage and the Go driver
-remain open.
+protocol remain open. SQLite is the initial durable database with the local driver selected;
+vector storage remains open.
 
 ## Agreed availability path
 
@@ -133,9 +134,11 @@ constraints prepare for failover without requiring a cluster in the initial rele
 SQLite is the selected local store: embedded transactions support durable local changes
 without a separately operated database service. Each installation keeps its database on
 local storage; WSL distributions and networked machines exchange application records
-through synchronization rather than share a live database file. SQLite WAL permits concurrent
-readers and one writer per database, so short transactions and realistic write-burst testing
-would be necessary. A cgo-free Go driver is available; the driver is not selected.
+through synchronization rather than share a live database file. The current local store uses
+rollback journaling with EXTRA synchronization and immediate transactions; concurrent retry
+tests validate that acknowledgment path. The selected cgo-free driver is pinned in the
+[local persistence contract](artifacts.md#selected-local-persistence-contract). SQLite still
+serializes writers, and representative workload/resource measurements remain future work.
 
 For shared coordination, a single service using SQLite is the agreed initial default,
 consistent with the agreed availability path. This is a design decision, not implemented behavior.

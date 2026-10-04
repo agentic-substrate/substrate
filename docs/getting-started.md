@@ -17,7 +17,7 @@ make build
 Open <http://127.0.0.1:9842>. The page requests the local status endpoint and distinguishes
 loading, connection success, and connection failure. The Refresh status button retries the
 request and works by keyboard. Its successful state means the bootstrap endpoint is reachable;
-it does not mean artifact storage or synchronization exists.
+it does not prove that the CLI artifact store is ready or that synchronization exists.
 
 ## Commands and configuration
 
@@ -81,6 +81,46 @@ browser grant; further requests require the credential again.
 Denial and unavailable-authority states disclose no restricted repository metadata. This
 read-only view does not activate artifacts or approve policy changes.
 
+## Local artifact capture and inspection
+
+With a trusted session credential, `capture` saves one memory observation from standard input.
+It defaults to that session's space and repository. Keep the same `-state-dir`, `-path`, and
+`-credential` selections as trusted setup. For example:
+
+```sh
+printf '%s\n' 'Use the documented build command.' | ./bin/substrate capture -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -operation observation-1 -provenance 'Local synthetic observation'
+./bin/substrate artifact -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -id ARTIFACT_ID
+./bin/substrate pending -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session"
+```
+
+Replace `ARTIFACT_ID` with the saved receipt's `artifact_id`; quote it as an ordinary argument.
+Capture returns a JSON receipt only after SQLite commits the observation, immutable revision,
+provenance, retry identity, and pending work together. `pending-local` means saved locally,
+unverified, and awaiting future indexing; it does not mean indexed, synchronized, or verified.
+The store supports observation content up to 1 MiB and provenance claims up to 4096 bytes.
+Operation IDs contain 1–128 bytes and must not have surrounding whitespace or control
+separators. An exact retry with the same operation ID returns the original receipt, including
+across process restarts. Changed content or metadata with that ID is rejected; choose a new
+operation ID for a new contribution. Output failure can lose the displayed receipt after a
+successful commit, so retry with the original input and operation ID.
+
+To propose an edit, pass `capture -artifact <artifact-id> -expected <revision-id>` with a new
+operation ID and content. An edit against the current memory revision advances the local head.
+A stale edit returns `conflict`, preserves its candidate, and keeps the current head. Inspect
+all authorized revisions with `artifact`. Resolve by submitting new content against the current
+head; old candidates remain in history. This does not approve shared state or verify facts.
+`retire -id <artifact-id> -expected <revision-id> -operation <operation-id>` marks an artifact
+retired. A stale expected revision blocks retirement. Later edits return `conflict-retired`
+and cannot restore it. The receipt records the original contribution outcome; it is not a
+current lifecycle or delivery grant. Re-inspect before using saved content.
+
+Every operation rechecks the session credential and registered Git checkout. Missing and
+inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
+skill and agent-definition storage retains committed source bytes and provenance as unapproved
+candidates through its internal API. Source registration and approved-version selection, normal
+recall, MCP, cross-space publication, indexing consumption, and backup/restore are separate work.
+The browser remains a status and read-only context view, with no artifact editing endpoint.
+
 ## HTTP contract
 
 `GET /api/status` returns JSON with `stage` equal to `bootstrap`, with caching disabled.
@@ -96,10 +136,13 @@ Client navigation without a file extension falls back to the embedded page. Unsu
 methods on the page routes return 405. The server applies a restrictive content policy and
 does not load external scripts or fonts.
 
-No artifact, MCP, artifact database, pairing, or synchronization endpoint exists yet. Authority
-records use bounded plaintext JSON in a 0700 directory, with 0600 state and credential files.
-Updates lock across processes and replace synced files atomically; persistence failures return
-errors, and oversized updates retain the previous usable authority. There is no at-rest
+No artifact, MCP, pairing, or synchronization HTTP endpoint exists yet. Artifact CLI commands
+use plaintext `artifacts.db` beside bounded plaintext JSON authority records in a 0700 directory,
+with 0600 database, state, and credential files. Keep this directory on the Linux/WSL local
+filesystem. SQLite uses rollback journaling with EXTRA synchronization and checks schema version
+before access; unsafe file modes, symlinks, and unknown newer schemas fail closed.
+Authority updates lock across processes and replace synced files atomically; persistence
+failures return errors, and oversized updates retain the previous usable authority. There is no at-rest
 encryption or protection against the owning OS account, root, or an endpoint compromise. See the
 [first release contract](product/first-release.md) for their required behavior and
 [development guide](development.md) for checks that validate this checkout.

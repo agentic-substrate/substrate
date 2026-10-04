@@ -96,5 +96,5 @@ and report it in the PR. An unexplained exception is a defect.
    It has no artifact APIs; exposing it remotely would bypass the current boundary.
 3. Unknown `/api/` and `/mcp` routes must return errors instead of the SPA entry point.
    Otherwise unsupported integrations can mistake an HTML page for an available API.
-4. Artifact runtime, MCP, artifact storage, and synchronization remain unimplemented. Preserve that
-   distinction in the UI and docs until the corresponding acceptance evidence exists.
+4. Local artifact storage is implemented through scoped CLI commands. Browser artifact APIs,
+   retrieval, MCP, and synchronization remain unimplemented; preserve their unavailable states.
