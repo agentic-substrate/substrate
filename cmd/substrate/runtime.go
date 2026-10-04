@@ -30,7 +30,7 @@ func runRuntime(args []string, in io.Reader, out io.Writer) error {
 		flags.StringVar(&checkout, "path", ".", "fixed explicitly registered checkout")
 		flags.StringVar(&credential, "credential", "", "private scoped session credential file outside Git")
 	case "index":
-		flags.BoolVar(&paused, "pause", false, "pause automatic indexing after processing this bounded batch")
+		flags.BoolVar(&paused, "pause", false, "pause without consuming queued work; false resumes and processes one bounded batch")
 	}
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
