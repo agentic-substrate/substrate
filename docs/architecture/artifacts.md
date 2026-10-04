@@ -192,8 +192,8 @@ objects share a generic denial. This is repository-scoped authorization for one 
 user; plaintext files and mode protection do not isolate that user or root.
 
 A successful contribution atomically commits artifact identity, immutable revision content,
-provenance, operation receipt, and pending incremental work. Schema version 1 is installed
-transactionally; a newer unknown schema fails with an actionable unavailable error. A
+provenance, operation receipt, and pending incremental work. The original version 1 schema migrates
+transactionally to the version 2 selection tables; a newer unknown schema fails with an actionable unavailable error. A
 contribution operation ID is unique within owner/space/repository. An exact retry returns its
 original receipt; a changed payload under that ID is rejected. No receipt is returned before
 commit. Storage failure remains unavailable, even when indexing has no consumer yet.
@@ -207,11 +207,54 @@ the contributing session, not independently verified factual evidence.
 
 Skill and agent-definition contributions read exact bytes from a full Git commit in the
 session's registered checkout, retain commit/path/blob identity, and remain candidates with
-no effective head. A moving ref, an unsafe path, or a symlink blob is rejected. Capturing does
+no effective head until separate trusted approval. A moving ref, an unsafe path, or a symlink blob is rejected. Capturing does
 not approve or execute source. Trusted registration and explicit approved-version selection
-are separate work; neither source text nor operation arguments can approve content.
+follow the contract below; neither source text nor scoped operation arguments can approve content.
 
 The local reopen and rollback checks prove the tested application's acknowledgment boundary.
 They do not prove device-failure durability, complete backup/restore, replica recovery,
 synchronization, retrieval readiness, or harness compatibility. Re-read this decision when
 schema, driver, authorization, Git selection, indexing, or recovery behavior changes.
+
+## Selected local Git approval contract
+
+The single local owner uses private filesystem authority through dedicated registration and
+approval CLI commands. These commands accept no session credential and have no browser or MCP
+endpoint. Scoped sessions can propose candidates, inspect their permitted metadata, and read
+approved snapshots; they cannot register identities or approve content. This separates interface
+capabilities within the trusted OS-account boundary, not hostile processes running as that account.
+Remote human review and cross-space publication remain unavailable.
+
+Registration binds one Git-backed artifact to a stable qualified identity consisting of its
+space, repository, kind, source namespace, and name. Namespaces and aliases are labels, not
+permissions. Registration is immutable and unique within that qualified identity; a retired
+identity cannot be re-registered to evade retirement. An optional alias may refer to several
+registered artifacts. Permission filtering runs before computing candidates, conflicts, or
+alternatives. Exact qualified reads preserve distinct permitted choices; ambiguous aliases
+block content delivery instead of selecting by source order, time, or similarity.
+
+Approval pins the whole immutable revision, including its explicit dependency inventory, and
+compares the expected effective head and the candidate's base. Stale approval cannot replace a
+newer head or undo retirement. Updating a Git branch, removing source files, or changing dependency
+bytes does not alter the stored approved snapshot. A new source or dependency version requires
+another candidate and explicit approval. Schema version 2 transactionally adds registrations and
+approved override records to the version 1 store. Approval, receipt, selected head, and pending
+index work commit together; a failed commit returns no success receipt.
+
+An override must explicitly name an active, approved, same-kind default in the same authorized
+repository and space, pin its current revision, and target a default marked overridable at
+registration. The first implementation permits one-level specialization only: override chains
+and cycles are rejected. Multiple approved specializations remain incomparable alternatives and
+block their alias. A changed or retired default invalidates its existing specialization and
+blocks that alias until explicitly resolved. A qualified default remains independently readable
+while active; qualification is never permission to read a different scope.
+
+A source bundle contains its main regular Git blob and up to 32 explicitly listed dependency
+blobs from the same full commit and registered repository, bounded to one MiB combined. Import
+uses raw objects with replacement refs disabled, rejects symlinks and unsafe paths, and stores
+exact commit/path/blob provenance alongside each dependency's bytes. The owner is responsible
+for declaring the complete dependency inventory during review. Substrate neither follows
+references in source text nor loads external files or executes scripts. Content reads return
+the stored bundle and do not establish native installation, activation, executable safety,
+harness compatibility, broader source access, or transfer authorization. Future adapters must
+reject any dependency or destination they cannot preserve under the governing boundary.

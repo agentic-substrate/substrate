@@ -218,3 +218,21 @@ func (s *Store) Inventory() (any, error) {
 	return result, err
 }
 func unavailable(err error) error { return fmt.Errorf("%w: %v", ErrUnavailable, err) }
+
+// OwnerContext is for trusted local administration, never credentialed interfaces.
+func (s *Store) OwnerContext(path string) (Context, error) {
+	var ctx Context
+	err := s.read(func(st *state) error {
+		b, err := bindingFor(st, path)
+		if err != nil {
+			return ErrDenied
+		}
+		sp, err := findSpace(st, b.SpaceID)
+		if err != nil {
+			return ErrDenied
+		}
+		ctx = Context{OwnerID: st.OwnerID, SpaceID: sp.ID, SpaceName: sp.Name, RepositoryID: b.RepositoryID, Checkout: b.Checkout}
+		return nil
+	})
+	return ctx, err
+}

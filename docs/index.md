@@ -16,8 +16,9 @@ The [problem](product/problem.md), [positioning](product/positioning.md), and
 ## Run the current foundation
 
 This checkout provides a Go executable with an embedded status and session-context page.
-Trusted CLI bindings and local artifact capture/inspection/retirement are available. Retrieval,
-approved Git version selection, MCP tools, and synchronization remain future work. Product
+Trusted CLI bindings, local artifact capture/inspection/retirement, Git registration/approval,
+and exact approved snapshot reads are available through the CLI.
+Lexical retrieval, MCP tools, and synchronization remain future work. Product
 goals describe the complete intended system, beyond these verified local capabilities.
 
 Start with [getting started](getting-started.md) to run the current executable, then read the
