@@ -113,10 +113,11 @@ processes. URI `modeof` points to the validated private database so journals are
 under an ordinary 022 umask. A subprocess regression holds a live transaction while another
 process opens the store, and abrupt-exit/cache-spill evidence exercises hot-journal rollback.
 This process-interruption check does not establish device-failure or complete recovery.
-Pending work is committed with content; there is no consumer or pause/resume control yet.
+Pending operation receipts are committed with content and retained. A separate coalesced index
+queue supports bounded atomic batches and explicit pause/resume.
 Existing receipts survive retries, while retirement remains authoritative for later reads.
-Schema version 1 stores migrate transactionally to version 2, adding immutable source registrations
-and exact revision approval/override records. Unknown versions fail before contribution.
+Schema versions 1 and 2 migrate transactionally to version 3, preserving source selection and
+retry receipts while adding revision associations and rebuildable token postings. Unknown versions fail before contribution.
 Do not edit the database directly or treat copying a live file as an application backup.
 
 After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
@@ -139,7 +140,7 @@ and default pins, `selection.go` filters scope before resolving alternatives, an
 captures an explicit bounded dependency inventory through the hardened raw Git reader. Owner
 commands cannot be invoked through the scoped session command handler. Registration/approval
 labels do not establish audience or execution rights. Approval and retirement enqueue durable
-incremental work for the future index consumer.
+incremental work for the index consumer.
 
 Focused checks cover source movement and deletion after approval, reopen, stale approval and
 competing candidate state, ambiguous aliases, override target changes, retirement, same-space
@@ -147,3 +148,33 @@ repository and Work/Personal filtering, revocation, failed approval rollback, ve
 bounded UTF-8 dependency snapshots, and the proposal/owner/read CLI flow. Use the same clean
 `TMPDIR` and full verification environment described above. Content delivery has no native
 adapter, script runner, external dependency resolver, or tested harness-installation behavior.
+
+## Retrieval and local MCP development
+
+The official Go MCP SDK is pinned at `github.com/modelcontextprotocol/go-sdk` v1.8.0. It supplies
+stdio protocol negotiation, schemas, and tool dispatch; Substrate's bridge validates bounded
+UTF-8 frames before the SDK decoder. `internal/node` owns private IPC, the installation lock,
+connection limits/deadlines, and bounded indexing. `internal/artifacts` owns current eligibility,
+revision associations, derived index transactions, deterministic lexical ranking, and current
+reads. `internal/strictjson` rejects text normalization at both transport boundaries. There is
+no new Node or model runtime requirement in the installed executable.
+
+After building embedded assets, run `go test ./internal/artifacts ./internal/node
+./internal/mcpbridge ./cmd/substrate` with the clean temporary-directory environment described
+above. Tests cover scope-invariant scores and coverage, hidden aliases/topics/identifiers,
+current direct reads, endpoint-filtered relationships, stale index/retirement invalidation,
+failed index rollback, paused save/reopen/resume, posting limits, legacy retry migration,
+source/search alias separation, private lock failures, malformed bounded frames, concurrent
+scoped bridges, current revocation, stopped-node errors, and bridge/node lifetime separation.
+The CLI test observes absent-node capture failing without opening a database. Owner source
+commands share the runtime lock and require an explicitly stopped node. These SDK-level
+checks do not replace versioned actual harness calls or establish complete recovery.
+
+Use `make build` before a packaged client journey. Client configuration must be scoped to a
+synthetic fixture or one invocation, retain credentials outside Git, and avoid logging bearer
+values. Record initialization client/version/protocol and actual tools/list/tools/call traffic,
+including each advertised client's discovery/capture/search/read/denial/concurrency/unavailable
+path. A successful model answer, process exit, or version command alone is not compatibility
+evidence. Client native installation/execution remains unsupported. Resource measurements and
+actual client verification are recorded below when observed; no latency, memory, or energy
+target is promised by source or a protocol specification alone.

@@ -215,5 +215,9 @@ func loadRevision(tx *sql.Tx, artifact, id string) (Revision, error) {
 			return Revision{}, ErrUnavailable
 		}
 	}
+	r.Associations, err = loadAssociations(tx, r.ID)
+	if err != nil {
+		return Revision{}, err
+	}
 	return r, nil
 }

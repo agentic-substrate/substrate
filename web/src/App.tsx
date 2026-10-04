@@ -65,11 +65,12 @@ export function App() {
         <p>
           Trusted local owner setup, explicit space and repository bindings, and
           scoped session credentials are available through the CLI. The CLI can
-          also save and inspect local memory observations.
+          also save, search, and read permitted observations and approved Git
+          snapshots. Scoped MCP tools connect harnesses to the local node.
         </p>
         <p>
-          Browser artifact inspection, scoped MCP tools, publication review, and
-          synchronization are planned work.
+          Browser artifact inspection, publication review, and synchronization
+          are planned work.
         </p>
       </section>
     </main>

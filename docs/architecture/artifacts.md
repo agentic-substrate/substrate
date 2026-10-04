@@ -197,13 +197,13 @@ user; plaintext files and mode protection do not isolate that user or root.
 
 A successful contribution atomically commits artifact identity, immutable revision content,
 provenance, operation receipt, and pending incremental work. The original version 1 schema migrates
-transactionally to the version 2 selection tables; a newer unknown schema fails with an actionable unavailable error. A
+transactionally through selection tables to version 3 revision associations and the derived lexical
+index; a newer unknown schema fails with an actionable unavailable error. A
 contribution operation ID is unique within owner/space/repository. An exact retry returns its
 original receipt; a changed payload under that ID is rejected. Text content and every
 contribution/lookup/retirement string must be valid UTF-8 before fingerprinting or persistence.
 Invalid bytes are rejected instead of being normalized to U+FFFD; valid U+FFFD is preserved.
-No receipt is returned before commit. Storage failure remains unavailable, even when indexing
-has no consumer yet.
+No receipt is returned before commit. Storage failure remains unavailable; derived index failure cannot invalidate a saved receipt.
 
 Memory observations are unverified and pending-local. An edit against the current expected
 revision advances the local head; an outdated edit is preserved as a conflict candidate and

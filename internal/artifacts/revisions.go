@@ -70,6 +70,9 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 			}
 		}
 	}
+	if err := c.Associations.validate(); err != nil {
+		return Receipt{}, err
+	}
 	hash := fingerprint(c)
 	tx, err := s.store.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -116,6 +119,9 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 	if _, err := tx.Exec("INSERT INTO revisions VALUES(?,?,?,?,?,?,?,?,?)", r.RevisionID, a.ID, c.ExpectedRevision, c.Content, c.Provenance, ctx.OwnerID, state, "unverified", source); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
+	if err := saveAssociations(tx, ctx, r.RevisionID, c.Associations); err != nil {
+		return Receipt{}, err
+	}
 	if state == "pending-local" {
 		if _, err := tx.Exec("UPDATE artifacts SET head=? WHERE id=?", r.RevisionID, a.ID); err != nil {
 			return Receipt{}, ErrUnavailable
@@ -150,6 +156,9 @@ func retry(tx *sql.Tx, ctx authority.Context, operation, hash string) (Receipt, 
 }
 
 func record(tx *sql.Tx, ctx authority.Context, hash string, r Receipt, action string) error {
+	if _, err := tx.Exec("INSERT OR IGNORE INTO index_queue VALUES(?)", r.ArtifactID); err != nil {
+		return ErrUnavailable
+	}
 	encoded, _ := json.Marshal(r)
 	if _, err := tx.Exec("INSERT INTO contributions VALUES(?,?,?,?,?,?)", ctx.OwnerID, ctx.SpaceID, ctx.RepositoryID, r.OperationID, hash, string(encoded)); err != nil {
 		return ErrUnavailable
