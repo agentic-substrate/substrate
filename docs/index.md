@@ -14,5 +14,3 @@ The product framing explains the [problem](product/problem.md), [vision](product
 [positioning](product/positioning.md), and [non-goals](product/non-goals.md).
 [Architecture decisions](architecture/index.md) cover deployment, artifact policy, retrieval,
 and reconciliation. The [bootstrap plan](plans/bootstrap.md) records the scope of this foundation.
-
-[Verification canary](getting-started.md#bootstrap-missing-anchor)
