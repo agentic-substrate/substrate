@@ -26,6 +26,9 @@ func (s *Session) Inspect(id string) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
+	if !validText(id) {
+		return Artifact{}, ErrInvalidText
+	}
 	tx, err := s.store.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Artifact{}, ErrUnavailable

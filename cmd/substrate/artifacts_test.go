@@ -44,6 +44,9 @@ func TestCaptureCLIReportsCommittedReceiptAndScopedInspection(t *testing.T) {
 		t.Fatalf("observation missing: %s", output.String())
 	}
 	output.Reset()
+	if err := runArtifact(args, strings.NewReader("original \xff observation"), &output); err == nil || output.Len() != 0 {
+		t.Fatalf("invalid UTF-8 capture acknowledged: %s %v", output.String(), err)
+	}
 	if err := runArtifact(args, strings.NewReader("changed retry payload"), &output); err == nil || output.Len() != 0 {
 		t.Fatalf("failed retry acknowledged: %s %v", output.String(), err)
 	}

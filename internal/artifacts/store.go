@@ -60,7 +60,7 @@ func Open(auth *authority.Store) (*Store, error) {
 	if err := privateFile(path, true); err != nil {
 		return nil, ErrUnavailable
 	}
-	query := url.Values{"mode": {"rw"}, "_txlock": {"immediate"}, "_pragma": {"busy_timeout(5000)", "journal_mode(DELETE)", "synchronous(EXTRA)", "foreign_keys(ON)"}}
+	query := url.Values{"mode": {"rw"}, "modeof": {path}, "_txlock": {"immediate"}, "_pragma": {"busy_timeout(5000)", "journal_mode(DELETE)", "synchronous(EXTRA)", "foreign_keys(ON)"}}
 	db, err := driver.Open((&url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}).String(), fts5.Register)
 	if err != nil {
 		return nil, ErrUnavailable

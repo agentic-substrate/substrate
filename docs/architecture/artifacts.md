@@ -175,8 +175,12 @@ and enforcement mechanisms still open. See [sharing](sharing.md),
 The one-owner implementation stores artifacts in `artifacts.db` beside trusted authority
 state, outside Git checkouts, under an owner-only directory. SQLite uses the pinned
 `github.com/ncruces/go-sqlite3` v0.35.6 `database/sql` driver, rollback journaling and
-`synchronous=EXTRA`. The cgo-free driver avoids compiler/build-tag requirements and registers
-its supported FTS5 extension for later lexical indexing. The actual capability check reports
+`synchronous=EXTRA`. The encoded `modeof` URI parameter makes driver-created journals inherit
+the validated private database mode without changing process-wide umask. Tests cover live
+transactions, a waiting independent opener, and recovery from an abruptly exited process
+with a hot rollback journal; they do not prove device-failure recovery. The cgo-free driver
+avoids compiler/build-tag requirements and registers its supported FTS5 extension for later
+lexical indexing. The actual capability check reports
 SQLite 3.53.4. Compared with `modernc.org/sqlite` v1.60.1 it needs a smaller production dependency
 set; `mattn/go-sqlite3` v1.14.52 needs cgo and an FTS5 build tag.
 This choice does not establish performance or memory targets. The driver documents higher
@@ -195,8 +199,11 @@ A successful contribution atomically commits artifact identity, immutable revisi
 provenance, operation receipt, and pending incremental work. Schema version 1 is installed
 transactionally; a newer unknown schema fails with an actionable unavailable error. A
 contribution operation ID is unique within owner/space/repository. An exact retry returns its
-original receipt; a changed payload under that ID is rejected. No receipt is returned before
-commit. Storage failure remains unavailable, even when indexing has no consumer yet.
+original receipt; a changed payload under that ID is rejected. Text content and every
+contribution/lookup/retirement string must be valid UTF-8 before fingerprinting or persistence.
+Invalid bytes are rejected instead of being normalized to U+FFFD; valid U+FFFD is preserved.
+No receipt is returned before commit. Storage failure remains unavailable, even when indexing
+has no consumer yet.
 
 Memory observations are unverified and pending-local. An edit against the current expected
 revision advances the local head; an outdated edit is preserved as a conflict candidate and
@@ -207,9 +214,14 @@ the contributing session, not independently verified factual evidence.
 
 Skill and agent-definition contributions read exact bytes from a full Git commit in the
 session's registered checkout, retain commit/path/blob identity, and remain candidates with
-no effective head. A moving ref, an unsafe path, or a symlink blob is rejected. Capturing does
-not approve or execute source. Trusted registration and explicit approved-version selection
-are separate work; neither source text nor operation arguments can approve content.
+no effective head. A moving ref, an unsafe/non-UTF-8 path, a symlink blob, or invalid UTF-8
+source content is rejected. Source commands use an empty `GIT_ALLOW_PROTOCOL` allowlist,
+which overrides repository transport settings and blocks missing-object promisor fetch
+helpers and network access. Required objects must already be local. This mechanism is
+verified on Git 2.43.0, rather than relying on an unsupported no-lazy-fetch flag. See the
+[versioned Git environment contract](https://github.com/git/git/blob/v2.43.0/Documentation/git.txt).
+Capturing does not approve or execute source. Trusted registration and explicit approved-version
+selection are separate work; neither source text nor operation arguments can approve content.
 
 The local reopen and rollback checks prove the tested application's acknowledgment boundary.
 They do not prove device-failure durability, complete backup/restore, replica recovery,

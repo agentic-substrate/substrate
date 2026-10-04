@@ -10,6 +10,7 @@ import (
 var ErrUnavailable = errors.New("artifact storage unavailable: repair the private state directory or use a compatible schema")
 var ErrOperation = errors.New("operation ID already used with different content")
 var ErrConflict = errors.New("expected revision no longer current")
+var ErrInvalidText = errors.New("artifact text must be valid UTF-8")
 
 type Store struct {
 	db        *sql.DB

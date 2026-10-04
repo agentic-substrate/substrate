@@ -128,6 +128,20 @@ normal retrieval, MCP clients, shared policy, publication, performance, an actua
 or other operating systems. Clean `TMPDIR` avoids this host's unrelated `/tmp/.git` marker;
 private-placement enforcement has no test exemption. Re-run at the next local boundary change.
 
+The issue #6 review corrections were verified on 2026-10-04 in the same toolchain/environment,
+with Git 2.43.0. Invalid UTF-8 previously received receipts and could alias changed payloads;
+new text validation rejects every contribution/lookup/retirement string and raw Git text before
+fingerprinting, while preserving valid U+FFFD. Live and hot journal tests initially observed
+0644 files; the supported encoded `modeof` URI now yields 0600 journals under a child process's
+022 umask. An independent opener waits for a live transaction, and abrupt-process hot-journal
+rollback preserves an earlier acknowledged revision while discarding uncommitted writes.
+A missing promisor blob previously executed a synthetic repository uploadpack helper. The
+empty `GIT_ALLOW_PROTOCOL` environment allowlist now overrides even permissive repository
+and caller settings: uploadpack and external-helper markers remain absent, and a synthetic
+loopback HTTP receiver records zero requests. Final check commands and the repaired source
+revision are recorded in PR #18. These controls do not claim arbitrary Git plugin isolation,
+device/power-failure recovery, backup completeness, or network synchronization readiness.
+
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget
 trigger. Require strong authentication for source/release authority, keep access least privileged
