@@ -1,6 +1,6 @@
 # Offline artifact access and revocation
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each grant, recovery, or deployment decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each grant, recovery, or deployment decision
 
 **Status:** bounded administrator-controlled grants for ordinary shared offline access,
 sensitive online-only exceptions, and independent wholly owned Personal operation are agreed.
@@ -132,6 +132,12 @@ and restored credentials need explicit revalidation behavior. Go monotonic readi
 process-local, are not serialized, and may pause during sleep on some systems; persisting
 `time.Time` does not solve expiry across reboot. See [Go time](https://pkg.go.dev/time#hdr-Monotonic_Clocks).
 Stronger guarantees against a hostile machine owner require the deployment's broader boundary.
+
+An extracted content key or copied plaintext cannot be recalled by a software lease. Key
+rotation must account for retained old keys and wrappers; rewrapping alone cannot revoke
+past possession. Before network transfer, decide custody, recovery scope, and offline key/use
+enforcement together. The [transfer/recovery contract](security.md#transfer-and-stale-state)
+also requires stale-peer and backup tests that preserve deletions and current membership.
 
 ## User and harness behavior
 

@@ -1,6 +1,6 @@
 # Joining and administration
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each identity, enrollment, or delivery decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each identity, enrollment, or delivery decision
 
 **Status:** easy user joins and administration are major product goals. Repository discovery
 manifests and reusable approved bindings are agreed. Local owner setup and device pairing
@@ -91,6 +91,11 @@ last contact, repository bindings, and effective access. Apply group and placeme
 across repositories; do not require a separate human decision for every worktree. People and
 devices can be revoked separately. Recovery must preserve the logical person's identity and
 must not revive revoked grants from a restored backup.
+
+Enterprise content recovery is a distinct assigned-scope authority, not an automatic consequence
+of dashboard administration, device approval, or account recovery. Custody and independent
+approval/key-release enforcement remain open. Recovery must be attributable and auditable,
+with denial outside the assigned scope. See the [recovery contract](security.md#key-custody-and-enterprise-recovery).
 
 A harness launch selects an approved binding and receives narrower session access. Reuse
 node enrollment across harnesses so switching tools does not require another membership join.

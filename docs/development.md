@@ -78,3 +78,15 @@ CodeQL scanning is disabled at the repository, and its automatic workflow has be
 to conserve the current usage budget. The required `gate` belongs to CI and does not depend
 on CodeQL. Revisit scanning when maintainers allocate a budget or before the first supported
 production release; review the workflow and repository setting together when restoring it.
+
+The [security roadmap](plans/security.md) records recommended CSF/SSDF/SLSA baselines, a
+control-evidence inventory, release verification, incident/restore work, and tests to retain
+when CI cost is reduced. These are future gates and evidence requirements, not additional
+implemented jobs or a claim of framework conformance. Keep the only test protecting a trust
+boundary; a flaky check needs a tracked fix and compensating verification. Review dependencies,
+untrusted build inputs, release credentials, and actual delivered artifacts at their boundaries.
+
+The repository's `skills/substrate-security/SKILL.md` is the reusable security planning/review
+workflow referenced by `AGENTS.md` and, through it, `CLAUDE.md`. Repo-specific memory entries
+and personal skill installations should link to these maintained contracts; they are reminders,
+not independent policy or control evidence.

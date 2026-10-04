@@ -106,5 +106,11 @@ review arrive with that capability. Teams and organizations follow with their ac
 membership, and administration controls. macOS, native Windows, automatic coordinator failover,
 optional embeddings, and native desktop convenience remain future scope.
 
+Before those network paths carry customer/internal data, meet the
+[security roadmap's transfer gates](../plans/security.md#capability-gates). Enterprise scoped
+content recovery and optional hub management/metrics are confirmed later direction; key
+custody, recovery granularity, and offline enforcement remain open. They do not expand this
+single-node release into a transfer system or an agent execution engine.
+
 See [delivery](../architecture/delivery.md), [packaging](../architecture/packaging.md), [artifacts](../architecture/artifacts.md),
 [repository bindings](../architecture/repositories.md), and [deployment](../architecture/deployment.md).

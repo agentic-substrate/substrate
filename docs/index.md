@@ -26,3 +26,5 @@ Start with [getting started](getting-started.md) to run the current executable, 
 and reconciliation. The [roadmap](https://github.com/agentic-substrate/substrate/blob/main/ROADMAP.md)
 groups future outcomes, and the [public Project](https://github.com/orgs/agentic-substrate/projects/2)
 tracks their execution. The [bootstrap plan](plans/bootstrap.md) records the foundation's scope.
+The [security roadmap](plans/security.md) records release and transfer gates, open recovery/key
+decisions, and evidence needed for security claims. Its recommendations are not deployed controls.

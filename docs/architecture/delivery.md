@@ -1,6 +1,6 @@
 # User interfaces and harness delivery
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each UI, harness, or packaging decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each UI, harness, or packaging decision
 
 **Status:** easy joins, inspectable administration, scoped harness access, and concrete human
 publication review are agreed goals. CLI, MCP, and a browser administration interface are
@@ -98,6 +98,11 @@ Direct authenticated HTTP MCP remains another deployment path, particularly for 
 execution environments. Stdio and HTTP have different transport/credential conventions,
 with the same application checks. See [MCP transports](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
 and [authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
+
+Before adding artifact operations, apply the [local-interface/MCP requirements](security.md#local-interfaces-and-mcp)
+for browser-origin protection, transport-specific authentication, token scope, header validation,
+and versioned client evidence. The cited protocol is a design reference; no transport, SDK,
+or compatibility claim has been selected or verified by the bootstrap.
 
 Return explicit readiness, blocked, approval-required, and pending states. Headless workers
 use their own provisioned service principals; they cannot wait indefinitely for interactive
