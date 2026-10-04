@@ -103,7 +103,8 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 	case "retire":
 		request.ID, request.Expected, request.Operation = *id, *expected, *operation
 	case "pending":
-
+	case "search":
+		request.Search = artifacts.SearchRequest{Query: query, Limit: limit, RelatedTo: relatedTo}
 	}
 	response := node.Call(context.Background(), *dir, request)
 	if response.Error != "" {

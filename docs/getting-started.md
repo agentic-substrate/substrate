@@ -228,7 +228,8 @@ encryption or protection against the owning OS account, root, or an endpoint com
 ## Scoped search and current reads
 
 With the node running, use `search -query 'build frontend' -limit 20` with the same state,
-checkout, and credential flags as capture. Empty queries list current permitted artifacts.
+checkout, and credential flags as capture. Empty queries list current permitted artifacts. The CLI applies the same query, result-limit,
+and related-origin checks as the MCP search tool.
 Exact artifact/revision IDs and explicitly recorded labels can find current content while
 lexical indexing is pending. Ordinary terms are lowercase lexical matches; a final `*` permits
 prefixes of at least three characters. Unrecorded paraphrases and typo correction are not

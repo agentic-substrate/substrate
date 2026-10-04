@@ -153,7 +153,7 @@ Research: [SQLite FTS5](https://www.sqlite.org/fts5.html),
 
 The initial index stores relational token positions for each current artifact revision in
 SQLite. Unicode letters, numbers, underscores, and hyphens form lowercase tokens. Search
-uses up to 32 query terms and optional final prefixes of at least three characters, with
+uses up to 32 query terms and optional final prefixes of at least three Unicode characters, with
 100 points per matched query term, up to ten frequency points per term, 20 points for an
 ordered contiguous multi-term phrase, and 1000 points for an exact artifact/revision ID,
 qualified source identity, or explicitly recorded identifier, search alias, or topic.

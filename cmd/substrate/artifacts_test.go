@@ -88,3 +88,75 @@ func TestCaptureRequiresExplicitNodeWithoutDatabaseFallback(t *testing.T) {
 		t.Fatal("node absence opened database")
 	}
 }
+
+func TestSearchCLIForwardsQueryLimitAndRelatedOrigin(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "repo")
+	state := filepath.Join(home, "state")
+	credential := filepath.Join(home, "credential")
+	os.Mkdir(root, 0700)
+	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git %v %s", err, out)
+	}
+	for _, args := range [][]string{{"init", "-state-dir", state, "-owner", "Owner"}, {"register", "-state-dir", state, "-path", root, "-space", "Personal"}, {"session", "-state-dir", state, "-path", root, "-space", "Personal", "-out", credential}} {
+		if err := runAuthority(args, new(bytes.Buffer)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime, err := node.Start(&authority.Store{Dir: state}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	common := []string{"--state-dir", state, "--path", root, "--credential", credential}
+	save := func(operation, content string, related ...string) artifacts.Receipt {
+		t.Helper()
+		args := append(append([]string{"capture"}, common...), "--operation", operation, "--provenance", "synthetic")
+		for _, id := range related {
+			args = append(args, "--related", id)
+		}
+		var output bytes.Buffer
+		if err := runArtifact(args, strings.NewReader(content), &output); err != nil {
+			t.Fatal(err)
+		}
+		var receipt artifacts.Receipt
+		if err := json.Unmarshal(output.Bytes(), &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return receipt
+	}
+	target := save("target", "otter target")
+	save("other", "zebra unrelated")
+	origin := save("origin", "otter source", target.ArtifactID)
+	if err := runRuntime([]string{"index", "--state-dir", state, "--pause=false"}, strings.NewReader(""), new(bytes.Buffer)); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name  string
+		flags []string
+		count int
+		want  string
+	}{{"negative query", []string{"--query", "absent-marker"}, 0, ""}, {"query and limit", []string{"--query", "otter", "--limit", "1"}, 1, ""}, {"related origin", []string{"--related-to", origin.ArtifactID}, 1, target.ArtifactID}} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append(append([]string{"search"}, common...), test.flags...)
+			var output bytes.Buffer
+			if err := runArtifact(args, strings.NewReader(""), &output); err != nil {
+				t.Fatal(err)
+			}
+			var result artifacts.SearchResponse
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Results) != test.count {
+				t.Fatalf("search flags ignored: %+v", result)
+			}
+			if test.want != "" && result.Results[0].ArtifactID != test.want {
+				t.Fatalf("wrong relationship result %+v", result)
+			}
+		})
+	}
+	var output bytes.Buffer
+	if err := runArtifact(append(append([]string{"search"}, common...), "--limit", "101"), strings.NewReader(""), &output); err == nil || output.Len() != 0 {
+		t.Fatalf("invalid limit bypassed: %v %s", err, output.String())
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/agentic-substrate/substrate/internal/authority"
 )
@@ -178,7 +179,7 @@ func (s *Session) Search(q SearchRequest) (SearchResponse, error) {
 	if len(terms) > 32 {
 		return SearchResponse{}, errors.New("search requires at most 32 terms")
 	}
-	prefix := strings.HasSuffix(q.Query, "*") && len(terms) > 0 && len(terms[len(terms)-1]) >= 3
+	prefix := strings.HasSuffix(q.Query, "*") && len(terms) > 0 && utf8.RuneCountInString(terms[len(terms)-1]) >= 3
 	tx, err := s.store.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return SearchResponse{}, ErrUnavailable

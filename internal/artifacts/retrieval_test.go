@@ -297,3 +297,21 @@ func TestInspectPreservesRevisionAssociationsAndRetryIdentity(t *testing.T) {
 		t.Fatalf("changed metadata accepted %v", err)
 	}
 }
+
+func TestPrefixMinimumCountsUnicodeCharacters(t *testing.T) {
+	f := setup(t)
+	saved := capture(t, f.session, memory("unicode-prefix", "猫咪喜欢 quiet observations"))
+	if _, err := f.store.IndexBatch(100); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"猫*", "猫咪*"} {
+		got, err := f.session.Search(SearchRequest{Query: query})
+		if err != nil || len(got.Results) != 0 {
+			t.Fatalf("short Unicode prefix expanded %q: %+v %v", query, got, err)
+		}
+	}
+	got, err := f.session.Search(SearchRequest{Query: "猫咪喜*"})
+	if err != nil || len(got.Results) != 1 || got.Results[0].RevisionID != saved.RevisionID {
+		t.Fatalf("three-character prefix failed %+v %v", got, err)
+	}
+}
