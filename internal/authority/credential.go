@@ -14,8 +14,8 @@ func WriteCredential(path, token string) error {
 	if err != nil {
 		return errors.New("credential destination parent must exist")
 	}
-	if _, err := gitOutput(parent, "rev-parse", "--show-toplevel"); err == nil {
-		return errors.New("credential files must be outside Git checkouts")
+	if err := outsideCheckout(parent); err != nil {
+		return err
 	}
 	file, err := openPrivate(filepath.Join(parent, filepath.Base(path)), syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL)
 	if err != nil {
@@ -53,8 +53,8 @@ func ReadCredential(path string) (string, error) {
 	if err != nil {
 		return "", ErrDenied
 	}
-	if _, err := gitOutput(parent, "rev-parse", "--show-toplevel"); err == nil {
-		return "", ErrDenied
+	if err := outsideCheckout(parent); err != nil {
+		return "", err
 	}
 	file, err := openPrivate(path, syscall.O_RDONLY)
 	if err != nil {

@@ -17,7 +17,7 @@ func gitOutput(path string, args ...string) (string, error) {
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
 	output, err := cmd.Output()
-	return strings.TrimSpace(string(output)), err
+	return strings.TrimSuffix(string(output), "\n"), err
 }
 func checkout(path string) (Binding, error) {
 	root, err := gitOutput(path, "rev-parse", "--show-toplevel")

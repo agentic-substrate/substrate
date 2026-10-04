@@ -419,3 +419,76 @@ func TestOversizedPersistedStateIsUnavailable(t *testing.T) {
 		t.Fatal("oversized persisted authority accepted")
 	}
 }
+
+func TestMalformedGitConfigurationCannotPermitPrivatePlacement(t *testing.T) {
+	store, root, home := fixture(t)
+	file := filepath.Join(root, "copied-credential")
+	if err := os.WriteFile(file, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCredential(filepath.Join(root, "new-credential"), strings.Repeat("a", 64)); err == nil {
+		t.Fatal("malformed Git config allowed credential creation")
+	}
+	if _, err := ReadCredential(file); err == nil {
+		t.Fatal("malformed Git config allowed checkout credential read")
+	}
+	inside := filepath.Join(root, "new-parent", "state")
+	if err := (&Store{Dir: inside}).Initialize("Owner"); err == nil {
+		t.Fatal("malformed Git config allowed authority creation")
+	}
+	if _, err := os.Stat(filepath.Join(root, "new-parent")); !os.IsNotExist(err) {
+		t.Fatalf("denied setup created parent: %v", err)
+	}
+	moved := filepath.Join(root, "existing-state")
+	if err := os.Rename(store.Dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&Store{Dir: moved}).Inventory(); err == nil {
+		t.Fatal("malformed Git config allowed moved authority read")
+	}
+	outside := filepath.Join(home, "outside-credential")
+	if err := WriteCredential(outside, strings.Repeat("a", 64)); err != nil {
+		t.Fatalf("separate placement rejected: %v", err)
+	}
+}
+func TestMissingGitRejectsPrivatePlacementWithoutCreatingFiles(t *testing.T) {
+	store, _, home := fixture(t)
+	credential := filepath.Join(home, "existing-credential")
+	if err := WriteCredential(credential, strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	outside := filepath.Join(home, "new-parent", "state")
+	checks := []func() error{
+		func() error { return (&Store{Dir: outside}).Initialize("Owner") },
+		func() error { return WriteCredential(filepath.Join(home, "new-credential"), strings.Repeat("a", 64)) },
+		func() error { _, err := ReadCredential(credential); return err },
+		func() error { _, err := store.Inventory(); return err },
+	}
+	for _, check := range checks {
+		if err := check(); err == nil || !strings.Contains(err.Error(), "Git") {
+			t.Fatalf("missing Git not actionable: %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "new-parent")); !os.IsNotExist(err) {
+		t.Fatalf("missing prerequisite created state parent: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "new-credential")); !os.IsNotExist(err) {
+		t.Fatalf("missing prerequisite created credential: %v", err)
+	}
+}
+
+func TestCheckoutPreservesTrailingPathWhitespace(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project ")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "init", "-q")
+	binding, err := checkout(root)
+	if err != nil || binding.Checkout != root {
+		t.Fatalf("trailing-space checkout lost pathname bytes: %#v %v", binding, err)
+	}
+}

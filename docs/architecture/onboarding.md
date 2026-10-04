@@ -23,7 +23,9 @@ of future network membership or shared offline leases.
 Authority uses bounded plaintext JSON with Linux file locking, synced atomic replacement,
 0700 directories, and 0600 files. It provides no at-rest encryption and trusts the owning OS
 account and filesystem administrators. Unsafe permissions, symlinks, corrupt/unavailable
-state, changed Git identity, and ambiguous context fail closed. Starting the anonymous
+state, changed Git identity, and ambiguous context fail closed. Private-placement checks
+walk canonical directory ancestors and reject any `.git` marker without trusting successful
+Git parsing; missing Git or inaccessible ancestors fail before creating private files. Starting the anonymous
 bootstrap page does not silently enroll an owner. Pairing, automated moves, token refresh,
 and remote/local-browser administration are future work.
 

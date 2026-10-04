@@ -4,7 +4,7 @@
 
 ## Prerequisites and build
 
-Use Linux or WSL 2 with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, and Make. In WSL, put the
+Use Linux or WSL 2 with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git, and Make. In WSL, put the
 checkout in the Linux filesystem. Node.js is needed to build the web assets and documentation;
 the resulting executable contains its UI and does not need Node.js or a model runtime.
 
@@ -69,7 +69,10 @@ bytes. Its only fields are `schema_version` (1), `repo_id`, and `space_id`, and 
 them as untrusted hints. Use IDs from trusted `register` or `bindings` output if adding that
 nonsecret file. Discovery neither registers the checkout nor issues a credential. Copied or
 edited manifests never replace accepted bindings. Keep credentials outside every checkout,
-including untracked files; reads and writes reject checkout destinations and symlinks.
+including untracked files. Reads, writes, and ongoing authority access inspect canonical
+ancestor directories and reject any `.git` marker, including malformed metadata. Missing Git
+or inaccessible placement cannot prove a safe destination and fails before setup writes.
+Credential files and the authority directory also reject symlinks.
 
 On the packaged browser page, enter the credential’s contents in Session credential to inspect
 the current space and registered checkout. The page clears the credential after each request,

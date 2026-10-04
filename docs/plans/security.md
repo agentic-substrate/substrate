@@ -94,15 +94,19 @@ and browser checks support the bootstrap row; they do not verify future artifact
 controls or hosted repository settings. Re-run relevant checks after a boundary change.
 
 On 2026-10-04, the issue #5 worktree passed `env PATH="/usr/local/go/bin:$PATH"
-GOCACHE=/tmp/substrate-go-cache make check` on Linux x86_64 under WSL 2 with Go 1.27.1,
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux x86_64 under WSL 2
+with Go 1.27.1,
 Node.js 24.15.0, and npm 11.12.1. Tests used synthetic `~/repos` equivalents and verified
 manifest nonauthority, explicit worktree/nested binding, scope denial, Git identity replacement,
-expiry/revocation, concurrent grant persistence, failed/oversized state updates, browser
+expiry/revocation, concurrent grant persistence, failed/oversized state updates, malformed
+Git metadata and missing-Git placement denial, whitespace-preserving paths, browser
 Origin/Host checks, and a real packaged-browser credential/revocation journey. Playwright
 checked keyboard focus, live status semantics, axe states, and 320-pixel reflow. No actual
 screen-reader application, other operating system, artifact policy, MCP client, transfer, or
 hosted security setting was verified. The issue #5 PR identifies the final source revision
-and commands; re-run at the next local trust-boundary change.
+and commands; re-run at the next local trust-boundary change. Final synthetic fixtures used
+`/var/tmp` because a pre-existing `/tmp/.git` marker made `/tmp` unavailable for private
+authority and credential placement; the check did not exempt or remove that marker.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

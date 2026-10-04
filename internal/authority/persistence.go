@@ -54,8 +54,12 @@ func (s *Store) locked(create bool, fn func(string) error) error {
 	if create {
 		parent := absolute
 		for {
-			if _, err := os.Stat(parent); err == nil {
+			_, err := os.Stat(parent)
+			if err == nil {
 				break
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return unavailable(err)
 			}
 			next := filepath.Dir(parent)
 			if next == parent {
@@ -63,8 +67,8 @@ func (s *Store) locked(create bool, fn func(string) error) error {
 			}
 			parent = next
 		}
-		if _, err := gitOutput(parent, "rev-parse", "--show-toplevel"); err == nil {
-			return errors.New("private state must be outside Git checkouts")
+		if err := outsideCheckout(parent); err != nil {
+			return unavailable(err)
 		}
 		if err := os.MkdirAll(absolute, 0700); err != nil {
 			return unavailable(err)
@@ -73,8 +77,8 @@ func (s *Store) locked(create bool, fn func(string) error) error {
 	if err := checkPrivate(absolute, true); err != nil {
 		return unavailable(err)
 	}
-	if _, err := gitOutput(absolute, "rev-parse", "--show-toplevel"); err == nil {
-		return ErrUnavailable
+	if err := outsideCheckout(absolute); err != nil {
+		return unavailable(err)
 	}
 	lock, err := openPrivate(filepath.Join(absolute, ".lock"), syscall.O_RDWR|syscall.O_CREAT)
 	if err != nil {
