@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/agentic-substrate/substrate/internal/artifacts"
+	"github.com/agentic-substrate/substrate/internal/authority"
+	"github.com/agentic-substrate/substrate/internal/node"
+	"io"
 )
 
 func TestSourceCLISeparatesProposalsFromOwnerApproval(t *testing.T) {
@@ -39,11 +42,19 @@ func TestSourceCLISeparatesProposalsFromOwnerApproval(t *testing.T) {
 	}
 	cliGit("add", ".")
 	cliGit("-c", "user.name=Owner", "-c", "user.email=owner@example.test", "commit", "-qm", "source")
+	runScoped := func(args []string, in io.Reader, out io.Writer) error {
+		runtime, err := node.Start(&authority.Store{Dir: state}, false)
+		if err != nil {
+			return err
+		}
+		defer runtime.Close()
+		return runArtifact(args, in, out)
+	}
 	common := []string{"-state-dir", state, "-path", root, "-credential", credential}
 	ownerFlags := []string{"-state-dir", state, "-path", root}
 	var output bytes.Buffer
 	propose := append(append([]string{"propose"}, common...), "-operation", "proposal", "-kind", "agent-definition", "-commit", cliGit("rev-parse", "HEAD"), "-file", "AGENT.md", "-dependency", "reference.md")
-	if err := runArtifact(propose, strings.NewReader(""), &output); err != nil {
+	if err := runScoped(propose, strings.NewReader(""), &output); err != nil {
 		t.Fatalf("propose source: %v", err)
 	}
 	var r artifacts.Receipt
@@ -64,29 +75,29 @@ func TestSourceCLISeparatesProposalsFromOwnerApproval(t *testing.T) {
 	}
 	output.Reset()
 	read := append(append([]string{"read"}, common...), "-selector", choice.Qualified)
-	if err := runArtifact(read, strings.NewReader(""), &output); err == nil || output.Len() != 0 {
+	if err := runScoped(read, strings.NewReader(""), &output); err == nil || output.Len() != 0 {
 		t.Fatalf("candidate delivered: %s %v", output.String(), err)
 	}
 	approval := append(append([]string{"approve"}, ownerFlags...), "-artifact", r.ArtifactID, "-revision", r.RevisionID, "-operation", "approval")
-	if err := runArtifact(append(append([]string{"approve"}, common...), "-artifact", r.ArtifactID), strings.NewReader(""), &output); err == nil {
+	if err := runScoped(append(append([]string{"approve"}, common...), "-artifact", r.ArtifactID), strings.NewReader(""), &output); err == nil {
 		t.Fatal("scoped interface offered approval")
 	}
 	if err := runSource(approval, &output); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()
-	if err := runArtifact(read, strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "approved agent definition") || !strings.Contains(output.String(), "reference bytes") || !strings.Contains(output.String(), "native_activation\":\"unsupported") {
+	if err := runScoped(read, strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "approved agent definition") || !strings.Contains(output.String(), "reference bytes") || !strings.Contains(output.String(), "native_activation\":\"unsupported") {
 		t.Fatalf("approved delivery: %s %v", output.String(), err)
 	}
 	output.Reset()
-	if err := runArtifact(append(append([]string{"choices"}, common...), "-selector", "assistant"), strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "effective") {
+	if err := runScoped(append(append([]string{"choices"}, common...), "-selector", "assistant"), strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "effective") {
 		t.Fatalf("choices: %s %v", output.String(), err)
 	}
 	output.Reset()
 	if err := runAuthority([]string{"revoke", "-state-dir", state, "-credential", credential}, new(bytes.Buffer)); err != nil {
 		t.Fatal(err)
 	}
-	if err := runArtifact(read, strings.NewReader(""), &output); err == nil || output.Len() != 0 {
+	if err := runScoped(read, strings.NewReader(""), &output); err == nil || output.Len() != 0 {
 		t.Fatalf("revoked content delivered: %s %v", output.String(), err)
 	}
 }

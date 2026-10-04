@@ -28,9 +28,11 @@ func main() {
 func run() error {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "node", "mcp", "index":
+			return runRuntime(os.Args[1:], os.Stdin, os.Stdout)
 		case "source-register", "approve":
 			return runSource(os.Args[1:], os.Stdout)
-		case "capture", "propose", "artifact", "retire", "pending", "choices", "read":
+		case "capture", "propose", "artifact", "retire", "pending", "choices", "read", "search":
 			return runArtifact(os.Args[1:], os.Stdin, os.Stdout)
 		case "init", "space", "bindings", "register", "session", "context", "revoke", "discover":
 			return runAuthority(os.Args[1:], os.Stdout)
@@ -44,7 +46,7 @@ func run() error {
 		return nil
 	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
-		return errors.New("usage: substrate init | space | bindings | register | session | context | revoke | discover | capture | propose | source-register | approve | artifact | choices | read | retire | pending | serve | version")
+		return errors.New("usage: substrate init | space | bindings | register | session | context | revoke | discover | node | mcp | index | capture | propose | source-register | approve | artifact | choices | search | read | retire | pending | serve | version")
 	}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	defaultDir, err := defaultStateDir()

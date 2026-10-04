@@ -8,6 +8,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/artifacts"
 	"github.com/agentic-substrate/substrate/internal/authority"
+	"github.com/agentic-substrate/substrate/internal/node"
 )
 
 func runSource(args []string, out io.Writer) error {
@@ -46,6 +47,11 @@ func runSource(args []string, out io.Writer) error {
 	if _, err := auth.OwnerContext(*path); err != nil {
 		return err
 	}
+	lock, err := node.Lock(auth)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	store, err := artifacts.Open(auth)
 	if err != nil {
 		return err

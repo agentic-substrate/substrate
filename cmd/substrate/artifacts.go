@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"flag"
 	"io"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/agentic-substrate/substrate/internal/artifacts"
 	"github.com/agentic-substrate/substrate/internal/authority"
+	"github.com/agentic-substrate/substrate/internal/node"
 )
 
 func runArtifact(args []string, in io.Reader, out io.Writer) error {
@@ -23,8 +24,16 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 	var id, expected, operation, provenance *string
 	var kind, commit, file, selector string
 	var dependencies dependencyPaths
+	var identifiers, aliases, topics, related dependencyPaths
+	var query, relatedTo string
+	var limit int
+	var revision string
 	switch args[0] {
 	case "capture", "propose":
+		flags.Var(&identifiers, "identifier", "explicit exact search identifier; repeat up to 32 times")
+		flags.Var(&aliases, "search-alias", "explicit search alias; does not approve a source")
+		flags.Var(&topics, "topic", "explicit topic label")
+		flags.Var(&related, "related", "related artifact ID within current scope")
 		if args[0] == "propose" {
 			flags.StringVar(&kind, "kind", "skill", "skill or agent-definition")
 			flags.StringVar(&commit, "commit", "", "full immutable Git commit")
@@ -42,7 +51,15 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 		expected = flags.String("expected", "", "expected current revision")
 		operation = flags.String("operation", "", "stable retirement operation ID")
 	case "pending":
-	case "choices", "read":
+	case "search":
+		flags.StringVar(&relatedTo, "related-to", "", "one-hop related results from this current permitted artifact")
+		flags.StringVar(&query, "query", "", "lexical query, exact identifier, or explicit alias/topic")
+		flags.IntVar(&limit, "limit", 20, "maximum results; 1 through 100")
+	case "read":
+		id = flags.String("id", "", "current artifact ID")
+		flags.StringVar(&revision, "revision", "", "current revision ID")
+		flags.StringVar(&selector, "selector", "", "exact qualified identity or explicit alias")
+	case "choices":
 		flags.StringVar(&selector, "selector", "", "qualified identity or explicit alias; empty lists permitted choices")
 	default:
 		return errors.New("unsupported artifact command")
@@ -61,44 +78,40 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 	if _, err := auth.Authenticate(token, *path); err != nil {
 		return err
 	}
-	store, err := artifacts.Open(auth)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	session, err := store.Session(token, *path)
-	if err != nil {
-		return err
-	}
-	var result any
+	request := node.Request{Token: token, Checkout: *path, Action: args[0]}
 	switch args[0] {
 	case "capture":
 		content, readErr := io.ReadAll(io.LimitReader(in, 1024*1024+1))
 		if readErr != nil {
 			return errors.New("observation unavailable: could not read standard input")
 		}
-		result, err = session.Contribute(artifacts.Contribution{OperationID: *operation, ArtifactID: *id, ExpectedRevision: *expected, Kind: "memory", Content: string(content), Provenance: *provenance})
+		request.Action = "capture"
+		request.Contribution = artifacts.Contribution{OperationID: *operation, ArtifactID: *id, ExpectedRevision: *expected, Kind: "memory", Content: string(content), Provenance: *provenance, Associations: artifacts.Associations{Identifiers: identifiers, Aliases: aliases, Topics: topics, Related: related}}
 	case "propose":
 		files := make([]artifacts.SourceFile, 0, len(dependencies))
 		for _, path := range dependencies {
 			files = append(files, artifacts.SourceFile{Path: path})
 		}
-		result, err = session.Contribute(artifacts.Contribution{OperationID: *operation, ArtifactID: *id, ExpectedRevision: *expected, Kind: kind, Provenance: *provenance, Source: &artifacts.Source{Commit: commit, Path: file, Files: files}})
+		request.Action = "capture"
+		request.Contribution = artifacts.Contribution{OperationID: *operation, ArtifactID: *id, ExpectedRevision: *expected, Kind: kind, Provenance: *provenance, Source: &artifacts.Source{Commit: commit, Path: file, Files: files}, Associations: artifacts.Associations{Identifiers: identifiers, Aliases: aliases, Topics: topics, Related: related}}
 	case "choices":
-		result, err = session.Choices(selector)
+		request.Read.Selector = selector
 	case "read":
-		result, err = session.Resolve(selector)
+		request.Read = artifacts.ReadRequest{ArtifactID: *id, RevisionID: revision, Selector: selector}
 	case "artifact":
-		result, err = session.Inspect(*id)
+		request.ID = *id
 	case "retire":
-		result, err = session.Retire(*id, *expected, *operation)
+		request.ID, request.Expected, request.Operation = *id, *expected, *operation
 	case "pending":
-		result, err = session.Pending()
+	case "search":
+		request.Search = artifacts.SearchRequest{Query: query, Limit: limit, RelatedTo: relatedTo}
 	}
-	if err != nil {
-		return err
+	response := node.Call(context.Background(), *dir, request)
+	if response.Error != "" {
+		return errors.New(response.Error)
 	}
-	return json.NewEncoder(out).Encode(result)
+	_, err = out.Write(append(response.Result, '\n'))
+	return err
 }
 
 type dependencyPaths []string

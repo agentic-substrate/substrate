@@ -165,6 +165,16 @@ to their actual caller without logging content or secrets.
 CLI import/export needs safe destination handling, bounded parsing, and interrupted-write
 behavior; local encryption does not defend against an already compromised endpoint.
 
+The selected local runtime holds an installation lock through SQLite migration and shutdown.
+Scoped CLI and stdio MCP bridges use owner-only Unix IPC with bounded frames, connections,
+and deadlines. They keep one trusted checkout/credential binding and authenticate every
+operation. Owner registration/approval stay offline under that same lock, without a scoped
+MCP route. Ranking uses only current permitted revisions and no hidden-corpus statistics.
+Search labels cannot approve or select a source alias; related endpoints and direct IDs repeat
+current scope/eligibility checks. Derived indexing cannot invalidate a committed save receipt.
+The [delivery contract](delivery.md#selected-local-mcp-transport) pins the SDK/transport;
+actual versioned client evidence remains distinct from protocol-level tests.
+
 Pin implemented MCP transports, protocol/SDK versions, and tested clients. The referenced
 [2026-07-28 Streamable HTTP revision](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 requires Origin and mirrored header/body validation and removes protocol-level sessions.

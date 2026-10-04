@@ -4,8 +4,9 @@
 
 **Status:** agreed release boundary. The architecture and
 artifact policies referenced below are agreed. Trusted local bindings, repository-scoped artifact
-persistence, explicit local Git registration/approval, and scoped snapshot reads are implemented. Lexical
-retrieval, MCP, indexing consumption, and backup/restore remain unfinished.
+persistence, explicit local Git registration/approval, and scoped snapshot reads are implemented. Scoped lexical retrieval, incremental indexing, and local stdio MCP are implemented.
+Client-specific evidence records actual tested versions; native activation, publication, and
+backup/restore remain unfinished.
 The bootstrap browser establishes status and context inspection, not the complete release.
 
 ## Job and scope

@@ -8,8 +8,8 @@ are an optional candidate subject to relevance and resource evaluation, not a ma
 dependency or local default. Useful hybrid recall and battery-conscious interactive work
 remain product goals. SQLite is selected for local nodes and the initial single coordinator.
 The [local persistence contract](artifacts.md#selected-local-persistence-contract) selects
-the pinned Go driver and FTS5 initialization. Scoring/index details, resource budgets, and
-any optional vector backend or model/provider remain open.
+the pinned Go driver and FTS5 initialization. The local lexical scoring/index contract is selected below. Resource targets and any
+optional vector backend or model/provider remain open.
 
 Artifacts means memories, skills, and agent definitions. The agreed
 [artifact contract](artifacts.md) defines eligibility before ranking, effective versions,
@@ -148,3 +148,50 @@ Research: [SQLite FTS5](https://www.sqlite.org/fts5.html),
 [SQLite Vec1](https://sqlite.org/vec1/doc/trunk/doc/vec1.md),
 [pgvector filtering and hybrid search](https://github.com/pgvector/pgvector), and
 [local embedding API example](https://docs.ollama.com/api/embed).
+
+## Selected local lexical implementation
+
+The initial index stores relational token positions for each current artifact revision in
+SQLite. Unicode letters, numbers, underscores, and hyphens form lowercase tokens. Search
+uses up to 32 query terms and optional final prefixes of at least three Unicode characters, with
+100 points per matched query term, up to ten frequency points per term, 20 points for an
+ordered contiguous multi-term phrase, and 1000 points for an exact artifact/revision ID,
+qualified source identity, or explicitly recorded identifier, search alias, or topic.
+Artifact ID breaks equal scores deterministically. No table-wide corpus statistics, model,
+vector backend, or remote service participates. Scope, active lifecycle, current head, and
+approved Git selection are checked before candidate scoring. Adding hidden Work documents
+cannot change Personal results, scores, or coverage. An ambiguous source alias retains
+qualified authorized alternatives; ranking does not select or activate that alias.
+
+Associations belong to immutable revisions and their retry fingerprints. Each of identifiers,
+search aliases, topics, and related artifact IDs permits up to 32 distinct UTF-8 labels of
+256 bytes. Related endpoints must be within the contributing session's scope. Related reads
+and `related_to` searches check both endpoints' current eligibility; retired or inaccessible
+endpoints disappear. Relationships traverse one explicitly recorded hop and never infer
+external or transitive access. Search aliases are separate from registered source delivery
+aliases: use search results' exact artifact/revision IDs for a subsequent current read.
+
+Schema version 3 adds revision associations, a coalesced per-artifact index queue, token
+positions, and a revision checkpoint. Migration preserves version 1/2 content, approvals,
+bundles, and retry receipts. Index batches atomically replace postings, record the current
+checkpoint, and consume their own queue. The existing pending operation ledger remains
+intact for later reconciliation. A failed batch leaves saved content, receipts, queue, and
+previous derived state intact. Current exact reads work while indexing is paused, and stale
+postings cannot deliver old or retired content. Exact ID/association lookup can find current
+unindexed content; ordinary lexical recall reports incomplete coverage until indexed.
+
+`Store.IndexBatch` processes at most 100 artifact identities per transaction. Each revision
+indexes at most 32,768 token positions across content and explicit associations/dependencies;
+`index.limited` reports permitted current revisions with truncated lexical coverage. Complete
+content remains saved and readable. `index.eligible`, `indexed`, and `pending` count only the
+current eligible session scope. Search returns at most 100 results and 400-rune excerpts.
+This bounds index work without promising recall for text beyond that cap. Unrecorded
+paraphrases, spelling errors, and inferred relationships are unsupported by this baseline.
+A paused capture remains pending-local/unverified evidence, not an indexed or verified fact.
+
+The foreground node attempts one bounded index batch each second when unpaused. `index
+--pause=true` processes no work; `index --pause=false` processes one batch and resumes that
+loop. The one-second control loop still wakes while paused; no battery or energy saving is
+claimed. Battery/charging detection, discretionary scheduling, enrichment, and model acquisition
+remain later maintenance work. Re-read this contract after changes to scoring, eligibility,
+queue semantics, coverage bounds, scheduling, or optional inference.

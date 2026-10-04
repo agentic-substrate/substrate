@@ -15,8 +15,9 @@ The current server is intended for a trusted Linux or WSL user and accepts loopb
 It serves an anonymous status page and a credentialed read-only session context endpoint.
 Trusted local CLI setup provides owner, space, checkout, and scoped session records. Local
 artifact capture/inspection/retirement authenticate each operation and filter owner, space,
-and repository before disclosure. Network enrollment, pairing, publication, and MCP remain
-unavailable. SQLite commits revisions, retry receipts, and pending work atomically; failed
+and repository before disclosure. A foreground node serves bounded owner-only Unix IPC; scoped stdio MCP bridges use the same
+current checks and cannot approve source or widen their fixed session. Network enrollment,
+pairing, publication, and remote MCP remain unavailable. SQLite commits revisions, retry receipts, and pending work atomically; failed
 commits return no success receipt, and stale edits cannot undo retirement. Git imports begin as immutable candidates; only trusted local owner commands register source
 identities and approve exact revision/dependency snapshots. Aliases and overrides resolve only
 within current authorized scope; ambiguity blocks delivery. Content reads never execute source. Plaintext owner-only

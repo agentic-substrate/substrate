@@ -56,7 +56,7 @@ Roadmap D identifiers preserve traceability to the supplied document.
 | D13 | Open mechanism | Identity-bound device enrollment/removal/re-enrollment; existing local pairing/invitation/OIDC sequence remains selected. |
 | D14 | Open mechanism | Authenticated tombstones/checkpoints, compaction, stale-node rebootstrap, backup expiry, and legal retention if applicable. |
 | D15 | Open | Approve exact telemetry fields, purposes, recipients, permissions, retention, region, and exports before collection. |
-| D16 | Open | Select actual MCP transports/revisions/SDKs and validate advertised client versions; stdio and HTTP have distinct security requirements. |
+| D16 | Verified for initial local stdio; broader transports open | Official Go MCP SDK v1.8.0 and actual versioned Codex, Claude, Cursor, and OpenCode tool traffic are recorded in the development guide. Remote HTTP MCP and native activation require separate evidence. |
 | D17 | Open | Define permitted/prohibited data classes and scope regulated uses/contracts before accepting obligations. |
 | D18 | Open | Establish measured restore/incident objectives and sustainable support commitments. |
 
@@ -85,6 +85,7 @@ operational evidence:
 | Local owner, space/checkout/session binding, bearer context Origin/Host checks, private state persistence | Verified with local evidence dated 2026-10-04 | `internal/authority`, `internal/server/context.go`, CLI and packaged browser tests; plaintext owner-only state is selected, with no same-user/root protection. Re-run after authority/interface changes. |
 | Local repository-scoped artifact persistence, immutable Git candidates, current session checks | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, CLI tests and packaged command journey; permission filtering, retries, stale revisions, commit failure, and retirement verified below. Re-run after storage, source, or authority changes. |
 | Local owner Git registration/approval, scoped qualified/alias delivery, immutable dependency bundles | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts` selection/bundle tests and separate owner/scoped CLI commands; dated commands and limits below. Re-run after source, selection, schema, or authority changes. |
+| Current scoped lexical retrieval, revision associations, private node IPC, and stdio MCP delivery | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, `internal/node`, `internal/mcpbridge`, and attached CLI tests; actual four-client calls and resource measurements are recorded below and in the development guide. Re-run after retrieval, transport, SDK, client-version, or authority changes. |
 | Broader artifact action policy, remote administration/MCP authorization, shared imports/publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local storage evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
@@ -194,6 +195,45 @@ one-file/multi-file root and exact literal filename checks, the 23-command packa
 journey, and pinned govulncheck. Documentation decisions passed against the stacked base and
 `origin/main`. No private-placement or dependency-authorization exception was introduced;
 all previously stated installation, execution, recovery, transfer, and platform limits remain.
+
+On 2026-10-04, issue #8 passed the combined `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` at revision
+`02b113d` on Linux amd64 under WSL 2 with Go 1.27.1, Node.js 24.15.0, npm 11.12.1,
+Git 2.43.0, SQLite 3.53.4, and official Go MCP SDK v1.8.0. The final runtime
+`badcd99646564d5d0f2baeef00a70176662fa826` only corrected CLI pause help and passed
+`make build` before actual client checks. Both documentation guards passed. Regression
+evidence covers current authorization before ranking and metadata, unchanged Personal results
+after hidden Work additions, exact pending lookup, association endpoint eligibility, distinct
+search/source aliases, stale and retired read denial, transactional indexing rollback and
+coalescing, bounded coverage, supported schema migration with unchanged retry receipts,
+revoked credentials, private installation locks, unavailable-node saves, concurrent connections,
+and malformed UTF-8/UTF-16 or oversized transport frames. Independent review identified ignored
+CLI query/limit/relationship arguments and a Unicode prefix-length mismatch; their new tests
+failed before the repairs and passed afterward. Sixteen new test functions and the reproducible
+resource workload are retained without a coverage quota.
+
+Actual Codex CLI 0.160.0, Claude Code 2.1.289, Cursor Agent 2026.10.01-e373342, and OpenCode
+1.18.32 subprocesses exercised discovery, capture, search, exact memory and both approved Git
+artifact reads, Personal denials, concurrent sessions, and a stopped installation. Asserted
+wire traffic preserved the same Codex artifact/revision/content/provenance when Claude read
+from its registered Work worktree. Personal results and coverage stayed empty, direct ID and
+qualified source denials disclosed no artifact metadata, and closing bridges preserved the
+node lifetime. After a coordinated node restart, Codex and Claude retries returned identical
+receipts and read the same saved revisions through actual tool calls. The
+[development record](../development.md#actual-client-verification) pins
+protocols, binary digest, measured overlap, synthetic-only configurations, and resource limits;
+PR #20 records commands. Raw transcripts and credentials remain outside Git. The initial index
+uses no model or global corpus statistics, caps each revision at 32,768 token positions, and
+reports limited coverage. The node still wakes each second while paused; no energy or larger
+corpus target is verified.
+
+This verifies trusted local-owner delivery on the tested WSL 2 installation. It does not verify
+remote HTTP MCP, native activation/execution, hostile same-account isolation, publication,
+transfer, complete backup/restore, device/power-failure durability, other operating systems,
+actual screen-reader or 400% zoom behavior, or framework/audit conformance. The copy-only UI
+change reused all three packaged browser flows, keyboard/focus, axe scans, and 320-pixel reflow.
+Project maintainers should repeat the scoped and actual-client checks at the next relevant
+boundary, SDK, client-version, or release change.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

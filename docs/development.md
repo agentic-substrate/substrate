@@ -113,10 +113,11 @@ processes. URI `modeof` points to the validated private database so journals are
 under an ordinary 022 umask. A subprocess regression holds a live transaction while another
 process opens the store, and abrupt-exit/cache-spill evidence exercises hot-journal rollback.
 This process-interruption check does not establish device-failure or complete recovery.
-Pending work is committed with content; there is no consumer or pause/resume control yet.
+Pending operation receipts are committed with content and retained. A separate coalesced index
+queue supports bounded atomic batches and explicit pause/resume.
 Existing receipts survive retries, while retirement remains authoritative for later reads.
-Schema version 1 stores migrate transactionally to version 2, adding immutable source registrations
-and exact revision approval/override records. Unknown versions fail before contribution.
+Schema versions 1 and 2 migrate transactionally to version 3, preserving source selection and
+retry receipts while adding revision associations and rebuildable token postings. Unknown versions fail before contribution.
 Do not edit the database directly or treat copying a live file as an application backup.
 
 After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
@@ -139,7 +140,7 @@ and default pins, `selection.go` filters scope before resolving alternatives, an
 captures an explicit bounded dependency inventory through the hardened raw Git reader. Owner
 commands cannot be invoked through the scoped session command handler. Registration/approval
 labels do not establish audience or execution rights. Approval and retirement enqueue durable
-incremental work for the future index consumer.
+incremental work for the index consumer.
 
 Focused checks cover source movement and deletion after approval, reopen, stale approval and
 competing candidate state, ambiguous aliases, override target changes, retirement, same-space
@@ -147,3 +148,109 @@ repository and Work/Personal filtering, revocation, failed approval rollback, ve
 bounded UTF-8 dependency snapshots, and the proposal/owner/read CLI flow. Use the same clean
 `TMPDIR` and full verification environment described above. Content delivery has no native
 adapter, script runner, external dependency resolver, or tested harness-installation behavior.
+
+## Retrieval and local MCP development
+
+The official Go MCP SDK is pinned at `github.com/modelcontextprotocol/go-sdk` v1.8.0. It supplies
+stdio protocol negotiation, schemas, and tool dispatch; Substrate's bridge validates bounded
+UTF-8 frames before the SDK decoder. `internal/node` owns private IPC, the installation lock,
+connection limits/deadlines, and bounded indexing. `internal/artifacts` owns current eligibility,
+revision associations, derived index transactions, deterministic lexical ranking, and current
+reads. `internal/strictjson` rejects text normalization at both transport boundaries. There is
+no new Node or model runtime requirement in the installed executable.
+
+After building embedded assets, run `go test ./internal/artifacts ./internal/node
+./internal/mcpbridge ./cmd/substrate` with the clean temporary-directory environment described
+above. Tests cover scope-invariant scores and coverage, hidden aliases/topics/identifiers,
+current direct reads, endpoint-filtered relationships, stale index/retirement invalidation,
+failed index rollback, paused save/reopen/resume, posting limits, legacy retry migration,
+source/search alias separation, private lock failures, malformed bounded frames, concurrent
+scoped bridges, current revocation, stopped-node errors, and bridge/node lifetime separation.
+The CLI test observes absent-node capture failing without opening a database. Owner source
+commands share the runtime lock and require an explicitly stopped node. These SDK-level
+checks do not replace versioned actual harness calls or establish complete recovery.
+
+Use `make build` before a packaged client journey. Client configuration must be scoped to a
+synthetic fixture or one invocation, retain credentials outside Git, and avoid logging bearer
+values. Record initialization client/version/protocol and actual tools/list/tools/call traffic,
+including each advertised client's discovery/capture/search/read/denial/concurrency/unavailable
+path. A successful model answer, process exit, or version command alone is not compatibility
+evidence. Client native installation/execution remains unsupported. Resource measurements and
+actual client verification are recorded below when observed; no latency, memory, or energy
+target is promised by source or a protocol specification alone.
+
+### Measured lexical workload
+
+On 2026-10-04, the issue #8 worktree ran the compiled artifact test workload on Linux amd64
+under WSL 2, Go 1.27.1, Git 2.43.0, SQLite 3.53.4, and an Intel Core i9-13980HX with
+GOMAXPROCS 16. Nine five-artifact query cases checked exact identifiers/revisions, explicit
+aliases/topics, lexical phrases, prefixes, approved skills/definitions, and expected misses
+for a typo and unrecorded paraphrase. All expected leading matches/misses passed; individual
+query calls took 6.3–8.3 ms in that run. This is a small synthetic evaluation, not a corpus
+recall claim.
+
+Run the reproducible resource workload after `make build`:
+
+```sh
+go test -c -o /var/tmp/substrate-retrieval-benchmark.test ./internal/artifacts
+TMPDIR=/var/tmp /usr/bin/time -v /var/tmp/substrate-retrieval-benchmark.test -test.run '^$' -test.bench BenchmarkScopedLexicalSearch -test.benchtime=20x -test.benchmem -test.count=1
+```
+
+The fixture contains 256 repository-scoped synthetic observations, each about 180 bytes with
+an identifier/topic. Cold indexing took 222.6 and 225.7 ms across calibration and measured
+setups; first-query latency was 15.8 and 11.8 ms. Twenty warm mixed lexical/exact/prefix/miss
+queries averaged 11.64 ms, 1,050,904 allocated bytes, and 12,768 allocations per operation.
+The entire compiled test process used 3.17 seconds user CPU, 2.37 seconds system CPU,
+9.09 seconds elapsed, and 24,320 KiB peak RSS, with zero major faults/swaps. Those process
+figures include two fixture creations/calibration, Git prerequisite processes, SQLite commits,
+and indexing; they are not query-only resource costs or node peak measurements. Other activity
+was running on the same host. The executable/test makes no model runtime or inference calls;
+cloud clients used separately for compatibility are not part of this measurement. No battery,
+energy, large-corpus, concurrent-load, model-quality, or other-platform target is established.
+Repeat with representative real permitted data before selecting an optional enhancement.
+
+### Actual client verification
+
+On 2026-10-04, actual client subprocesses passed against runtime revision
+`badcd99646564d5d0f2baeef00a70176662fa826` on Linux amd64 under WSL 2. The packaged binary's
+SHA256 was `8e30d95d656a1b042e2ac415f8734481bceb49df16ac1db175fc4d9643707dae`.
+Each client listed the four tools and made successful discovery, capture, search, and current
+read calls, including both approved Git artifact types with exact revision, source, content,
+and provenance. Each also exercised empty Personal discovery/search, generic denials for a
+Work artifact ID and qualified source identity, and explicit errors from a separate stopped
+installation. Two overlapping processes per client saved distinct observations and read their
+receipts. Wire responses, identities, and error contents were asserted; process exit and model
+narration alone were insufficient.
+
+| Tested executable | Observed MCP negotiation | Concurrent process overlap |
+|---|---|---|
+| Codex CLI 0.160.0 | `initialize`, `2025-06-18` | 25.77 seconds |
+| Claude Code 2.1.289 | `server/discover`, `2026-07-28` | 8.58 seconds |
+| Cursor Agent 2026.10.01-e373342 | `initialize`, `2025-11-25`; wire client version `1.0.0` | 21.45 seconds |
+| OpenCode 1.18.32 | `initialize`, `2025-11-25` | 10.68 seconds |
+
+Codex saved a synthetic Work observation; Claude searched and read the identical artifact and
+revision from the separately registered Work worktree, preserving its content and provenance.
+Personal results and eligible/indexed/pending/limited counts remained zero, and denied reads
+returned no structured artifact metadata. Closing every bridge left the explicitly started
+node alive. The node was then stopped and reopened using the same final binary and state.
+Both Codex and Claude repeated their original save operations through actual tool calls:
+each returned an identical receipt and read the same revision, content, and provenance after
+the restart. This checks process restart, without establishing device-failure recovery.
+
+The manual fixture used private state and credential files outside Git, synthetic repositories,
+and a transparent Python stdio recorder. Invocation or private project configuration enabled
+only the synthetic MCP servers and disabled native file, shell, and web actions. Prompts
+prohibited delegation, and emitted client tool events were checked for unexpected actions.
+Global client configuration
+and authentication were not changed. Existing Codex, Claude, and Cursor authentication was
+used. OpenCode used the working anonymous `opencode/space-bunny-free` provider; two earlier
+free-provider requests returned service errors and did not count as compatibility evidence.
+These cloud model calls evaluated client integration, independently of the model-free retrieval
+workload above. Credentials, raw provider output, and private transcripts stay outside Git.
+
+The PR's `### Verified` section records the exact fixture-runner and assertion commands.
+Re-run this matrix after SDK, transport, authority, node, or advertised client-version changes.
+The observations establish basic local stdio behavior for these executable versions and this
+synthetic workload. They do not establish native installation/execution, remote MCP, other
+platforms, a latency guarantee, complete recovery, or complete accessibility conformance.

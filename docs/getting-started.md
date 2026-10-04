@@ -83,6 +83,10 @@ read-only view does not activate artifacts or approve policy changes.
 
 ## Local artifact capture and inspection
 
+Start `./bin/substrate node` in a separate terminal, using the same `-state-dir` as setup.
+The node runs in the foreground; stop it with Ctrl+C or SIGTERM. Scoped artifact commands
+require this explicit running node and never create a database fallback.
+
 With a trusted session credential, `capture` saves one memory observation from standard input.
 It defaults to that session's space and repository. Keep the same `-state-dir`, `-path`, and
 `-credential` selections as trusted setup. For example:
@@ -96,7 +100,8 @@ printf '%s\n' 'Use the documented build command.' | ./bin/substrate capture -pat
 Replace `ARTIFACT_ID` with the saved receipt's `artifact_id`; quote it as an ordinary argument.
 Capture returns a JSON receipt only after SQLite commits the observation, immutable revision,
 provenance, retry identity, and pending work together. `pending-local` means saved locally,
-unverified, and awaiting future indexing; it does not mean indexed, synchronized, or verified.
+unverified evidence; it does not mean indexed, synchronized, or verified. Search separately
+reports current index coverage.
 Artifact content and all contribution/lookup/retirement metadata must be valid UTF-8.
 Invalid byte sequences are rejected before fingerprinting or persistence; they are never
 converted to replacement characters. A valid U+FFFD character is ordinary supported text.
@@ -125,8 +130,8 @@ match the returned Git entry exactly; directories and `.` are rejected, while li
 characters, tabs, and trailing spaces are preserved. Reads use locally available objects only:
 a missing promisor object remains unavailable without remote-helper execution or network access,
 even when repository configuration allows a transport. Materialize required objects separately
-through your trusted Git workflow. Normal lexical recall, MCP, cross-space publication, indexing
-consumption, and backup/restore remain unavailable.
+through your trusted Git workflow. Lexical recall and local stdio MCP use the foreground node.
+Cross-space publication and backup/restore remain unavailable.
 The browser remains a status and read-only context view, with no artifact editing endpoint.
 
 ## Git candidates and approved content
@@ -142,8 +147,10 @@ The owner must review the complete declared inventory before approving it.
 ```sh
 ./bin/substrate propose -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -operation skill-1 -kind skill -commit FULL_COMMIT_ID -file skills/build/SKILL.md -dependency skills/build/reference.md
 ./bin/substrate artifact -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -id ARTIFACT_ID
+# Stop the node before these trusted owner review commands.
 ./bin/substrate source-register -path "$HOME/repos/project" -artifact ARTIFACT_ID -source repository -name build -alias build
 ./bin/substrate approve -path "$HOME/repos/project" -artifact ARTIFACT_ID -revision REVISION_ID -operation approve-skill-1
+# Restart ./bin/substrate node before scoped reads.
 ./bin/substrate choices -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -selector build
 ./bin/substrate read -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -selector QUALIFIED_ID
 ```
@@ -217,3 +224,56 @@ failures return errors, and oversized updates retain the previous usable authori
 encryption or protection against the owning OS account, root, or an endpoint compromise. See the
 [first release contract](product/first-release.md) for their required behavior and
 [development guide](development.md) for checks that validate this checkout.
+
+## Scoped search and current reads
+
+With the node running, use `search -query 'build frontend' -limit 20` with the same state,
+checkout, and credential flags as capture. Empty queries list current permitted artifacts. The CLI applies the same query, result-limit,
+and related-origin checks as the MCP search tool.
+Exact artifact/revision IDs and explicitly recorded labels can find current content while
+lexical indexing is pending. Ordinary terms are lowercase lexical matches; a final `*` permits
+prefixes of at least three characters. Unrecorded paraphrases and typo correction are not
+implemented. Results identify the current revision, unverified/approved state, lexical score,
+excerpt, and permitted associations; scores never confer approval or permission.
+
+Capture/propose accept repeated `-identifier`, `-search-alias`, `-topic`, and `-related` flags.
+Each field allows up to 32 distinct UTF-8 labels of 256 bytes. Relationships name existing
+artifacts in the current scope. `search -related-to ARTIFACT_ID` returns one-hop current
+permitted endpoints, optionally narrowed with `-query`. A missing or inaccessible origin is
+denied without identifying another scope's content. Search aliases do not change registered
+source aliases. Read result IDs with `read -id ARTIFACT_ID` or `read -revision REVISION_ID`;
+`read -selector` remains the registered qualified/source-alias channel. Supply exactly one
+selector. Superseded, retired, candidate, inaccessible, and missing current revisions cannot
+be read through retrieval; authorized historical inspection uses `artifact` separately.
+
+The node processes up to 100 queued identities each second, with at most 32,768 indexed token
+positions per revision. Search's `index` object reports eligible/indexed/pending counts and
+limited lexical coverage for this session only. Complete content remains durable and readable.
+Start `node -index-paused` to pause indexing from startup. `index -pause=true` pauses without
+consuming work; `index -pause=false` processes one batch and resumes. Keep `-state-dir`
+consistent. Saved content and pending operation receipts survive pause/restart and index failure.
+This is bounded local indexing, not backup, synchronization, or a battery-aware scheduler.
+
+## Connect a local MCP client
+
+Configure your MCP client's local command as the absolute built executable path with arguments
+`mcp -state-dir PRIVATE_DIR -path REGISTERED_CHECKOUT -credential PRIVATE_FILE`. Start the node
+separately with that same directory. Use a credential file outside Git rather than putting its
+bearer value in command arguments or committed configuration. Each bridge has one fixed session;
+provision a distinct credential for another registered worktree or a fresh Personal context.
+
+The tools are `discovery`, `capture`, `search`, and `read`; their structured inputs follow the
+CLI behavior above. Discovery and empty search list up to 20 permitted current choices.
+Capture requires `operation_id`, `content`, and `provenance`. Search accepts `query`, optional
+`limit`, and optional `related_to`. Read requires exactly one `artifact_id`, `revision_id`, or
+`selector`. No tool approves, installs, executes, or publishes content. Closing the client ends
+its bridge and leaves the node alive. Missing/stopped nodes return an explicit unavailable
+error with a bounded timeout; no automatic startup or remote fallback occurs. The browser
+HTTP `/mcp` route stays unsupported. See the development guide for actual client verification.
+
+Basic local stdio flows were verified on 2026-10-04 with Codex CLI 0.160.0, Claude Code
+2.1.289, Cursor Agent 2026.10.01-e373342, and OpenCode 1.18.32 on WSL 2. The
+[client verification record](development.md#actual-client-verification) describes the exact
+runtime, protocols, Work-to-worktree reuse, scope denials, and concurrent/unavailable states.
+These checks verify content delivery; native harness installation and execution remain
+unsupported.

@@ -95,12 +95,27 @@ contracts remain open implementation details.
 
 See [delivery](delivery.md), [deployment](deployment.md), and [onboarding](onboarding.md).
 
-## Initial local command access
+## Selected foreground node and local command access
 
-The current CLI opens the shared private authority directory and artifact database directly.
-SQLite immediate transactions coordinate concurrent command processes and preserve atomic
-receipts; the browser server still exposes no artifact API. This is the selected initial
-local persistence path, preceding the proposed node-attachment/service model above. It does
-not establish singleton node startup, service integration, complete backups, or migration
-recovery. Keep data on the local Linux/WSL filesystem and re-evaluate this access path when
-introducing indexing workers, MCP, background services, or recovery.
+`substrate node` owns one private state directory through a lifetime `runtime.lock`, distinct
+from the authority store's short transaction lock. It opens/migrates SQLite once and listens
+on `node.sock`, mode 0600 inside the validated owner-only directory. Scoped CLI and stdio MCP
+sessions attach to that node; they do not open their own database or start it implicitly.
+Duplicate startup fails without removing the live socket. After abrupt shutdown, the next
+exclusive lock holder may replace a private stale socket and let SQLite recover its journal.
+Normal shutdown stops accepting, drains bounded requests, closes SQLite, removes only its
+own socket identity, and finally releases the installation lock. Closing a bridge leaves the
+node running. A shorter private directory is required when its Unix socket path exceeds
+100 bytes; unavailability returns an actionable bounded error without remote fallback.
+
+This replaces the initial direct scoped CLI persistence path. Trusted owner `source-register`
+and `approve` remain offline commands: stop the node, perform the review command under the
+same exclusive installation lock, and restart. They fail while a node owns the directory.
+Authority setup, scoped credential creation/revocation, and read-only browser context keep
+using the separate authority lock; they do not open SQLite. Installation locks and file modes
+protect against other OS users, not hostile processes using the owner's account or root.
+
+Foreground operation is implemented on the tested Linux environment. User-service installation,
+on-demand startup coordination, full migration backup/restore, native platform packaging,
+and continuous WSL availability remain unimplemented. The browser `serve` command retains
+its separate numeric-loopback status/context interface and no artifact or HTTP MCP API.

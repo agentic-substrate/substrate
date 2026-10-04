@@ -55,6 +55,10 @@ func (s *Session) Inspect(id string) (Artifact, error) {
 				return Artifact{}, ErrUnavailable
 			}
 		}
+		r.Associations, err = loadAssociations(tx, r.ID)
+		if err != nil {
+			return Artifact{}, err
+		}
 		a.Revisions = append(a.Revisions, r)
 	}
 	if err := rows.Err(); err != nil {

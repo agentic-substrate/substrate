@@ -5,8 +5,8 @@
 **Status:** easy joins, inspectable administration, scoped harness access, and concrete human
 publication review are agreed goals. CLI, MCP, and a browser administration interface are
 selected for the first usable release. The browser uses Vite + React, with its static build
-embedded in the Go executable. Concrete MCP transport, background node lifecycle, local IPC,
-shared credential handling, and concrete platform packaging remain open. The local owner/session credential
+embedded in the Go executable. The local stdio MCP/Unix node mechanism is selected below; background service installation,
+remote MCP, shared credentials, and concrete platform packaging remain open. The local owner/session credential
 and browser inspection mechanism is selected in [onboarding](onboarding.md); inspection
 displays an authenticated snapshot and does not persist browser authority. The bootstrap
 uses TypeScript and npm,
@@ -14,7 +14,8 @@ with tool versions pinned in the repository. Linux
 and WSL 2 are selected for the initial release; macOS and native Windows follow later.
 These choices define the release direction. The executable provides trusted local setup, scoped artifact capture/inspection, owner-controlled
 Git registration/approval, and approved snapshot reads. The browser serves status and authenticated
-context inspection; lexical retrieval, MCP, and native artifact adapters remain unavailable.
+context inspection. Local CLI/MCP retrieval attaches to the foreground node; browser artifact
+APIs and native artifact adapters remain unavailable.
 
 ## Interface recommendation
 
@@ -105,8 +106,8 @@ and [authorization](https://modelcontextprotocol.io/specification/2026-07-28/bas
 
 Before adding artifact operations, apply the [local-interface/MCP requirements](security.md#local-interfaces-and-mcp)
 for browser-origin protection, transport-specific authentication, token scope, header validation,
-and versioned client evidence. The cited protocol is a design reference; no transport, SDK,
-or compatibility claim has been selected or verified by the bootstrap.
+and versioned client evidence. The local implementation pins the official Go SDK as described below; remote authorization
+and untested client compatibility remain unverified.
 
 Return explicit readiness, blocked, approval-required, and pending states. Headless workers
 use their own provisioned service principals; they cannot wait indefinitely for interactive
@@ -116,3 +117,36 @@ existing conversations still require the agreed runtime/isolation boundary.
 
 See [installation and lifecycle research](packaging.md), [onboarding](onboarding.md), [artifact decisions](artifacts.md),
 [repository bindings](repositories.md), and [deployment](deployment.md).
+
+## Selected local MCP transport
+
+The bridge uses the official `github.com/modelcontextprotocol/go-sdk` v1.8.0 stdio transport.
+The pinned SDK negotiates its supported protocol version with each client; record the actual
+initialized client/version/protocol rather than assuming the latest design reference was
+negotiated. Each process fixes its private state directory, registered checkout, and private
+credential-file path through trusted startup arguments. Client roots, tool arguments, source
+instructions, and source aliases cannot enlarge that session. The bridge reads the credential
+for every tool operation, and the node authenticates current authority before disclosure.
+
+The four tools are `discovery`, `capture`, `search`, and `read`. Discovery lists up to 20
+current permitted choices and scope-only index coverage. Capture records unverified memory
+with provenance and a stable retry ID. Search uses lexical queries, exact identifiers, explicit
+associations, and one-hop related results. Read requires exactly one current artifact ID,
+revision ID, or registered qualified identity/source alias. Missing, stale, retired, or
+inaccessible objects receive a generic denial; permitted ambiguity receives a conflict.
+Search labels cannot change source approval resolution. There are no registration, approval,
+publication, native-installation, or execution tools. A content read reports native activation
+as unsupported. Tool errors preserve denial, conflict, pending coverage, and unavailable states.
+
+Both stdio and private IPC bound frames to eight MiB and reject invalid raw UTF-8 or unpaired
+Unicode escapes before decoding. Capture remains bounded to one MiB of text and 4096 bytes
+of provenance. IPC connections use two-second connect and at most thirty-second operation
+deadlines, and the runtime admits at most 32 simultaneous connections. A node missing or
+stopped after bridge initialization remains an explicit tool error; no bridge owns its node's
+lifetime. Private transport does not prove safety against the owner's OS account or root.
+The foreground node contract is in [packaging](packaging.md#selected-foreground-node-and-local-command-access).
+
+Actual client evidence belongs in the development guide with exact versions and limitations.
+SDK-level integration checks alone do not advertise a harness as tested, and native feature
+installation remains separate from MCP reads. Re-run client discovery, capture, search, reads,
+denials, concurrent sessions, and stopped-node behavior after transport or client changes.

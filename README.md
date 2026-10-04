@@ -32,8 +32,9 @@ page. Trusted CLI setup binds sessions to explicit spaces and repositories. The 
 inspect, and retire local memory observations with durable revisions and retry receipts.
 The owner can register Git-backed skills and agent definitions, approve exact immutable
 revision/dependency bundles, and inspect qualified choices or alias conflicts. Scoped sessions
-read only approved snapshots in their registered scope. Lexical retrieval, MCP tools, native
-activation, and synchronization remain roadmap work.
+read approved snapshots and current observations in their registered scope through lexical
+search, explicit associations, and CLI or stdio MCP tools attached to one foreground node.
+Native activation, publication, synchronization, and complete recovery remain roadmap work.
 
 ## Try the foundation
 

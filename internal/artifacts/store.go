@@ -130,7 +130,13 @@ func migrate(db *sql.DB) error {
 		if _, err := tx.Exec(selectionSchema); err != nil {
 			return ErrUnavailable
 		}
-	} else if version != 2 {
+		version = 2
+	}
+	if version == 2 {
+		if _, err := tx.Exec(retrievalSchema); err != nil {
+			return ErrUnavailable
+		}
+	} else if version != 3 {
 		return ErrUnavailable
 	}
 	if err := tx.Commit(); err != nil {
