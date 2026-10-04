@@ -91,9 +91,10 @@ and report it in the PR. An unexplained exception is a defect.
 
 1. Build the UI before any whole-module Go command; its files are embedded at compile time.
    Missing build output is a build failure, not an empty successful application.
-2. The bootstrap server accepts numeric loopback listeners only. It has no authentication or
-   artifact APIs; exposing it as a remote service would bypass the current boundary.
+2. The bootstrap server accepts numeric loopback listeners only. Its status/static routes
+   stay anonymous; the read-only context API requires a scoped credential and exact origin/Host checks.
+   It has no artifact APIs; exposing it remotely would bypass the current boundary.
 3. Unknown `/api/` and `/mcp` routes must return errors instead of the SPA entry point.
    Otherwise unsupported integrations can mistake an HTML page for an available API.
-4. Artifact runtime, MCP, storage, and synchronization remain unimplemented. Preserve that
+4. Artifact runtime, MCP, artifact storage, and synchronization remain unimplemented. Preserve that
    distinction in the UI and docs until the corresponding acceptance evidence exists.

@@ -1,13 +1,31 @@
 # Repository context and artifact sources
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each scope, adapter, or storage decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each scope, adapter, or storage decision
 
 **Status:** repository-level artifacts, per-item review before newly derived cross-space
 publication, a checked-in discovery manifest, and mixed source ownership are agreed. Captured
 memory belongs in Substrate; reviewed Git knowledge, skills, and agent definitions can be
 associated with the same repository. Easy user joins and administration are major product
-goals. Exact registration, default write scopes, and adapter mechanisms remain proposals.
-Manifest filename/format and identity/enrollment credentials are not selected.
+goals. Local registration and the nonsecret discovery format are selected below. Default artifact
+write scopes, network enrollment, and adapter mechanisms remain proposals.
+
+## Selected one-node binding mechanism
+
+The trusted owner CLI explicitly registers canonical Git checkout roots in owner-only state
+outside Git. A logical repository belongs to one selected space. Sibling linked worktrees need
+explicit registration and share its repository ID only when native Git common-directory and
+worktree metadata verify the relationship. Recorded common-directory device/inode identity
+detects replacement metadata at the same path. Clones and independently rooted nested
+repositories start separately; ordinary subdirectories use their checkout root.
+
+`.substrate.json` is the selected local discovery filename. The bounded JSON object contains
+only `schema_version: 1`, `repo_id`, and `space_id`; the TOML example below remains a future
+network/source sketch. No discovery field affects registration or session grants. The owner
+selects the actual space through trusted CLI flags. Sessions bind one approved checkout,
+repository, and space, and every authentication rechecks the native binding. Changing CWD,
+copying a manifest, editing repository configuration, or naming a folder Work cannot widen it.
+Moving or replacing Git metadata requires a new trusted registration location; automatic
+move repair and inherited worktree registration are not implemented.
 
 ## Observed environment
 

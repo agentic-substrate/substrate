@@ -9,8 +9,15 @@ import (
 )
 
 // New keeps API failures separate from client-side navigation.
-func New(assets fs.FS) http.Handler {
+func New(assets fs.FS, options ...Options) http.Handler {
+	var config Options
+	if len(options) > 0 {
+		config = options[0]
+	}
 	mux := http.NewServeMux()
+	if config.Authority != nil {
+		mux.HandleFunc("GET /api/context", config.context)
+	}
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")

@@ -82,7 +82,8 @@ operational evidence:
 | Bootstrap numeric loopback restriction and API/MCP errors | Verified with evidence on local WSL 2 | `cmd/substrate/lifecycle.go`, `internal/server/server.go`, their tests, and the check recorded below; other environments remain unverified. |
 | Locked dependencies, pinned CI Actions, restricted CI credentials, dependency review/govulncheck | Implemented but unverified by this change | Lockfiles and `.github/workflows/ci.yml`; hosted runs and settings readback establish operational evidence. |
 | Branch/tag protection, private reporting, secret scanning/push protection | Planned verification of external settings | Read back actual settings; repository prose cannot prove they are enabled. |
-| Artifact/local admin/MCP authorization, file/secret handling, bounded imports | Planned | First-release boundary tests, actor attribution, explicit local encryption/key-storage decision, and manual configuration/permission checks. |
+| Local owner, space/checkout/session binding, bearer context Origin/Host checks, private state persistence | Verified with local evidence dated 2026-10-04 | `internal/authority`, `internal/server/context.go`, CLI and packaged browser tests; plaintext owner-only state is selected, with no same-user/root protection. Re-run after authority/interface changes. |
+| Artifact object/action policy, remote administration/MCP authorization, bounded artifact imports | Planned | First-release boundary tests, actual caller attribution, and transport/client-specific checks. Local session identity is not artifact or remote authorization evidence. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
 
@@ -91,6 +92,21 @@ WSL 2 with Go 1.27.1, Node.js 24.15.0, and npm 11.12.1. Runtime code was revisio
 with documentation/instruction changes only. Its lifecycle, routing, race, packaged smoke,
 and browser checks support the bootstrap row; they do not verify future artifact/MCP/transfer
 controls or hosted repository settings. Re-run relevant checks after a boundary change.
+
+On 2026-10-04, the issue #5 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux x86_64 under WSL 2
+with Go 1.27.1,
+Node.js 24.15.0, and npm 11.12.1. Tests used synthetic `~/repos` equivalents and verified
+manifest nonauthority, explicit worktree/nested binding, scope denial, Git identity replacement,
+expiry/revocation, concurrent grant persistence, failed/oversized state updates, malformed
+Git metadata and missing-Git placement denial, whitespace-preserving paths, browser
+Origin/Host checks, and a real packaged-browser credential/revocation journey. Playwright
+checked keyboard focus, live status semantics, axe states, and 320-pixel reflow. No actual
+screen-reader application, other operating system, artifact policy, MCP client, transfer, or
+hosted security setting was verified. The issue #5 PR identifies the final source revision
+and commands; re-run at the next local trust-boundary change. Final synthetic fixtures used
+`/var/tmp` because a pre-existing `/tmp/.git` marker made `/tmp` unavailable for private
+authority and credential placement; the check did not exempt or remove that marker.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

@@ -5,9 +5,29 @@
 **Status:** easy user joins and administration are major product goals. Repository discovery
 manifests and reusable approved bindings are agreed. Local owner setup and device pairing
 come first, administrator-verified invitations serve early teams, and optional organization
-OIDC follows with organization features. These are design decisions, not implemented behavior.
-Authentication procedures, credential formats, recovery mechanisms, and offline grant
-durations remain open.
+OIDC follows with organization features. Local owner and scoped session setup are implemented through the trusted CLI. Device pairing,
+invitations, organization authentication, recovery mechanisms, and shared offline grant
+durations remain unimplemented and their concrete credentials remain open.
+
+## Selected local owner and session mechanism
+
+The OS account initializes one opaque owner ID with a display name and an initial Personal
+space. Explicit trusted commands create further spaces and checkout registrations. These
+commands rely on OS filesystem ownership; session credentials cannot invoke administration
+over HTTP. A profile/session credential has 256 random bits, is stored outside Git in a new
+0600 file, and is represented only by its SHA-256 digest in private authority state. It binds
+exactly one space/repository/checkout and expires 24 hours after issuance. Revocation removes
+its grant, and subsequent requests re-read current state. This local expiry is independent
+of future network membership or shared offline leases.
+
+Authority uses bounded plaintext JSON with Linux file locking, synced atomic replacement,
+0700 directories, and 0600 files. It provides no at-rest encryption and trusts the owning OS
+account and filesystem administrators. Unsafe permissions, symlinks, corrupt/unavailable
+state, changed Git identity, and ambiguous context fail closed. Private-placement checks
+walk canonical directory ancestors and reject any `.git` marker without trusting successful
+Git parsing; missing Git or inaccessible ancestors fail before creating private files. Starting the anonymous
+bootstrap page does not silently enroll an owner. Pairing, automated moves, token refresh,
+and remote/local-browser administration are future work.
 
 ## Required product outcomes
 
@@ -105,7 +125,8 @@ credential conventions, but application permission checks apply to both. See [MC
 
 Unattended workers need owned service principals and scoped credentials rather than copied
 human enrollment secrets. Their transport and lifecycle are separate implementation decisions.
-Exact local connection, credential storage, administration interface, and recovery procedures
+The one-node owner/session credential storage and read-only browser inspection are selected
+above. MCP connection, remote administration, shared credentials, and recovery procedures
 still require contracts before implementation.
 The [delivery research](delivery.md) records agreed CLI/MCP access and a small Vite + React
 browser administration interface embedded in Go for the first usable release. Exact screens,

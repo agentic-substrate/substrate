@@ -54,7 +54,8 @@ button[aria-disabled="true"] {
   border-color: #53665f;
   cursor: wait;
 }
-button:focus-visible {
+button:focus-visible,
+input:focus-visible {
   outline: 3px solid #1767a6;
   outline-offset: 4px;
 }
@@ -65,4 +66,20 @@ button:focus-visible {
   section {
     padding: 1rem;
   }
+}
+
+label {
+  display: block;
+  font-weight: 600;
+}
+input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  border: 2px solid #53665f;
+  border-radius: 0.35rem;
+  color: #18252b;
+  background: #fff;
+  font: inherit;
 }

@@ -28,7 +28,11 @@ functionality or cross-harness compatibility.
 
 After `make build`, run `./bin/substrate serve` in one terminal and `npm run dev` in another.
 Vite serves the editable UI on loopback and proxies `/api` requests to the Go listener on
-port 9842. The built executable continues to serve its previously compiled assets until rebuilt.
+port 9842. Anonymous status works through this proxy. Credentialed context inspection uses
+the packaged page at the Go listener origin: the protected route intentionally rejects a
+Vite origin/Host rather than weakening its local browser boundary. Rebuild to inspect changed
+context UI behavior with credentials. The built executable continues to serve its previously
+compiled assets until rebuilt.
 
 Run `npm run docs:dev` to preview documentation. `npm run docs:build` produces a static site in
 `docs/.vitepress/dist`; `npm run docs:preview` serves that build. CI publishes the built site as

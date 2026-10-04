@@ -141,9 +141,16 @@ does not establish anonymity. Review proxy headers as well as application logs.
 
 ## Local interfaces and MCP
 
-The bootstrap exposes only loopback status/static routes and rejects unsupported API/MCP
-paths. Before artifact/admin operations exist, decide authentication, browser Origin/CSRF
-protection, credential storage, file permissions, and interface exposure. Loopback alone is
+The bootstrap status/static routes remain anonymous and reveal no restricted context. The
+selected local read-only context route validates one scoped bearer credential, exact numeric
+loopback Host/port, matching Origin when present, and browser Fetch-Site before returning
+binding metadata. Credentials are never cookies or URL parameters. Other unsupported API/MCP
+paths remain errors. Local administration uses the trusted owner CLI, separately from session
+authority. Private authority records and credentials live outside Git; their plaintext storage,
+owner-only modes, synced atomic replacement, and 24-hour local session expiry are selected
+one-node mechanisms. File modes and credential hashes do not protect against same-user or
+root access. Artifact/admin operations must enforce object/action policy in addition to this
+identity foundation; network credential and encryption decisions remain open. Loopback alone is
 insufficient protection from hostile websites or processes running with the same privileges.
 Restrict filesystem, SQLite, and backup access; record the local encryption/key-storage
 decision and the boundary for other users/processes. Attribute privileged and MCP operations
