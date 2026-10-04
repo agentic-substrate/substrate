@@ -2,7 +2,8 @@ import { defineConfig } from "vitepress";
 
 export default defineConfig({
   title: "Substrate",
-  description: "Durable context across coding harnesses, sessions, and machines.",
+  description:
+    "Durable context across coding harnesses, sessions, and machines.",
   cleanUrls: true,
   themeConfig: {
     nav: [
@@ -10,7 +11,10 @@ export default defineConfig({
       { text: "Start", link: "/getting-started" },
       { text: "Development", link: "/development" },
       { text: "Architecture", link: "/architecture/" },
-      { text: "Source", link: "https://github.com/agentic-substrate/substrate" },
+      {
+        text: "Source",
+        link: "https://github.com/agentic-substrate/substrate",
+      },
     ],
     sidebar: [
       { text: "Overview", link: "/" },
