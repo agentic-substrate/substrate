@@ -208,3 +208,48 @@ was running on the same host. The executable/test makes no model runtime or infe
 cloud clients used separately for compatibility are not part of this measurement. No battery,
 energy, large-corpus, concurrent-load, model-quality, or other-platform target is established.
 Repeat with representative real permitted data before selecting an optional enhancement.
+
+### Actual client verification
+
+On 2026-10-04, actual client subprocesses passed against runtime revision
+`badcd99646564d5d0f2baeef00a70176662fa826` on Linux amd64 under WSL 2. The packaged binary's
+SHA256 was `8e30d95d656a1b042e2ac415f8734481bceb49df16ac1db175fc4d9643707dae`.
+Each client listed the four tools and made successful discovery, capture, search, and current
+read calls, including both approved Git artifact types with exact revision, source, content,
+and provenance. Each also exercised empty Personal discovery/search, generic denials for a
+Work artifact ID and qualified source identity, and explicit errors from a separate stopped
+installation. Two overlapping processes per client saved distinct observations and read their
+receipts. Wire responses, identities, and error contents were asserted; process exit and model
+narration alone were insufficient.
+
+| Tested executable | Observed MCP negotiation | Concurrent process overlap |
+|---|---|---|
+| Codex CLI 0.160.0 | `initialize`, `2025-06-18` | 25.77 seconds |
+| Claude Code 2.1.289 | `server/discover`, `2026-07-28` | 8.58 seconds |
+| Cursor Agent 2026.10.01-e373342 | `initialize`, `2025-11-25`; wire client version `1.0.0` | 21.45 seconds |
+| OpenCode 1.18.32 | `initialize`, `2025-11-25` | 10.68 seconds |
+
+Codex saved a synthetic Work observation; Claude searched and read the identical artifact and
+revision from the separately registered Work worktree, preserving its content and provenance.
+Personal results and eligible/indexed/pending/limited counts remained zero, and denied reads
+returned no structured artifact metadata. Closing every bridge left the explicitly started
+node alive. The node was then stopped and reopened using the same final binary and state.
+Both Codex and Claude repeated their original save operations through actual tool calls:
+each returned an identical receipt and read the same revision, content, and provenance after
+the restart. This checks process restart, without establishing device-failure recovery.
+
+The manual fixture used private state and credential files outside Git, synthetic repositories,
+and a transparent Python stdio recorder. Invocation or private project configuration enabled
+only the synthetic MCP servers and disabled native file, shell, web, and delegation actions;
+the emitted client tool events were checked for unexpected actions. Global client configuration
+and authentication were not changed. Existing Codex, Claude, and Cursor authentication was
+used. OpenCode used the working anonymous `opencode/space-bunny-free` provider; two earlier
+free-provider requests returned service errors and did not count as compatibility evidence.
+These cloud model calls evaluated client integration, independently of the model-free retrieval
+workload above. Credentials, raw provider output, and private transcripts stay outside Git.
+
+The PR's `### Verified` section records the exact fixture-runner and assertion commands.
+Re-run this matrix after SDK, transport, authority, node, or advertised client-version changes.
+The observations establish basic local stdio behavior for these executable versions and this
+synthetic workload. They do not establish native installation/execution, remote MCP, other
+platforms, a latency guarantee, complete recovery, or complete accessibility conformance.

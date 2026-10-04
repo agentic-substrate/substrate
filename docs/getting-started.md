@@ -270,3 +270,10 @@ Capture requires `operation_id`, `content`, and `provenance`. Search accepts `qu
 its bridge and leaves the node alive. Missing/stopped nodes return an explicit unavailable
 error with a bounded timeout; no automatic startup or remote fallback occurs. The browser
 HTTP `/mcp` route stays unsupported. See the development guide for actual client verification.
+
+Basic local stdio flows were verified on 2026-10-04 with Codex CLI 0.160.0, Claude Code
+2.1.289, Cursor Agent 2026.10.01-e373342, and OpenCode 1.18.32 on WSL 2. The
+[client verification record](development.md#actual-client-verification) describes the exact
+runtime, protocols, Work-to-worktree reuse, scope denials, and concurrent/unavailable states.
+These checks verify content delivery; native harness installation and execution remain
+unsupported.
