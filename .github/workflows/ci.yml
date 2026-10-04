@@ -95,8 +95,8 @@ jobs:
       - name: Verify documentation guard behavior
         run: |
           node --test --test-isolation=none --test-reporter=tap scripts/*.test.mjs | tee docs-tests.tap
-          rg -q '^# tests [1-9][0-9]*$' docs-tests.tap
-          rg -q '^# skipped 0$' docs-tests.tap
+          grep -Eq '^# tests [1-9][0-9]*$' docs-tests.tap
+          grep -Eq '^# skipped 0$' docs-tests.tap
       - name: Require paired documentation on pull requests
         if: github.event_name == 'pull_request'
         env:

@@ -69,5 +69,8 @@ merge queues when contributor volume makes that operational cost material.
 Backend CI checks reachable Go vulnerabilities with govulncheck. Dependency review blocks
 introduced advisories; Dependabot groups updates for Actions, npm, and Go. A separate CodeQL
 workflow reports Go and JavaScript/TypeScript findings. Third-party Actions are pinned to
-commit SHAs. GitHub alerts, reporting, tag protection, and the required check are separate
+commit SHAs. CodeQL uses separate language jobs: Go requires the real build, while JavaScript
+and TypeScript use source extraction without a manual build. The documentation test-output
+checks use the standard runner's grep command and do not require a ripgrep installation.
+GitHub alerts, reporting, tag protection, and the required check are separate
 repository settings that must be read back and canary-tested after publication.

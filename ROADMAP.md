@@ -8,11 +8,11 @@ defines the evidence for the three Now outcomes.
 
 ## Now
 
-- Reuse permitted memories, skills, and agent definitions across multiple harness sessions on
+- [Feature #2](https://github.com/agentic-substrate/substrate/issues/2): Reuse permitted memories, skills, and agent definitions across multiple harness sessions on
   one Linux or WSL node through a CLI and MCP, with explicit repository bindings and versions.
-- Keep Work and Personal boundaries understandable and enforceable across every artifact
+- [Feature #3](https://github.com/agentic-substrate/substrate/issues/3): Keep Work and Personal boundaries understandable and enforceable across every artifact
   operation, including exact-content human review for permitted cross-space publication.
-- Trust acknowledged saves, restart, backup, and restore, while observing and controlling
+- [Feature #4](https://github.com/agentic-substrate/substrate/issues/4): Trust acknowledged saves, restart, backup, and restore, while observing and controlling
   incremental indexing and bounded background work.
 
 ## Next
