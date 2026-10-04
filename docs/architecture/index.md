@@ -1,10 +1,13 @@
 # Architecture decisions
 
-**Last reviewed:** 2026-10-03. Re-read before changing an accepted boundary or filing its implementation.
+**Last reviewed:** 2026-10-04. Re-read before changing an accepted boundary or filing its implementation.
 
 These decisions describe the agreed direction. The bootstrap status server does not implement
 artifact storage, authorization, MCP, or synchronization. Implementation acceptance lives in
 the [first release contract](../product/first-release.md).
+
+The [vision](../product/vision.md) explains the purpose and intended experience. These pages
+record how selected boundaries support it and where implementation choices remain open.
 
 - [Deployment](deployment.md) starts locally and advances to selectively synchronized nodes.
 - [Delivery](delivery.md) defines the CLI, MCP, and embedded administrative interface.

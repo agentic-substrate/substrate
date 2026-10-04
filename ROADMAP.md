@@ -1,10 +1,12 @@
 # Roadmap
 
-**Last reviewed:** 2026-10-03. Re-read before accepting a foundational epic or changing a horizon.
+**Last reviewed:** 2026-10-04. Re-read before accepting a foundational epic or changing a horizon.
 
-Horizons express confidence in the outcome, not delivery dates. Execution state belongs in the
-GitHub Project once created. The [first release contract](docs/product/first-release.md)
-defines the evidence for the three Now outcomes.
+The [vision](docs/product/vision.md) is durable context that compounds across sessions:
+permitted knowledge and reviewed practice follow the work, with understandable boundaries
+and eventual task continuity. Horizons express confidence in the outcome, not delivery dates.
+Execution state belongs in the [GitHub Project](https://github.com/orgs/agentic-substrate/projects/2).
+The [first release contract](docs/product/first-release.md) defines evidence for the three Now outcomes.
 
 ## Now
 
@@ -24,6 +26,12 @@ defines the evidence for the three Now outcomes.
 
 ## Later
 
+- Keep knowledge useful as projects change through verification, explicit contradiction and
+  staleness handling, and reviewed improvements to reusable procedures.
+- Resume unfinished work across harnesses and machines through structured checkpoints and
+  handoffs. Transcript restoration remains an optional, validated convenience.
+- Deliver effective instructions, preferences, and approved native skills and agent definitions
+  through adapters that preserve the session's permissions and selected versions.
 - Administer team and organization spaces, membership, policy, and auditing without granting
   other projects access to restricted artifacts.
 - Add native macOS and Windows support when lifecycle and packaging can be tested there.

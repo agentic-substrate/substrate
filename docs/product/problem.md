@@ -1,6 +1,6 @@
 # Problem: project knowledge is scattered across tools
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each phase exit
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each phase exit
 
 ## The job
 
@@ -22,7 +22,7 @@ person managing their own machines and a team or organization administrator.
 | Rules are copied between `AGENTS.md`, `CLAUDE.md`, and Cursor rules | A clear answer about which version is authoritative |
 | Preferences are repeated in each harness | Consistent working choices across tools |
 | Decisions and lessons stay in chats or local memory stores | The reasoning and evidence behind earlier work |
-| Skill folders are copied or updated independently | A known, approved version of a reusable procedure |
+| Skill and agent-definition folders are copied or updated independently | A known, approved version of a procedure or role |
 | A task stays inside one conversation | Progress and next steps when work moves elsewhere |
 | Old memories remain available after the code changes | A reliable distinction between current facts and stale claims |
 | Each machine, checkout, and harness needs separate setup | Predictable onboarding and an understandable view of who receives which context |
@@ -33,11 +33,13 @@ skill is approved for a particular team.
 
 ## The product response
 
-Substrate is intended to make context durable beneath interchangeable harnesses. The proposed
-design resolves applicable instructions and preferences, retrieves relevant memories, and
-distributes approved skills from shared authority. Observations would return with scope and
-provenance. The long-term lifecycle adds verification, knowledge maintenance, skill proposals,
-and portable task continuity. The architecture remains under discussion.
+Substrate is intended to make knowledge and working practices durable beneath interchangeable
+harnesses. Applicable instructions and preferences, permitted memories, and approved skills
+and agent definitions should carry forward. Observations return with scope and provenance;
+review and verification can turn useful lessons into reliable knowledge and reusable practice.
+The long-term lifecycle adds knowledge maintenance, procedure improvements, and portable task
+continuity. The [architecture decisions](../architecture/index.md) record selected boundaries
+and mechanisms that still need design. The current bootstrap does not implement this runtime.
 
 ## What must hold
 

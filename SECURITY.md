@@ -1,6 +1,6 @@
 # Security policy
 
-**Last reviewed:** 2026-10-03. Re-read before each release or trust-boundary change.
+**Last reviewed:** 2026-10-04. Re-read before each release or trust-boundary change.
 
 The project is in bootstrap development and has no supported production release. Report
 suspected vulnerabilities privately through the repository's GitHub security reporting page
@@ -28,9 +28,14 @@ exposure or authorization bypass is still worth reporting, even in an experiment
 ## Dependencies and releases
 
 Review dependency changes and prefer a small dependency surface. CI reviews dependencies
-introduced by pull requests, checks reachable Go vulnerabilities, and runs CodeQL. GitHub
+introduced by pull requests and checks reachable Go vulnerabilities. GitHub
 security alerts track repository-wide advisories; unrelated changes should not bypass a
 known finding silently. Avoid credentials in fixtures and keep security checks actionable.
+
+CodeQL scanning is disabled to conserve the current usage budget, and its automatic workflow
+has been removed. Revisit it when maintainers allocate a scanning budget or before the first
+supported production release. Dependency checks, secret scanning and push protection, private
+vulnerability reporting, and branch and release-tag protections remain part of the baseline.
 
 Never move or reuse a published release tag. Publish a new version for a correction, identify
 the affected versions, and retain the original provenance. Release tags and branch rules are

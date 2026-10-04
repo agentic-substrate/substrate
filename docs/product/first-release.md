@@ -1,6 +1,6 @@
 # First usable release
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** before filing or closing a foundational epic
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** before filing or closing a foundational epic
 
 **Status:** agreed release boundary. The architecture and
 artifact policies referenced below are agreed. Product runtime capabilities are not implemented;
@@ -15,6 +15,12 @@ without carrying Work material into Personal projects.
 Use one owner, one node, and multiple harness sessions in one Linux environment or WSL 2
 distro. Include memories, skills, and agent definitions from the first usable release. Start
 with scoped discovery and content delivery, then add synchronization across environments.
+
+This is the first step toward the [vision](vision.md), rather than the whole learning loop.
+It must demonstrate that knowledge survives a harness switch, that reviewed versions and
+permissions remain understandable, and that captured work is durable. Cross-machine continuity,
+automatic knowledge maintenance, and native harness delivery build on that evidence later;
+they are not prerequisites for this release.
 
 | Boundary | Benefit | Tradeoff |
 |---|---|---|
