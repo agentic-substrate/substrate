@@ -240,8 +240,9 @@ the restart. This checks process restart, without establishing device-failure re
 
 The manual fixture used private state and credential files outside Git, synthetic repositories,
 and a transparent Python stdio recorder. Invocation or private project configuration enabled
-only the synthetic MCP servers and disabled native file, shell, web, and delegation actions;
-the emitted client tool events were checked for unexpected actions. Global client configuration
+only the synthetic MCP servers and disabled native file, shell, and web actions. Prompts
+prohibited delegation, and emitted client tool events were checked for unexpected actions.
+Global client configuration
 and authentication were not changed. Existing Codex, Claude, and Cursor authentication was
 used. OpenCode used the working anonymous `opencode/space-bunny-free` provider; two earlier
 free-provider requests returned service errors and did not count as compatibility evidence.
