@@ -43,3 +43,5 @@ does not load external scripts or fonts.
 No artifact, MCP, database, pairing, or synchronization endpoint exists yet. See the
 [first release contract](product/first-release.md) for their required behavior and
 [development guide](development.md) for checks that validate this checkout.
+
+The temporary verification branch adds a status-page sentence to exercise the paired-guide requirement.
