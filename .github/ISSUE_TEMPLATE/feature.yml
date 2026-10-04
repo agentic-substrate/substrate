@@ -1,0 +1,18 @@
+name: Feature proposal
+description: Propose a concrete user outcome and its acceptance evidence.
+type: Feature
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: Explain the situation, need, and result. Link the relevant product contract.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence and boundaries
+      description: Describe observable behavior, constraints, and what remains outside scope.
+    validations:
+      required: true

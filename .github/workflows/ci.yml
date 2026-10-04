@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: make build
+      - run: go test -race -shuffle=on -cover -json ./... | tee test-output.json
+      - name: Require executed Go tests with no skips
+        if: always()
+        run: |
+          test -s test-output.json
+          jq -es 'any(.[]; .Action == "pass" and .Test != null) and all(.[]; .Action != "skip" or .Test == null)' test-output.json
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l cmd internal)"
+      - run: npm run test:smoke
+      - name: Check reachable Go vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check:web
+      - run: make build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Require executed browser tests with no skips
+        if: always()
+        run: |
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; const {stats} = JSON.parse(readFileSync("test-results/browser.json")); if (stats.expected < 1 || stats.skipped !== 0 || stats.unexpected !== 0) process.exit(1);'
+
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-preview
+          path: docs/.vitepress/dist
+          if-no-files-found: error
+          retention-days: 7
+      - run: npm run check:docs
+      - name: Verify documentation guard behavior
+        run: |
+          node --test --test-isolation=none --test-reporter=tap scripts/*.test.mjs | tee docs-tests.tap
+          grep -Eq '^# tests [1-9][0-9]*$' docs-tests.tap
+          grep -Eq '^# skipped 0$' docs-tests.tap
+      - name: Require paired documentation on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: npm run check:docs-required -- --base "$BASE_SHA"
+
+  dependencies:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-scopes: runtime, development, unknown
+
+  gate:
+    if: always()
+    needs: [backend, frontend, docs, dependencies]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable check to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          jq -e --arg event "$EVENT_NAME" '
+            .backend.result == "success" and
+            .frontend.result == "success" and
+            .docs.result == "success" and
+            (if $event == "pull_request" then .dependencies.result == "success"
+             else .dependencies.result == "skipped" end)
+          ' <<< "$JOB_RESULTS"
