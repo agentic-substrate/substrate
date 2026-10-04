@@ -1,11 +1,12 @@
 # Offline changes and conflict resolution
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each synchronization or artifact-lifecycle decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each synchronization or artifact-lifecycle decision
 
 **Status:** local durability, explicit shared authority, current permission checks on reconnect,
 Git source ownership, and reviewed cross-space publication are agreed. The type-aware
 reconciliation policy below is selected for the initial implementation.
-Wire formats, identifiers, retention, and implementation are still open.
+Synchronization wire formats, cross-node identifiers, retention, and implementation are
+still open; the selected local persistence contract below is implemented.
 
 ## Agreed initial policy
 
@@ -93,7 +94,9 @@ Exact deletion markers, compaction rules, draft retention, and restore protocol 
 
 Validate duplicate retries, two offline edits, edit versus retirement, stale approvals,
 revoked submissions, and permission-safe review before declaring synchronization ready.
-No conflict engine or synchronization acceptance test is implemented yet.
+The local store now preserves expected-base candidates, operation receipts, and retirement
+state under the [selected persistence contract](artifacts.md#selected-local-persistence-contract).
+This is not a synchronization engine or synchronization acceptance test.
 
 See [deployment](deployment.md), [offline grants](offline.md), [source ownership](repositories.md),
 and [sharing](sharing.md).

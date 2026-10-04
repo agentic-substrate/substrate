@@ -15,9 +15,10 @@ The [problem](product/problem.md), [positioning](product/positioning.md), and
 
 ## Run the current foundation
 
-This checkout provides a Go executable with an embedded status page. Artifact storage,
-retrieval, MCP tools, and synchronization are future work. Product goals and agreed architecture
-describe the intended system; the runnable shell does not implement them yet.
+This checkout provides a Go executable with an embedded status and session-context page.
+Trusted CLI bindings and local artifact capture/inspection/retirement are available. Retrieval,
+approved Git version selection, MCP tools, and synchronization remain future work. Product
+goals describe the complete intended system, beyond these verified local capabilities.
 
 Start with [getting started](getting-started.md) to run the current executable, then read the
 [development guide](development.md) for verification and previews.

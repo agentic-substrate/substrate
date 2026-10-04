@@ -1,12 +1,12 @@
 # Artifact precedence, discovery, and policy
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each policy, search, or adapter decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each policy, search, or adapter decision
 
 **Status:** artifacts means memories, skills, and agent definitions. The decision order,
 type-specific precedence, search boundaries, segmentation, denied/approval/allowed distinction,
 and mandatory organization restrictions are agreed. Per-item cross-space publication review
-is also agreed. These are design decisions, not implemented behavior. Exact schemas, policy
-evaluator, isolation mechanisms, and offline grant durations and enforcement remain open.
+is also agreed. Local repository-scoped persistence is selected below. Broader policy
+evaluation, publication, isolation mechanisms, and offline grant durations and enforcement remain open.
 The [offline model](offline.md) uses finite administrator-controlled shared grants with
 online-only sensitive exceptions and independent wholly owned Personal operation.
 
@@ -169,3 +169,64 @@ A Work-to-Personal switch needs fresh authorized context; old conversation conte
 be retracted. Offline revocation follows the agreed [grant policy](offline.md), with durations
 and enforcement mechanisms still open. See [sharing](sharing.md),
 [retrieval](retrieval.md), and [repository bindings](repositories.md).
+
+## Selected local persistence contract
+
+The one-owner implementation stores artifacts in `artifacts.db` beside trusted authority
+state, outside Git checkouts, under an owner-only directory. SQLite uses the pinned
+`github.com/ncruces/go-sqlite3` v0.35.6 `database/sql` driver, rollback journaling and
+`synchronous=EXTRA`. The encoded `modeof` URI parameter makes driver-created journals inherit
+the validated private database mode without changing process-wide umask. Tests cover live
+transactions, a waiting independent opener, and recovery from an abruptly exited process
+with a hot rollback journal; they do not prove device-failure recovery. The cgo-free driver
+avoids compiler/build-tag requirements and registers its supported FTS5 extension for later
+lexical indexing. The actual capability check reports
+SQLite 3.53.4. Compared with `modernc.org/sqlite` v1.60.1 it needs a smaller production dependency
+set; `mattn/go-sqlite3` v1.14.52 needs cgo and an FTS5 build tag.
+This choice does not establish performance or memory targets. The driver documents higher
+per-connection memory use from its Wasm sandbox; actual application resource measurements
+remain future evidence. See the [driver guidance](https://github.com/ncruces/go-sqlite3/tree/v0.35.6)
+and [SQLite synchronization settings](https://www.sqlite.org/pragma.html#pragma_synchronous).
+
+A storage session retains its credential privately and authenticates through current local
+authority on every operation. Caller-supplied destination IDs can narrow or match that binding;
+they cannot grant another space or repository. Every lookup filters owner, space, and repository
+before loading content, revision, receipt, or pending-work metadata. Missing and inaccessible
+objects share a generic denial. This is repository-scoped authorization for one trusted OS
+user; plaintext files and mode protection do not isolate that user or root.
+
+A successful contribution atomically commits artifact identity, immutable revision content,
+provenance, operation receipt, and pending incremental work. Schema version 1 is installed
+transactionally; a newer unknown schema fails with an actionable unavailable error. A
+contribution operation ID is unique within owner/space/repository. An exact retry returns its
+original receipt; a changed payload under that ID is rejected. Text content and every
+contribution/lookup/retirement string must be valid UTF-8 before fingerprinting or persistence.
+Invalid bytes are rejected instead of being normalized to U+FFFD; valid U+FFFD is preserved.
+No receipt is returned before commit. Storage failure remains unavailable, even when indexing
+has no consumer yet.
+
+Memory observations are unverified and pending-local. An edit against the current expected
+revision advances the local head; an outdated edit is preserved as a conflict candidate and
+cannot replace that head. Retirement checks the expected head and persists lifecycle state;
+later edits remain restricted candidates and cannot restore the artifact. Restoration,
+verification, publication, and shared acceptance are unavailable. Provenance is a claim from
+the contributing session, not independently verified factual evidence.
+
+Skill and agent-definition contributions read exact bytes from a full Git commit in the
+session's registered checkout, retain commit/path/blob identity, and remain candidates with
+no effective head. A moving ref, an unsafe/non-UTF-8 path, a symlink blob, or invalid UTF-8
+source content is rejected. Source paths identify one literal regular file, never a directory
+or `.`. Git tree reads require exactly one NUL-terminated entry whose raw path equals the
+requested path; literal wildcard characters, tabs, and trailing spaces remain supported.
+Source commands use an empty `GIT_ALLOW_PROTOCOL` allowlist,
+which overrides repository transport settings and blocks missing-object promisor fetch
+helpers and network access. Required objects must already be local. This mechanism is
+verified on Git 2.43.0, rather than relying on an unsupported no-lazy-fetch flag. See the
+[versioned Git environment contract](https://github.com/git/git/blob/v2.43.0/Documentation/git.txt).
+Capturing does not approve or execute source. Trusted registration and explicit approved-version
+selection are separate work; neither source text nor operation arguments can approve content.
+
+The local reopen and rollback checks prove the tested application's acknowledgment boundary.
+They do not prove device-failure durability, complete backup/restore, replica recovery,
+synchronization, retrieval readiness, or harness compatibility. Re-read this decision when
+schema, driver, authorization, Git selection, indexing, or recovery behavior changes.

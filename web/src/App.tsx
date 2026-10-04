@@ -64,10 +64,11 @@ export function App() {
         <h2 id="scope-heading">Available in this checkout</h2>
         <p>
           Trusted local owner setup, explicit space and repository bindings, and
-          scoped session credentials are available through the CLI.
+          scoped session credentials are available through the CLI. The CLI can
+          also save and inspect local memory observations.
         </p>
         <p>
-          Artifact storage, scoped MCP tools, publication review, and
+          Browser artifact inspection, scoped MCP tools, publication review, and
           synchronization are planned work.
         </p>
       </section>

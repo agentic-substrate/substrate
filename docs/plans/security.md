@@ -83,7 +83,8 @@ operational evidence:
 | Locked dependencies, pinned CI Actions, restricted CI credentials, dependency review/govulncheck | Implemented but unverified by this change | Lockfiles and `.github/workflows/ci.yml`; hosted runs and settings readback establish operational evidence. |
 | Branch/tag protection, private reporting, secret scanning/push protection | Planned verification of external settings | Read back actual settings; repository prose cannot prove they are enabled. |
 | Local owner, space/checkout/session binding, bearer context Origin/Host checks, private state persistence | Verified with local evidence dated 2026-10-04 | `internal/authority`, `internal/server/context.go`, CLI and packaged browser tests; plaintext owner-only state is selected, with no same-user/root protection. Re-run after authority/interface changes. |
-| Artifact object/action policy, remote administration/MCP authorization, bounded artifact imports | Planned | First-release boundary tests, actual caller attribution, and transport/client-specific checks. Local session identity is not artifact or remote authorization evidence. |
+| Local repository-scoped artifact persistence, immutable Git candidates, current session checks | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, CLI tests and packaged command journey; permission filtering, retries, stale revisions, commit failure, and retirement verified below. Re-run after storage, source, or authority changes. |
+| Broader artifact action policy, remote administration/MCP authorization, shared imports/publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local storage evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
 
@@ -107,6 +108,47 @@ hosted security setting was verified. The issue #5 PR identifies the final sourc
 and commands; re-run at the next local trust-boundary change. Final synthetic fixtures used
 `/var/tmp` because a pre-existing `/tmp/.git` marker made `/tmp` unavailable for private
 authority and credential placement; the check did not exempt or remove that marker.
+
+On 2026-10-04, the issue #6 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux x86_64 under WSL 2
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, and SQLite 3.53.4 through the pinned driver.
+Synthetic tests verified acknowledged reopen, whole-transaction and commit-failure rollback,
+expected-base candidates, immutable retry receipts, changed-payload rejection, retirement,
+Work/Personal and same-space repository filtering, revoked-session reads/writes/queue access,
+private database/journal modes, unknown-schema rejection, eight concurrent retries across two
+connections, FTS5 initialization, and raw Git commit/blob identity despite replacement refs.
+The same-space read check also failed when its repository predicate was deliberately removed,
+then passed after restoration. A compiled CLI subprocess journey verified capture, subsequent
+process inspection/retry, changed retry denial, pending work, retirement, and revoked access.
+Existing packaged-browser checks covered axe error/context states, keyboard focus, and
+320-pixel reflow after a text-only capability correction. The pinned CI govulncheck command
+reported no reachable vulnerabilities. The issue #6 PR records the final source revision and
+exact commands. This does not verify device/power failure, backups/restores, replica recovery,
+normal retrieval, MCP clients, shared policy, publication, performance, an actual screen reader,
+or other operating systems. Clean `TMPDIR` avoids this host's unrelated `/tmp/.git` marker;
+private-placement enforcement has no test exemption. Re-run at the next local boundary change.
+
+The issue #6 review corrections were verified on 2026-10-04 in the same toolchain/environment,
+with Git 2.43.0. Invalid UTF-8 previously received receipts and could alias changed payloads;
+new text validation rejects every contribution/lookup/retirement string and raw Git text before
+fingerprinting, while preserving valid U+FFFD. Live and hot journal tests initially observed
+0644 files; the supported encoded `modeof` URI now yields 0600 journals under a child process's
+022 umask. An independent opener waits for a live transaction, and abrupt-process hot-journal
+rollback preserves an earlier acknowledged revision while discarding uncommitted writes.
+A missing promisor blob previously executed a synthetic repository uploadpack helper. The
+empty `GIT_ALLOW_PROTOCOL` environment allowlist now overrides even permissive repository
+and caller settings: uploadpack and external-helper markers remain absent, and a synthetic
+loopback HTTP receiver records zero requests. Final check commands and the repaired source
+revision are recorded in PR #18. These controls do not claim arbitrary Git plugin isolation,
+device/power-failure recovery, backup completeness, or network synchronization readiness.
+
+A further source-provenance regression on 2026-10-04 demonstrated that `.` could capture
+the first regular file from a one-file or multi-file root tree while recording the false
+path `.`. The source reader now rejects `.` and requires exactly one NUL-terminated Git tree
+entry with a raw path equal to the requested literal filename. Tests preserve exact bytes,
+paths, and blob IDs for literal asterisk, tab, and trailing-space names and reject directories
+and unmatched glob-looking paths. The final commands and source revision are recorded in
+PR #18; these local checks do not extend the existing recovery or platform claims.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

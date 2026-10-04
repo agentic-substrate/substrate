@@ -149,8 +149,10 @@ paths remain errors. Local administration uses the trusted owner CLI, separately
 authority. Private authority records and credentials live outside Git; their plaintext storage,
 owner-only modes, synced atomic replacement, and 24-hour local session expiry are selected
 one-node mechanisms. File modes and credential hashes do not protect against same-user or
-root access. Artifact/admin operations must enforce object/action policy in addition to this
-identity foundation; network credential and encryption decisions remain open. Loopback alone is
+root access. Local artifact CLI/storage operations now authenticate each call and filter
+owner/space/repository before reads, writes, receipts, and pending-work disclosure. Plaintext
+SQLite storage follows the private-placement boundary and preserves immutable candidates and
+retirement. Broader artifact/admin operations still need their complete object/action policy; network credential and encryption decisions remain open. Loopback alone is
 insufficient protection from hostile websites or processes running with the same privileges.
 Restrict filesystem, SQLite, and backup access; record the local encryption/key-storage
 decision and the boundary for other users/processes. Attribute privileged and MCP operations

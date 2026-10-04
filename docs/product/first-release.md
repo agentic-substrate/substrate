@@ -3,8 +3,9 @@
 **Last reviewed:** 2026-10-04 · **Re-read cadence:** before filing or closing a foundational epic
 
 **Status:** agreed release boundary. The architecture and
-artifact policies referenced below are agreed. Product runtime capabilities are not implemented;
-the bootstrap establishes the scaffold, checks, contributor contract, and roadmap.
+artifact policies referenced below are agreed. Trusted local bindings and repository-scoped artifact persistence are implemented;
+retrieval, approved Git version selection, MCP, indexing, and backup/restore remain unfinished.
+The bootstrap browser establishes status and context inspection, not the complete release.
 
 ## Job and scope
 
