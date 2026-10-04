@@ -36,7 +36,8 @@ export function App() {
       <p className="eyebrow">Local application</p>
       <h1>Substrate</h1>
       <p className="intro">
-        Project knowledge that carries between coding sessions.
+        Project knowledge that carries between coding sessions. Verification
+        canary.
       </p>
       <section aria-labelledby="status-heading">
         <h2 id="status-heading">Application status</h2>
