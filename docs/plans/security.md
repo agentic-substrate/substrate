@@ -84,7 +84,7 @@ operational evidence:
 | Branch/tag protection, private reporting, secret scanning/push protection | Planned verification of external settings | Read back actual settings; repository prose cannot prove they are enabled. |
 | Local owner, space/checkout/session binding, bearer context Origin/Host checks, private state persistence | Verified with local evidence dated 2026-10-04 | `internal/authority`, `internal/server/context.go`, CLI and packaged browser tests; plaintext owner-only state is selected, with no same-user/root protection. Re-run after authority/interface changes. |
 | Local repository-scoped artifact persistence, immutable Git candidates, current session checks | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, CLI tests and packaged command journey; permission filtering, retries, stale revisions, commit failure, and retirement verified below. Re-run after storage, source, or authority changes. |
-| Local owner Git registration/approval, scoped qualified/alias delivery, immutable dependency bundles | Implemented but unverified by this documentation change; project maintainers own review | `internal/artifacts` selection/bundle tests and separate owner/scoped CLI commands; record passing dated commands before claiming verification. Re-run after source, selection, schema, or authority changes. |
+| Local owner Git registration/approval, scoped qualified/alias delivery, immutable dependency bundles | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts` selection/bundle tests and separate owner/scoped CLI commands; dated commands and limits below. Re-run after source, selection, schema, or authority changes. |
 | Broader artifact action policy, remote administration/MCP authorization, shared imports/publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local storage evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
@@ -142,6 +142,38 @@ and caller settings: uploadpack and external-helper markers remain absent, and a
 loopback HTTP receiver records zero requests. Final check commands and the repaired source
 revision are recorded in PR #18. These controls do not claim arbitrary Git plugin isolation,
 device/power-failure recovery, backup completeness, or network synchronization readiness.
+
+On 2026-10-04, the issue #7 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux x86_64 under WSL 2
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. Runtime revision
+`85940872f62cbaffcca65801053d1b6e52c46d75` includes the preceding storage-boundary repairs.
+Sixteen new test functions verify immutable approved content after source movement/deletion and
+reopen, exact dependency snapshots/provenance, bounded and invalid-UTF-8 inputs, expected-head and
+candidate-base checks, retirement, unique qualified identities, ambiguous aliases, explicit
+one-level override pins and their invalidation, inspectable relationship metadata, transaction
+rollback, version 1 migration, and current Work/Personal and same-space repository filtering.
+Removing the repository predicate made its denial test fail; restoring it passed. Removing
+approval text validation also failed the before-retry regression. These mutation checks use
+synthetic data and leave the production controls intact.
+
+A separate packaged command journey used private `/var/tmp` fixtures and 23 CLI subprocesses
+for setup, candidate capture, owner registration, unapproved/stale-approval denial, exact approval,
+source/reference edits and removal, pinned content read, duplicate alias denial and authorized
+alternatives, qualified reads, retirement, pending work, and revoked reads/listing. Successful
+content reads report native activation as unsupported. The final full check also passed the
+inherited private-journal/hot-recovery and missing-object transport-denial tests, Go race/shuffle,
+vet/format, packaged server smoke, all three existing browser flows, web checks, and built local
+document links. The browser source did not change. The pinned govulncheck command reported no
+reachable vulnerabilities. Documentation decisions passed against the stacked PR base and
+`origin/main`; the issue #7 PR records exact commands and the final documentation revision.
+
+This verifies a trusted local OS owner boundary, not a remote human-review or same-account
+hostile-process boundary. It does not prove native installation/execution, complete dependency
+inventory discovery, external source/history authorization, MCP/harness compatibility, lexical
+retrieval, publication, network transfer, device/power-failure durability, complete backup/restore,
+resource targets, another platform, or framework/audit conformance. Owner review must declare
+the complete same-commit dependency inventory. Re-run at the next source, selection, schema,
+or authority change; later adapters must preserve these checks and independently prove delivery.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget
