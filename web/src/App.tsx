@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { SessionContext } from "./SessionContext";
+
 type Status = "loading" | "connected" | "error";
 
 export function App() {
@@ -57,11 +59,12 @@ export function App() {
           Refresh status
         </button>
       </section>
+      <SessionContext />
       <section aria-labelledby="scope-heading">
         <h2 id="scope-heading">Available in this checkout</h2>
         <p>
-          The application shell and development checks are ready for building
-          the local artifact layer.
+          Trusted local owner setup, explicit space and repository bindings, and
+          scoped session credentials are available through the CLI.
         </p>
         <p>
           Artifact storage, scoped MCP tools, publication review, and

@@ -5,14 +5,22 @@ test("the packaged UI reports connection failure and recovers by keyboard", asyn
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("status")).toContainText("Connected");
+  await expect(
+    page
+      .getByRole("region", { name: "Application status" })
+      .getByRole("status"),
+  ).toContainText("Connected");
   await page.route("**/api/status", (route) => route.abort());
   await page.keyboard.press("Tab");
   await expect(
     page.getByRole("button", { name: "Refresh status" }),
   ).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toContainText("Unable to reach");
+  await expect(
+    page
+      .getByRole("region", { name: "Application status" })
+      .getByRole("status"),
+  ).toContainText("Unable to reach");
   await expect(
     page.getByRole("button", { name: "Refresh status" }),
   ).toBeFocused();
@@ -22,7 +30,11 @@ test("the packaged UI reports connection failure and recovers by keyboard", asyn
   expect(scan.violations).toEqual([]);
   await page.unroute("**/api/status");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toContainText("Connected");
+  await expect(
+    page
+      .getByRole("region", { name: "Application status" })
+      .getByRole("status"),
+  ).toContainText("Connected");
   await page.setViewportSize({ width: 320, height: 800 });
   expect(
     await page.evaluate(

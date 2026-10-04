@@ -12,7 +12,10 @@ Use synthetic data where possible. Maintainers will investigate and coordinate d
 there is no guaranteed response deadline at this stage.
 
 The current server is intended for a trusted Linux or WSL user and accepts loopback listeners.
-It serves a status page and has no artifact storage, authentication, enrollment, or MCP tools.
+It serves an anonymous status page and a credentialed read-only session context endpoint.
+Trusted local CLI setup provides owner, space, checkout, and scoped session records; artifact
+storage, network enrollment, pairing, and MCP tools remain unavailable. Plaintext owner-only
+state files do not protect against the owner’s OS account, root, or endpoint compromise.
 Future artifact authorization must apply to every read, search, list, mutation, delivery, and
 publication surface. Repository contents and model-supplied arguments cannot grant authority.
 

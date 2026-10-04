@@ -5,8 +5,11 @@
 **Status:** easy joins, inspectable administration, scoped harness access, and concrete human
 publication review are agreed goals. CLI, MCP, and a browser administration interface are
 selected for the first usable release. The browser uses Vite + React, with its static build
-embedded in the Go executable. Concrete MCP transport, node lifecycle, local IPC, credential
-handling, and concrete platform packaging remain open. The bootstrap uses TypeScript and npm,
+embedded in the Go executable. Concrete MCP transport, background node lifecycle, local IPC,
+shared credential handling, and concrete platform packaging remain open. The local owner/session credential
+and browser inspection mechanism is selected in [onboarding](onboarding.md); inspection
+displays an authenticated snapshot and does not persist browser authority. The bootstrap
+uses TypeScript and npm,
 with tool versions pinned in the repository. Linux
 and WSL 2 are selected for the initial release; macOS and native Windows follow later.
 These choices define the release direction. Artifact delivery and administration are not yet
