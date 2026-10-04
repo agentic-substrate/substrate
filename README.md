@@ -1,8 +1,31 @@
 # Substrate
 
-Substrate is an open source foundation for carrying permitted memories, skills, and agent
-definitions between coding harnesses. When a session changes tools or projects, useful context
-should survive without leaking Work artifacts into Personal projects.
+Substrate is an open source, self-hosted context layer beneath coding harnesses. Its goal is
+for useful knowledge and working practices to survive a change of tool, session, or machine,
+while people retain control over where that context belongs and who can use it.
+
+Memories, skills, and agent definitions are **artifacts**. Together with applicable
+instructions, working preferences, and future task checkpoints, they should let the next
+session build on what earlier work learned instead of starting with another project briefing.
+
+## The result we are working toward
+
+A developer can switch harnesses, continue on another laptop, or join an existing repository
+and receive the permitted context needed for that work. A lesson can become a verified memory
+or a reviewed procedure, with its source and history preserved. As code and circumstances
+change, outdated or conflicting knowledge should be visible rather than quietly treated as fact.
+
+Work and Personal remain separate even on the same machine. A useful coding practice can
+cross that boundary only through an authorized, reviewed publication of a separate version.
+An organization can prohibit outside-project use. People and administrators can inspect what
+is stored locally, what is synchronized, which version applies, and why a session receives it.
+Joining devices and managing access should reduce setup work instead of creating another system
+that needs constant attention.
+
+The [vision](docs/product/vision.md) describes the full learning and continuity loop. The
+[first release contract](docs/product/first-release.md) defines the initial evidence we need.
+
+## Available today
 
 This checkout is the bootstrap foundation. It builds a Go executable with an embedded
 Vite/React status page. Artifact storage, retrieval, MCP tools, and synchronization are roadmap
@@ -44,6 +67,6 @@ administrative interface. Initial retrieval uses text and explicit associations.
 Tailscale, PostgreSQL, and pgvector are not requirements. The SQLite driver and other runtime
 libraries will be selected when implementing their contracts.
 
-Read the [roadmap](ROADMAP.md), [product framing](docs/product/vision.md), and
+Read the [roadmap](ROADMAP.md), [public Project](https://github.com/orgs/agentic-substrate/projects/2), and
 [architecture decisions](docs/architecture/index.md). The whole project is licensed under
 [Apache 2.0](LICENSE). There is no separate paid edition or required hosted service.

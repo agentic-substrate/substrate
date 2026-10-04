@@ -1,6 +1,6 @@
 # Development
 
-**Last reviewed:** 2026-10-03. Re-read whenever a command, tool version, or CI contract changes.
+**Last reviewed:** 2026-10-04. Re-read whenever a command, tool version, or CI contract changes.
 
 ## Setup and verification
 
@@ -69,10 +69,12 @@ merge queues when contributor volume makes that operational cost material.
 Backend CI checks reachable Go vulnerabilities with govulncheck. Dependency review blocks
 introduced advisories in runtime, development, and unknown scopes because build dependencies
 also run in contributor and CI environments. Dependabot groups updates for Actions, npm,
-and Go. A separate CodeQL
-workflow reports Go and JavaScript/TypeScript findings. Third-party Actions are pinned to
-commit SHAs. CodeQL uses separate language jobs: Go requires the real build, while JavaScript
-and TypeScript use source extraction without a manual build. The documentation test-output
+and Go. Third-party Actions are pinned to commit SHAs. The documentation test-output
 checks use the standard runner's grep command and do not require a ripgrep installation.
 GitHub alerts, reporting, tag protection, and the required check are separate
 repository settings that must be read back and canary-tested after publication.
+
+CodeQL scanning is disabled at the repository, and its automatic workflow has been removed
+to conserve the current usage budget. The required `gate` belongs to CI and does not depend
+on CodeQL. Revisit scanning when maintainers allocate a budget or before the first supported
+production release; review the workflow and repository setting together when restoring it.
