@@ -115,7 +115,8 @@ process opens the store, and abrupt-exit/cache-spill evidence exercises hot-jour
 This process-interruption check does not establish device-failure or complete recovery.
 Pending work is committed with content; there is no consumer or pause/resume control yet.
 Existing receipts survive retries, while retirement remains authoritative for later reads.
-Schema version 1 is created transactionally and unknown versions fail before contribution.
+Schema version 1 stores migrate transactionally to version 2, adding immutable source registrations
+and exact revision approval/override records. Unknown versions fail before contribution.
 Do not edit the database directly or treat copying a live file as an application backup.
 
 After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
@@ -130,3 +131,19 @@ Their temporary roots must be outside every Git checkout; an ancestor `.git` mar
 intentional fail-closed placement denial, even if its Git metadata is broken. Select a clean
 `TMPDIR` in that case. The issue #6 local verification used `TMPDIR=/var/tmp` because this host
 has an unrelated `/tmp/.git` marker. That environment choice is not a source-code exception.
+
+
+Local Git selection separates trusted owner operations from credentialed proposals and reads.
+`internal/artifacts/registration.go` binds qualified identities, `approval.go` handles expected-head
+and default pins, `selection.go` filters scope before resolving alternatives, and `bundle.go`
+captures an explicit bounded dependency inventory through the hardened raw Git reader. Owner
+commands cannot be invoked through the scoped session command handler. Registration/approval
+labels do not establish audience or execution rights. Approval and retirement enqueue durable
+incremental work for the future index consumer.
+
+Focused checks cover source movement and deletion after approval, reopen, stale approval and
+competing candidate state, ambiguous aliases, override target changes, retirement, same-space
+repository and Work/Personal filtering, revocation, failed approval rollback, version 1 migration,
+bounded UTF-8 dependency snapshots, and the proposal/owner/read CLI flow. Use the same clean
+`TMPDIR` and full verification environment described above. Content delivery has no native
+adapter, script runner, external dependency resolver, or tested harness-installation behavior.

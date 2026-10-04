@@ -63,6 +63,13 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 	if c.Kind != "memory" && (c.Source == nil || c.Content != "") {
 		return Receipt{}, errors.New("skills and definitions require immutable Git source; content is read from Git")
 	}
+	if c.Source != nil {
+		for _, file := range c.Source.Files {
+			if !validText(file.Path, file.Blob, file.Content) {
+				return Receipt{}, ErrInvalidText
+			}
+		}
+	}
 	hash := fingerprint(c)
 	tx, err := s.store.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -91,7 +98,7 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 	var source string
 	state := "pending-local"
 	if c.Kind != "memory" {
-		content, src, err := readSource(ctx.Checkout, *c.Source)
+		content, src, err := readBundle(ctx.Checkout, *c.Source)
 		if err != nil {
 			return Receipt{}, err
 		}

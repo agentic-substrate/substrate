@@ -119,16 +119,75 @@ current lifecycle or delivery grant. Re-inspect before using saved content.
 
 Every operation rechecks the session credential and registered Git checkout. Missing and
 inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
-skill and agent-definition storage retains committed source bytes and provenance as unapproved
-candidates through its internal API. Git source text must also be valid UTF-8. A source path
-must name one literal regular file and match the returned Git entry exactly; directories and
-`.` are rejected, while literal wildcard characters, tabs, and trailing spaces are preserved.
-Reads use locally available objects only: a missing promisor object remains unavailable without
-remote-helper execution or network access, even when repository configuration allows a
-transport. Materialize required Git objects separately through your trusted Git workflow.
-Source registration and approved-version selection, normal
-recall, MCP, cross-space publication, indexing consumption, and backup/restore are separate work.
+skills and agent definitions use the proposal and owner approval flow below. Git source text
+must also be valid UTF-8. Each main or dependency path must name one literal regular file and
+match the returned Git entry exactly; directories and `.` are rejected, while literal wildcard
+characters, tabs, and trailing spaces are preserved. Reads use locally available objects only:
+a missing promisor object remains unavailable without remote-helper execution or network access,
+even when repository configuration allows a transport. Materialize required objects separately
+through your trusted Git workflow. Normal lexical recall, MCP, cross-space publication, indexing
+consumption, and backup/restore remain unavailable.
 The browser remains a status and read-only context view, with no artifact editing endpoint.
+
+## Git candidates and approved content
+
+`propose` captures a skill or agent-definition snapshot from an exact full Git commit in the
+session's registered checkout. It reads regular raw Git blobs; branch names, unsafe paths,
+symlinks, and missing objects fail. Source access stays local and does not fetch remote objects.
+Content and all source metadata must be UTF-8 text. Use `-dependency` once for each declared
+script or reference file in the same commit, up to 32 distinct dependencies and one MiB combined
+with the main document. No references are followed automatically, and no scripts are executed.
+The owner must review the complete declared inventory before approving it.
+
+```sh
+./bin/substrate propose -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -operation skill-1 -kind skill -commit FULL_COMMIT_ID -file skills/build/SKILL.md -dependency skills/build/reference.md
+./bin/substrate artifact -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -id ARTIFACT_ID
+./bin/substrate source-register -path "$HOME/repos/project" -artifact ARTIFACT_ID -source repository -name build -alias build
+./bin/substrate approve -path "$HOME/repos/project" -artifact ARTIFACT_ID -revision REVISION_ID -operation approve-skill-1
+./bin/substrate choices -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -selector build
+./bin/substrate read -path "$HOME/repos/project" -credential "$HOME/.config/substrate/project-session" -selector QUALIFIED_ID
+```
+
+Replace placeholders with the exact full commit, receipt artifact/revision IDs, and registration's
+`qualified` identity. Keep any explicit `-state-dir` flag consistent throughout. Namespaces,
+names, and optional aliases use 1–80 lowercase letters, digits, dots, underscores, or hyphens;
+`.` and `..` alone are invalid. Registration binds the artifact permanently to its qualified
+space/repository/kind/source/name identity. It neither grants access nor widens applicability.
+Only trusted local owner commands register and approve; they accept no session credential and
+are unavailable through browser or MCP interfaces. This assumes a trusted owning OS account:
+a hostile process with that account's filesystem access can invoke the owner CLI.
+
+A proposed source begins as a candidate. First approval expects an empty selected head; later
+approval requires `-expected <current-revision-id>` and a candidate captured against that same
+head using `propose -artifact <artifact-id> -expected <current-revision-id>`. Competing candidates
+remain conflicts. Resolve with a new proposal based on the current head and explicit approval.
+Retirement continues to block delivery and cannot be undone by approval of old candidates.
+`artifact` inspects authorized history and provenance; `choices` with no selector lists registered
+sources with candidate, effective, overridden, conflict, or retired state, the overridable-default
+flag, and the explicit override artifact/revision pins. These commands disclose
+only the session's own space and repository.
+
+An exact qualified read preserves each permitted approved choice. Equal names from different
+sources do not establish precedence. If several approved sources share an alias, reading that
+alias fails with a conflict; inspect alternatives and select a qualified identity or explicitly
+retire an unwanted choice. Source order, time, and relevance never choose the winner. Unauthorized
+sources do not affect conflict state or explanations. Missing and inaccessible reads share a
+generic denial; storage or authority failures are unavailable and produce no success JSON.
+
+To permit specialization, register a default with `source-register -overridable`. Register its
+specialization separately with the same alias, then approve it with `-overrides <default-artifact-id>`
+and `-override-revision <default-head-id>`. The default must be approved, active, the same kind,
+and in the same authorized scope. Only one-level relationships are supported; chains and cycles
+are rejected. Multiple incomparable approved specializations block alias delivery. Advancing or
+retiring the pinned default invalidates its specialization and blocks that alias until resolved.
+An active default remains accessible by its exact qualified identity. New specialization approval
+must pin the current default and use a fresh candidate based on its own current head.
+
+Approved reads return stored main and dependency bytes with exact commit/path/blob provenance,
+even after the source branch advances or files disappear. Source or dependency changes create
+new unapproved candidates and cannot silently replace the approved snapshot. The response marks
+`native_activation` as `unsupported`; content read is not native installation, executable safety,
+activation, or tested harness compatibility. No cross-space publication is provided.
 
 ## HTTP contract
 

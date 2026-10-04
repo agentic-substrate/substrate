@@ -20,10 +20,16 @@ type Session struct {
 	store           *Store
 	token, checkout string
 }
+type SourceFile struct {
+	Path    string `json:"path"`
+	Blob    string `json:"blob,omitempty"`
+	Content string `json:"content,omitempty"`
+}
 type Source struct {
-	Commit string `json:"commit"`
-	Path   string `json:"path"`
-	Blob   string `json:"blob"`
+	Files  []SourceFile `json:"files,omitempty"`
+	Commit string       `json:"commit"`
+	Path   string       `json:"path"`
+	Blob   string       `json:"blob"`
 }
 type Contribution struct {
 	OperationID      string  `json:"operation_id"`

@@ -17,8 +17,9 @@ Trusted local CLI setup provides owner, space, checkout, and scoped session reco
 artifact capture/inspection/retirement authenticate each operation and filter owner, space,
 and repository before disclosure. Network enrollment, pairing, publication, and MCP remain
 unavailable. SQLite commits revisions, retry receipts, and pending work atomically; failed
-commits return no success receipt, and stale edits cannot undo retirement. Git source imports
-remain immutable candidates rather than approved or executable content. Plaintext owner-only
+commits return no success receipt, and stale edits cannot undo retirement. Git imports begin as immutable candidates; only trusted local owner commands register source
+identities and approve exact revision/dependency snapshots. Aliases and overrides resolve only
+within current authorized scope; ambiguity blocks delivery. Content reads never execute source. Plaintext owner-only
 state files do not protect against the owner’s OS account, root, or endpoint compromise.
 Future artifact authorization must apply to every read, search, list, mutation, delivery, and
 publication surface. Repository contents and model-supplied arguments cannot grant authority.

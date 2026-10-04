@@ -30,7 +30,10 @@ The [vision](docs/product/vision.md) describes the full learning and continuity 
 This checkout builds a Go executable with an embedded Vite/React status and session-context
 page. Trusted CLI setup binds sessions to explicit spaces and repositories. The CLI can save,
 inspect, and retire local memory observations with durable revisions and retry receipts.
-Retrieval, approved Git version selection, MCP tools, and synchronization remain roadmap work.
+The owner can register Git-backed skills and agent definitions, approve exact immutable
+revision/dependency bundles, and inspect qualified choices or alias conflicts. Scoped sessions
+read only approved snapshots in their registered scope. Lexical retrieval, MCP tools, native
+activation, and synchronization remain roadmap work.
 
 ## Try the foundation
 

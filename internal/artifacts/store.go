@@ -98,6 +98,18 @@ func privateFile(path string, create bool) error {
 	return nil
 }
 
+const selectionSchema = `
+CREATE TABLE registrations (
+ artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id), qualified TEXT NOT NULL UNIQUE,
+ alias TEXT NOT NULL, overridable INTEGER NOT NULL CHECK(overridable IN (0,1))
+);
+CREATE TABLE approvals (
+ revision_id TEXT PRIMARY KEY REFERENCES revisions(id),
+ overrides TEXT NOT NULL, override_revision TEXT NOT NULL
+);
+PRAGMA user_version=2;
+`
+
 func migrate(db *sql.DB) error {
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -112,7 +124,13 @@ func migrate(db *sql.DB) error {
 		if _, err := tx.Exec(schema); err != nil {
 			return ErrUnavailable
 		}
-	} else if version != 1 {
+		version = 1
+	}
+	if version == 1 {
+		if _, err := tx.Exec(selectionSchema); err != nil {
+			return ErrUnavailable
+		}
+	} else if version != 2 {
 		return ErrUnavailable
 	}
 	if err := tx.Commit(); err != nil {

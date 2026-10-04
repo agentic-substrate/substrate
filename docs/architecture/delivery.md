@@ -12,8 +12,9 @@ displays an authenticated snapshot and does not persist browser authority. The b
 uses TypeScript and npm,
 with tool versions pinned in the repository. Linux
 and WSL 2 are selected for the initial release; macOS and native Windows follow later.
-These choices define the release direction. Artifact delivery and administration are not yet
-implemented; the current executable serves a status page.
+These choices define the release direction. The executable provides trusted local setup, scoped artifact capture/inspection, owner-controlled
+Git registration/approval, and approved snapshot reads. The browser serves status and authenticated
+context inspection; lexical retrieval, MCP, and native artifact adapters remain unavailable.
 
 ## Interface recommendation
 

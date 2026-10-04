@@ -150,8 +150,13 @@ authority. Private authority records and credentials live outside Git; their pla
 owner-only modes, synced atomic replacement, and 24-hour local session expiry are selected
 one-node mechanisms. File modes and credential hashes do not protect against same-user or
 root access. Local artifact CLI/storage operations now authenticate each call and filter
-owner/space/repository before reads, writes, receipts, and pending-work disclosure. Plaintext
-SQLite storage follows the private-placement boundary and preserves immutable candidates and
+owner/space/repository before reads, writes, receipts, and pending-work disclosure.
+Trusted local owner commands register qualified Git source identities and approve exact snapshots
+in the registered scope. Scoped session commands can propose and read content but cannot invoke
+those approval operations. Same-account hostile processes remain outside this boundary; no
+remote human-review or publication authority is implied. Approved bundles preserve each declared
+dependency's exact provenance and do not execute scripts or follow external references.
+Plaintext SQLite storage follows the private-placement boundary and preserves immutable candidates and
 retirement. Broader artifact/admin operations still need their complete object/action policy; network credential and encryption decisions remain open. Loopback alone is
 insufficient protection from hostile websites or processes running with the same privileges.
 Restrict filesystem, SQLite, and backup access; record the local encryption/key-storage
