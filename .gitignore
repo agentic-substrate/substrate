@@ -1,0 +1,9 @@
+/node_modules/
+/bin/
+/internal/webui/dist/
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
+/playwright-report/
+/test-results/
+/.superpowers/
+*.log

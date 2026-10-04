@@ -1,0 +1,3 @@
+module github.com/agentic-substrate/substrate
+
+go 1.27.1

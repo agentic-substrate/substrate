@@ -1,0 +1,19 @@
+# Architecture decisions
+
+**Last reviewed:** 2026-10-03. Re-read before changing an accepted boundary or filing its implementation.
+
+These decisions describe the agreed direction. The bootstrap status server does not implement
+artifact storage, authorization, MCP, or synchronization. Implementation acceptance lives in
+the [first release contract](../product/first-release.md).
+
+- [Deployment](deployment.md) starts locally and advances to selectively synchronized nodes.
+- [Delivery](delivery.md) defines the CLI, MCP, and embedded administrative interface.
+- [Packaging](packaging.md) limits initial platform support to Linux and WSL 2.
+- [Artifacts](artifacts.md) defines eligibility, precedence, and effective versions.
+- [Sharing](sharing.md) separates placement, audience, and reviewed publication.
+- [Repositories](repositories.md) binds Git identities and checkouts to trusted spaces.
+- [Onboarding](onboarding.md) explains enrollment and administrative authority.
+- [Offline behavior](offline.md) sets the boundaries for disconnected use and grants.
+- [Reconciliation](reconciliation.md) preserves conflicting candidates without silent overwrite.
+- [Retrieval](retrieval.md) combines text, context, and explicit associations.
+- [Embeddings](embeddings.md) keeps model inference optional and subject to evaluation.
