@@ -183,6 +183,18 @@ paths, and blob IDs for literal asterisk, tab, and trailing-space names and reje
 and unmatched glob-looking paths. The final commands and source revision are recorded in
 PR #18; these local checks do not extend the existing recovery or platform claims.
 
+The issue #7 source-path follow-up also verified dependency handling on 2026-10-04. A fixture
+containing only a regular root `SKILL.md` reproduced an acknowledged candidate for dependency
+path `.` before the repair, then rejected it without a receipt after integrating the exact
+Git-path check. Runtime revision `a67bfb1bf5eaf12b8b21ab295ac0b1cd314896f8` passed
+`env PATH="/usr/local/go/bin:$PATH" GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp
+go test -race -shuffle=on ./internal/artifacts ./cmd/substrate` and the full `make check`
+under that same environment. All seventeen issue #7 test functions passed, as did the inherited
+one-file/multi-file root and exact literal filename checks, the 23-command packaged source
+journey, and pinned govulncheck. Documentation decisions passed against the stacked base and
+`origin/main`. No private-placement or dependency-authorization exception was introduced;
+all previously stated installation, execution, recovery, transfer, and platform limits remain.
+
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget
 trigger. Require strong authentication for source/release authority, keep access least privileged
