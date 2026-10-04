@@ -178,3 +178,33 @@ path. A successful model answer, process exit, or version command alone is not c
 evidence. Client native installation/execution remains unsupported. Resource measurements and
 actual client verification are recorded below when observed; no latency, memory, or energy
 target is promised by source or a protocol specification alone.
+
+### Measured lexical workload
+
+On 2026-10-04, the issue #8 worktree ran the compiled artifact test workload on Linux amd64
+under WSL 2, Go 1.27.1, Git 2.43.0, SQLite 3.53.4, and an Intel Core i9-13980HX with
+GOMAXPROCS 16. Nine five-artifact query cases checked exact identifiers/revisions, explicit
+aliases/topics, lexical phrases, prefixes, approved skills/definitions, and expected misses
+for a typo and unrecorded paraphrase. All expected leading matches/misses passed; individual
+query calls took 6.3–8.3 ms in that run. This is a small synthetic evaluation, not a corpus
+recall claim.
+
+Run the reproducible resource workload after `make build`:
+
+```sh
+go test -c -o /var/tmp/substrate-retrieval-benchmark.test ./internal/artifacts
+TMPDIR=/var/tmp /usr/bin/time -v /var/tmp/substrate-retrieval-benchmark.test -test.run '^$' -test.bench BenchmarkScopedLexicalSearch -test.benchtime=20x -test.benchmem -test.count=1
+```
+
+The fixture contains 256 repository-scoped synthetic observations, each about 180 bytes with
+an identifier/topic. Cold indexing took 222.6 and 225.7 ms across calibration and measured
+setups; first-query latency was 15.8 and 11.8 ms. Twenty warm mixed lexical/exact/prefix/miss
+queries averaged 11.64 ms, 1,050,904 allocated bytes, and 12,768 allocations per operation.
+The entire compiled test process used 3.17 seconds user CPU, 2.37 seconds system CPU,
+9.09 seconds elapsed, and 24,320 KiB peak RSS, with zero major faults/swaps. Those process
+figures include two fixture creations/calibration, Git prerequisite processes, SQLite commits,
+and indexing; they are not query-only resource costs or node peak measurements. Other activity
+was running on the same host. The executable/test makes no model runtime or inference calls;
+cloud clients used separately for compatibility are not part of this measurement. No battery,
+energy, large-corpus, concurrent-load, model-quality, or other-platform target is established.
+Repeat with representative real permitted data before selecting an optional enhancement.

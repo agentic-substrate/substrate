@@ -282,3 +282,18 @@ func TestIndexCapsPostingsAndReportsLimitedCoverage(t *testing.T) {
 		t.Fatal("index cap truncated durable content")
 	}
 }
+
+func TestInspectPreservesRevisionAssociationsAndRetryIdentity(t *testing.T) {
+	f := setup(t)
+	c := memory("association-save", "observation")
+	c.Associations = Associations{Identifiers: []string{"ISSUE-8"}, Aliases: []string{"explicit alias"}, Topics: []string{"retrieval"}}
+	saved := capture(t, f.session, c)
+	history, err := f.session.Inspect(saved.ArtifactID)
+	if err != nil || len(history.Revisions) != 1 || !reflect.DeepEqual(history.Revisions[0].Associations, c.Associations) {
+		t.Fatalf("revision lost associations %+v %v", history, err)
+	}
+	c.Associations.Aliases = []string{"changed alias"}
+	if _, err := f.session.Contribute(c); !errors.Is(err, ErrOperation) {
+		t.Fatalf("changed metadata accepted %v", err)
+	}
+}

@@ -46,7 +46,7 @@ func run() error {
 		return nil
 	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
-		return errors.New("usage: substrate init | space | bindings | register | session | context | revoke | discover | capture | propose | source-register | approve | artifact | choices | read | retire | pending | serve | version")
+		return errors.New("usage: substrate init | space | bindings | register | session | context | revoke | discover | node | mcp | index | capture | propose | source-register | approve | artifact | choices | search | read | retire | pending | serve | version")
 	}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	defaultDir, err := defaultStateDir()
