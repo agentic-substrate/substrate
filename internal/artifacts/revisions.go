@@ -28,10 +28,22 @@ func operationID(id string) bool {
 	return len(id) > 0 && len(id) <= 128 && strings.TrimSpace(id) == id && !strings.ContainsAny(id, "\x00\r\n\t")
 }
 
+func validText(values ...string) bool {
+	for _, value := range values {
+		if !utf8.ValidString(value) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Session) Contribute(c Contribution) (Receipt, error) {
 	ctx, err := s.authenticate()
 	if err != nil {
 		return Receipt{}, err
+	}
+	if !validText(c.OperationID, c.ArtifactID, c.ExpectedRevision, c.SpaceID, c.RepositoryID, c.Kind, c.Content, c.Provenance) || (c.Source != nil && !validText(c.Source.Commit, c.Source.Path, c.Source.Blob)) {
+		return Receipt{}, ErrInvalidText
 	}
 	if c.SpaceID == "" {
 		c.SpaceID = ctx.SpaceID
@@ -53,8 +65,8 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 	}
 	if c.Source != nil {
 		for _, file := range c.Source.Files {
-			if !utf8.ValidString(file.Path) || !utf8.ValidString(file.Blob) || !utf8.ValidString(file.Content) {
-				return Receipt{}, errors.New("dependency source fields must be UTF-8 text")
+			if !validText(file.Path, file.Blob, file.Content) {
+				return Receipt{}, ErrInvalidText
 			}
 		}
 	}
@@ -152,6 +164,9 @@ func (s *Session) Retire(id, expected, operation string) (Receipt, error) {
 	ctx, err := s.authenticate()
 	if err != nil {
 		return Receipt{}, err
+	}
+	if !validText(id, expected, operation) {
+		return Receipt{}, ErrInvalidText
 	}
 	if !operationID(operation) {
 		return Receipt{}, errors.New("retirement requires an operation ID")

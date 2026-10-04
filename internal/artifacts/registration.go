@@ -47,7 +47,7 @@ func (o *Owner) Register(r Registration) (Choice, error) {
 	}
 	for _, c := range all {
 		if c.ArtifactID == r.ArtifactID {
-			if c.Qualified != qualified || c.Alias != r.Alias || c.overridable != r.Overridable {
+			if c.Qualified != qualified || c.Alias != r.Alias || c.Overridable != r.Overridable {
 				return Choice{}, ErrConflict
 			}
 			return c.Choice, nil
@@ -65,5 +65,5 @@ func (o *Owner) Register(r Registration) (Choice, error) {
 	if err := tx.Commit(); err != nil {
 		return Choice{}, ErrUnavailable
 	}
-	return Choice{ArtifactID: r.ArtifactID, Qualified: qualified, Alias: r.Alias, State: "candidate", Reason: "explicit owner approval required"}, nil
+	return Choice{ArtifactID: r.ArtifactID, Qualified: qualified, Alias: r.Alias, Overridable: r.Overridable, State: "candidate", Reason: "explicit owner approval required"}, nil
 }

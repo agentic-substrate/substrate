@@ -197,6 +197,14 @@ func TestOverrideRequiresExplicitApprovedOverridableDefault(t *testing.T) {
 	if _, err := owner.Approve(approved); err != nil {
 		t.Fatal(err)
 	}
+	choices, err := f.session.Choices(specificChoice.Qualified)
+	if err != nil || len(choices) != 1 || choices[0].Overrides != r.ArtifactID || choices[0].OverrideRevision != r.RevisionID {
+		t.Fatalf("approved relationship not inspectable: %+v %v", choices, err)
+	}
+	defaults, err := f.session.Choices(defaultChoice.Qualified)
+	if err != nil || len(defaults) != 1 || !defaults[0].Overridable {
+		t.Fatalf("default registration not inspectable: %+v %v", defaults, err)
+	}
 	d, err := f.session.Resolve("build")
 	if err != nil || d.Revision.Content != "specialization" {
 		t.Fatalf("explicit override not effective: %+v %v", d, err)
@@ -405,7 +413,7 @@ func TestApprovalValidatesAllTextBeforeRetryFingerprint(t *testing.T) {
 			invalid.Overrides = r.ArtifactID
 			invalid.OverrideRevision = value
 		}
-		if _, err := owner.Approve(invalid); !errors.Is(err, ErrConflict) {
+		if _, err := owner.Approve(invalid); !errors.Is(err, ErrInvalidText) {
 			t.Fatalf("%s validated after receipt fingerprint: %v", field, err)
 		}
 	}

@@ -29,12 +29,15 @@ type Approval struct {
 	OverrideRevision string `json:"override_revision,omitempty"`
 }
 type Choice struct {
-	ArtifactID string `json:"artifact_id"`
-	Qualified  string `json:"qualified"`
-	Alias      string `json:"alias"`
-	RevisionID string `json:"revision_id"`
-	State      string `json:"state"`
-	Reason     string `json:"reason"`
+	Overridable      bool   `json:"overridable"`
+	Overrides        string `json:"overrides,omitempty"`
+	OverrideRevision string `json:"override_revision,omitempty"`
+	ArtifactID       string `json:"artifact_id"`
+	Qualified        string `json:"qualified"`
+	Alias            string `json:"alias"`
+	RevisionID       string `json:"revision_id"`
+	State            string `json:"state"`
+	Reason           string `json:"reason"`
 }
 type Delivery struct {
 	Choice           Choice   `json:"choice"`
@@ -51,8 +54,8 @@ func (s *Store) Owner(checkout string) (*Owner, error) {
 
 type selection struct {
 	Choice
-	lifecycle, kind, overrides, overrideRevision string
-	overridable, relationConflict                bool
+	lifecycle, kind  string
+	relationConflict bool
 }
 
 func selections(tx *sql.Tx, ctx authority.Context) ([]selection, error) {
@@ -68,7 +71,7 @@ func selections(tx *sql.Tx, ctx authority.Context) ([]selection, error) {
 	result := []selection{}
 	for rows.Next() {
 		var c selection
-		if err := rows.Scan(&c.ArtifactID, &c.Qualified, &c.Alias, &c.RevisionID, &c.lifecycle, &c.kind, &c.overridable, &c.overrides, &c.overrideRevision); err != nil {
+		if err := rows.Scan(&c.ArtifactID, &c.Qualified, &c.Alias, &c.RevisionID, &c.lifecycle, &c.kind, &c.Overridable, &c.Overrides, &c.OverrideRevision); err != nil {
 			return nil, ErrUnavailable
 		}
 		c.State, c.Reason = "effective", "approved revision selected"
@@ -88,11 +91,11 @@ func selections(tx *sql.Tx, ctx authority.Context) ([]selection, error) {
 		byID[c.ArtifactID] = i
 	}
 	for i, c := range result {
-		if c.State != "effective" || c.overrides == "" {
+		if c.State != "effective" || c.Overrides == "" {
 			continue
 		}
-		j, ok := byID[c.overrides]
-		if !ok || result[j].lifecycle != "active" || result[j].RevisionID != c.overrideRevision || !result[j].overridable || result[j].overrides != "" {
+		j, ok := byID[c.Overrides]
+		if !ok || result[j].lifecycle != "active" || result[j].RevisionID != c.OverrideRevision || !result[j].Overridable || result[j].Overrides != "" {
 			result[i].State, result[i].Reason = "conflict", "approved override target changed or retired"
 			result[i].relationConflict = true
 		} else {

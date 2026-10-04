@@ -97,6 +97,9 @@ Replace `ARTIFACT_ID` with the saved receipt's `artifact_id`; quote it as an ord
 Capture returns a JSON receipt only after SQLite commits the observation, immutable revision,
 provenance, retry identity, and pending work together. `pending-local` means saved locally,
 unverified, and awaiting future indexing; it does not mean indexed, synchronized, or verified.
+Artifact content and all contribution/lookup/retirement metadata must be valid UTF-8.
+Invalid byte sequences are rejected before fingerprinting or persistence; they are never
+converted to replacement characters. A valid U+FFFD character is ordinary supported text.
 The store supports observation content up to 1 MiB and provenance claims up to 4096 bytes.
 Operation IDs contain 1–128 bytes and must not have surrounding whitespace or control
 separators. An exact retry with the same operation ID returns the original receipt, including
@@ -116,8 +119,12 @@ current lifecycle or delivery grant. Re-inspect before using saved content.
 
 Every operation rechecks the session credential and registered Git checkout. Missing and
 inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
-skills and agent definitions use the proposal and owner approval flow below. Normal lexical
-recall, MCP, cross-space publication, indexing consumption, and backup/restore remain unavailable.
+skills and agent definitions use the proposal and owner approval flow below. Git source text
+must also be valid UTF-8. Reads use locally available objects only: a missing promisor object
+remains unavailable without remote-helper execution or network access, even when repository
+configuration allows a transport. Materialize required objects separately through your trusted
+Git workflow. Normal lexical recall, MCP, cross-space publication, indexing consumption, and
+backup/restore remain unavailable.
 The browser remains a status and read-only context view, with no artifact editing endpoint.
 
 ## Git candidates and approved content
@@ -154,7 +161,8 @@ head using `propose -artifact <artifact-id> -expected <current-revision-id>`. Co
 remain conflicts. Resolve with a new proposal based on the current head and explicit approval.
 Retirement continues to block delivery and cannot be undone by approval of old candidates.
 `artifact` inspects authorized history and provenance; `choices` with no selector lists registered
-sources with candidate, effective, overridden, conflict, or retired state. These commands disclose
+sources with candidate, effective, overridden, conflict, or retired state, the overridable-default
+flag, and the explicit override artifact/revision pins. These commands disclose
 only the session's own space and repository.
 
 An exact qualified read preserves each permitted approved choice. Equal names from different
@@ -198,7 +206,10 @@ No artifact, MCP, pairing, or synchronization HTTP endpoint exists yet. Artifact
 use plaintext `artifacts.db` beside bounded plaintext JSON authority records in a 0700 directory,
 with 0600 database, state, and credential files. Keep this directory on the Linux/WSL local
 filesystem. SQLite uses rollback journaling with EXTRA synchronization and checks schema version
-before access; unsafe file modes, symlinks, and unknown newer schemas fail closed.
+before access; unsafe file modes, symlinks, and unknown newer schemas fail closed. SQLite
+journals inherit the private database mode without changing the process umask. A supported
+interrupted-process hot journal can recover earlier acknowledged state on reopen; this is
+not a device-failure, backup, or replica-recovery guarantee.
 Authority updates lock across processes and replace synced files atomically; persistence
 failures return errors, and oversized updates retain the previous usable authority. There is no at-rest
 encryption or protection against the owning OS account, root, or an endpoint compromise. See the

@@ -2,7 +2,6 @@ package artifacts
 
 import (
 	"errors"
-	"unicode/utf8"
 )
 
 func readBundle(checkout string, src Source) (string, Source, error) {
@@ -13,9 +12,6 @@ func readBundle(checkout string, src Source) (string, Source, error) {
 	content, main, err := readSource(checkout, src)
 	if err != nil {
 		return "", Source{}, err
-	}
-	if !utf8.ValidString(content) {
-		return "", Source{}, invalid
 	}
 	total := len(content)
 	files := make([]SourceFile, 0, len(src.Files))
@@ -30,7 +26,7 @@ func readBundle(checkout string, src Source) (string, Source, error) {
 			return "", Source{}, err
 		}
 		total += len(bytes)
-		if total > 1024*1024 || !utf8.ValidString(bytes) {
+		if total > 1024*1024 {
 			return "", Source{}, invalid
 		}
 		files = append(files, SourceFile{Path: source.Path, Blob: source.Blob, Content: bytes})

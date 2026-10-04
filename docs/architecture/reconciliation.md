@@ -5,7 +5,8 @@
 **Status:** local durability, explicit shared authority, current permission checks on reconnect,
 Git source ownership, and reviewed cross-space publication are agreed. The type-aware
 reconciliation policy below is selected for the initial implementation.
-Wire formats, identifiers, retention, and implementation are still open.
+Synchronization wire formats, cross-node identifiers, retention, and implementation are
+still open; the selected local persistence contract below is implemented.
 
 ## Agreed initial policy
 

@@ -109,15 +109,23 @@ when changing versions or indexing behavior. No benchmark or resource target is 
 and immutable Git reads. Storage sessions authenticate on every operation; ordinary serialized
 context is not a storage credential. A single connection per store bounds connection count,
 and SQLite's immediate transactions and five-second busy timeout coordinate separate command
-processes. Pending work is committed with content; there is no consumer or pause/resume control
-yet. Existing receipts survive retries, while retirement remains authoritative for later reads.
+processes. URI `modeof` points to the validated private database so journals are also owner-only
+under an ordinary 022 umask. A subprocess regression holds a live transaction while another
+process opens the store, and abrupt-exit/cache-spill evidence exercises hot-journal rollback.
+This process-interruption check does not establish device-failure or complete recovery.
+Pending work is committed with content; there is no consumer or pause/resume control yet.
+Existing receipts survive retries, while retirement remains authoritative for later reads.
 Schema version 1 stores migrate transactionally to version 2, adding immutable source registrations
 and exact revision approval/override records. Unknown versions fail before contribution.
 Do not edit the database directly or treat copying a live file as an application backup.
 
 After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
 failed commit, receipt rollback, stale edits, retirement, authorization, private placement,
-Git replacement/source, and CLI checks. The full `make check` still supplies the race detector,
+Git replacement/source, invalid UTF-8, promisor helper/network denial, and CLI checks.
+Source reads set an empty `GIT_ALLOW_PROTOCOL` allowlist, verified on Git 2.43.0, overriding
+repository and inherited caller protocol settings before a transport or helper can run.
+All stored text is valid UTF-8; limits count bytes and invalid input is rejected before
+receipt fingerprinting. The full `make check` still supplies the race detector,
 web accessibility flows, static checks, and built-document validation. Tests use synthetic data.
 Their temporary roots must be outside every Git checkout; an ancestor `.git` marker causes
 intentional fail-closed placement denial, even if its Git metadata is broken. Select a clean

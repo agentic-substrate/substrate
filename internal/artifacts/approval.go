@@ -2,7 +2,6 @@ package artifacts
 
 import (
 	"context"
-	"unicode/utf8"
 
 	"github.com/agentic-substrate/substrate/internal/authority"
 )
@@ -12,10 +11,8 @@ func (o *Owner) Approve(a Approval) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	for _, value := range []string{a.OperationID, a.ArtifactID, a.RevisionID, a.ExpectedRevision, a.Overrides, a.OverrideRevision} {
-		if !utf8.ValidString(value) {
-			return Receipt{}, ErrConflict
-		}
+	if !validText(a.OperationID, a.ArtifactID, a.RevisionID, a.ExpectedRevision, a.Overrides, a.OverrideRevision) {
+		return Receipt{}, ErrInvalidText
 	}
 	if !operationID(a.OperationID) || (a.Overrides == "") != (a.OverrideRevision == "") {
 		return Receipt{}, ErrConflict
@@ -70,7 +67,7 @@ func (o *Owner) Approve(a Approval) (Receipt, error) {
 		if target == nil {
 			return Receipt{}, authority.ErrDenied
 		}
-		if target.ArtifactID == a.ArtifactID || target.lifecycle != "active" || target.RevisionID == "" || target.RevisionID != a.OverrideRevision || !target.overridable || target.kind != selected.kind || target.overrides != "" || selected.overridable || target.Alias == "" || target.Alias != selected.Alias {
+		if target.ArtifactID == a.ArtifactID || target.lifecycle != "active" || target.RevisionID == "" || target.RevisionID != a.OverrideRevision || !target.Overridable || target.kind != selected.kind || target.Overrides != "" || selected.Overridable || target.Alias == "" || target.Alias != selected.Alias {
 			return Receipt{}, ErrConflict
 		}
 	}
