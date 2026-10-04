@@ -53,6 +53,23 @@ Product and architecture documents state their review cadence. Re-read the affec
 when implementing their contracts. `npm run docs:build` and `npm run check:docs` check built
 local pages and anchors. External source availability requires a separate review.
 
+## Security decisions and reusable guidance
+
+For changes to identity, permissions, local interfaces, MCP, keys, recovery, transfer,
+telemetry, or releases, read `SECURITY.md`, `docs/architecture/security.md`, and
+`docs/plans/security.md` with the affected product contract. Use the repository's
+`skills/substrate-security/SKILL.md` workflow for that work. `CLAUDE.md` includes these
+instructions; repo-specific memories and installed skill links must point back to the
+current checkout's contracts rather than replace them.
+
+Keep confirmed direction, proposed architecture, open decisions, implementation, and dated
+verification separate. Scoped enterprise recovery is required; custody, recovery granularity,
+and offline enforcement remain unresolved. Customer-controlled custody is a recommendation.
+Settle those decisions and meet the transfer gate before carrying customer/internal data
+over a network. Management, enrollment, recovery, analytics, and content authority are distinct.
+Approve field-level telemetry policy before collection. Do not claim content blindness,
+remote erasure, framework conformance, or audit status without the relevant evidence.
+
 ## Accessibility
 
 Target WCAG 2.2 AA. A UI change includes markup, styles, rendered strings, controls, and

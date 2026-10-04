@@ -1,6 +1,6 @@
 # Deployment and disconnected operation
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each architecture decision
+**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each architecture decision
 
 Go is selected for the backend, CLI, and MCP. Vite + React is selected for the browser,
 with its static build embedded in Go for the first usable release. See the
@@ -20,6 +20,14 @@ mechanisms remain open.
 SQLite is selected for local nodes and the initial single coordinator. Driver, vector backend,
 embedding runtime/model, credential protocols and identity-provider integrations, and
 synchronization mechanisms remain under discussion.
+
+Future peer-to-peer and hub-and-spoke transfer of permitted customer/internal context is
+confirmed direction. A hub may provide authoritative management and metrics, and enterprise
+administrators need content recovery within assigned scope. Initial HTTPS synchronization and
+one coordinator remain selected; topology does not grant content or recovery authority.
+The [transfer/recovery contract](security.md) records proposed plane separation and unresolved
+custody/enforcement. Meet its [security gates](../plans/security.md#capability-gates) before
+network transfer carries customer/internal data.
 
 The [installation contract](packaging.md) selects Linux and WSL 2 initially, with
 macOS and native Windows later. Foreground operation and optional user services are the recommended

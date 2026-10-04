@@ -16,6 +16,20 @@ It serves a status page and has no artifact storage, authentication, enrollment,
 Future artifact authorization must apply to every read, search, list, mutation, delivery, and
 publication surface. Repository contents and model-supplied arguments cannot grant authority.
 
+The [transfer and recovery contract](docs/architecture/security.md) describes future trust
+boundaries, and the [security roadmap](docs/plans/security.md) records open decisions and
+evidence gates. These documents add requirements without claiming that controls are deployed.
+Content, management, enrollment, recovery, and analytics are distinct authorities. Future
+enterprise recovery must enforce assigned scope independently and protect its audit record.
+A hub, valid credential, or imported instruction cannot silently widen decryption or access
+authority. Before customer/internal network transfer, decide custody, recoverable scope,
+offline enforcement, deletion, and telemetry, then verify hostile-peer/hub and restore behavior.
+Endpoint/root compromise and retained plaintext limit revocation and content-blindness claims.
+
+Assess reachable disclosure, unauthorized mutation, policy/revision rollback, unsafe import,
+or recovery-scope bypass against the implemented surface and documented boundary. The future
+design is review context, not proof that an absent feature is already vulnerable or secure.
+
 ## What is not a vulnerability by itself
 
 A feature listed as future work, a lexical search result with poor relevance, and a missing

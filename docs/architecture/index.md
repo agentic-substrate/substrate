@@ -18,5 +18,10 @@ record how selected boundaries support it and where implementation choices remai
 - [Onboarding](onboarding.md) explains enrollment and administrative authority.
 - [Offline behavior](offline.md) sets the boundaries for disconnected use and grants.
 - [Reconciliation](reconciliation.md) preserves conflicting candidates without silent overwrite.
+- [Transfer and recovery](security.md) records hub authority, scoped enterprise recovery,
+  proposed key custody, telemetry limits, and evidence required before customer-data transfer.
 - [Retrieval](retrieval.md) combines text, context, and explicit associations.
 - [Embeddings](embeddings.md) keeps model inference optional and subject to evaluation.
+
+The [security roadmap](../plans/security.md) pairs those boundaries with unresolved decisions,
+release gates, retained security tests, and factual enterprise assurance requirements.

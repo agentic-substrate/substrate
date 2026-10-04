@@ -24,6 +24,12 @@ The [first release contract](docs/product/first-release.md) defines evidence for
 - Extend the same contracts to multiple laptops and servers with secure enrollment, finite
   offline grants, and explicit lifecycle and recovery evidence.
 
+Before network transfer carries customer or internal data, meet the
+[security gates](docs/plans/security.md#capability-gates): decide key custody, recovery scope,
+offline enforcement, deletion, and telemetry, then verify hostile peers/hubs and scoped recovery.
+Future peer-to-peer and hub-and-spoke paths enforce the same transfer policy; initial HTTPS
+synchronization with one coordinator remains the selected first distribution step.
+
 ## Later
 
 - Keep knowledge useful as projects change through verification, explicit contradiction and
@@ -34,6 +40,9 @@ The [first release contract](docs/product/first-release.md) defines evidence for
   through adapters that preserve the session's permissions and selected versions.
 - Administer team and organization spaces, membership, policy, and auditing without granting
   other projects access to restricted artifacts.
+- Provide optional authoritative hub management and approved metrics, with enterprise content
+  recovery limited to assigned scope. Management and analytics confer no implicit decryption
+  authority; custody and independently enforced recovery remain design decisions.
 - Add native macOS and Windows support when lifecycle and packaging can be tested there.
 - Improve retrieval only when evaluated queries justify the added resource cost. Optional
   embeddings, alternate stores, and coordinator availability need measured revisit triggers.
