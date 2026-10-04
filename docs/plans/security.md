@@ -175,6 +175,14 @@ resource targets, another platform, or framework/audit conformance. Owner review
 the complete same-commit dependency inventory. Re-run at the next source, selection, schema,
 or authority change; later adapters must preserve these checks and independently prove delivery.
 
+A further source-provenance regression on 2026-10-04 demonstrated that `.` could capture
+the first regular file from a one-file or multi-file root tree while recording the false
+path `.`. The source reader now rejects `.` and requires exactly one NUL-terminated Git tree
+entry with a raw path equal to the requested literal filename. Tests preserve exact bytes,
+paths, and blob IDs for literal asterisk, tab, and trailing-space names and reject directories
+and unmatched glob-looking paths. The final commands and source revision are recorded in
+PR #18; these local checks do not extend the existing recovery or platform claims.
+
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget
 trigger. Require strong authentication for source/release authority, keep access least privileged
