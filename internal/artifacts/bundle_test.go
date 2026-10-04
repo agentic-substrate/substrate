@@ -96,3 +96,16 @@ func TestInvalidUTF8DependencyIdentityCannotBecomeNormalizedRetry(t *testing.T) 
 		t.Fatal("invalid UTF-8 dependency identity acknowledged")
 	}
 }
+
+func TestDependencyBundleRejectsRootDirectoryAlias(t *testing.T) {
+	f := setup(t)
+	receipt := gitCandidate(t, f, "root-file-only", "", "", "main document")
+	a, err := f.session.Inspect(receipt.ArtifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := Contribution{OperationID: "dot-dependency", Kind: "skill", Source: &Source{Commit: a.Revisions[0].Source.Commit, Path: "SKILL.md", Files: []SourceFile{{Path: "."}}}}
+	if r, err := f.session.Contribute(candidate); err == nil || r != (Receipt{}) {
+		t.Fatalf("root directory alias captured as dependency: %+v %v", r, err)
+	}
+}

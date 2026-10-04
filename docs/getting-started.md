@@ -125,11 +125,13 @@ current lifecycle or delivery grant. Re-inspect before using saved content.
 Every operation rechecks the session credential and registered Git checkout. Missing and
 inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
 skills and agent definitions use the proposal and owner approval flow below. Git source text
-must also be valid UTF-8. Reads use locally available objects only: a missing promisor object
-remains unavailable without remote-helper execution or network access, even when repository
-configuration allows a transport. Materialize required objects separately through your trusted
-Git workflow. Lexical recall and local stdio MCP use the foreground node. Cross-space publication and
-backup/restore remain unavailable.
+must also be valid UTF-8. Each main or dependency path must name one literal regular file and
+match the returned Git entry exactly; directories and `.` are rejected, while literal wildcard
+characters, tabs, and trailing spaces are preserved. Reads use locally available objects only:
+a missing promisor object remains unavailable without remote-helper execution or network access,
+even when repository configuration allows a transport. Materialize required objects separately
+through your trusted Git workflow. Lexical recall and local stdio MCP use the foreground node.
+Cross-space publication and backup/restore remain unavailable.
 The browser remains a status and read-only context view, with no artifact editing endpoint.
 
 ## Git candidates and approved content
