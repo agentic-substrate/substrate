@@ -120,8 +120,10 @@ current lifecycle or delivery grant. Re-inspect before using saved content.
 Every operation rechecks the session credential and registered Git checkout. Missing and
 inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
 skill and agent-definition storage retains committed source bytes and provenance as unapproved
-candidates through its internal API. Git source text must also be valid UTF-8. Reads use
-locally available objects only: a missing promisor object remains unavailable without
+candidates through its internal API. Git source text must also be valid UTF-8. A source path
+must name one literal regular file and match the returned Git entry exactly; directories and
+`.` are rejected, while literal wildcard characters, tabs, and trailing spaces are preserved.
+Reads use locally available objects only: a missing promisor object remains unavailable without
 remote-helper execution or network access, even when repository configuration allows a
 transport. Materialize required Git objects separately through your trusted Git workflow.
 Source registration and approved-version selection, normal

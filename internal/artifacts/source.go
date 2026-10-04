@@ -28,18 +28,26 @@ func readSource(checkout string, src Source) (string, Source, error) {
 		return "", Source{}, ErrInvalidText
 	}
 	invalid := errors.New("source unavailable: use a full Git commit and a regular repository-relative file")
-	if _, err := hex.DecodeString(src.Commit); err != nil || (len(src.Commit) != 40 && len(src.Commit) != 64) || strings.ToLower(src.Commit) != src.Commit || src.Path == "" || len(src.Path) > 4096 || strings.ContainsAny(src.Path, "\x00\r\n\\:") || path.IsAbs(src.Path) || path.Clean(src.Path) != src.Path || src.Path == ".." || strings.HasPrefix(src.Path, "../") {
+	if _, err := hex.DecodeString(src.Commit); err != nil || (len(src.Commit) != 40 && len(src.Commit) != 64) || strings.ToLower(src.Commit) != src.Commit || src.Path == "" || len(src.Path) > 4096 || strings.ContainsAny(src.Path, "\x00\r\n\\:") || path.IsAbs(src.Path) || path.Clean(src.Path) != src.Path || src.Path == "." || src.Path == ".." || strings.HasPrefix(src.Path, "../") {
 		return "", Source{}, invalid
 	}
 	commit, err := sourceGit(checkout, "rev-parse", "--verify", src.Commit+"^{commit}")
 	if err != nil || strings.TrimSpace(string(commit)) != src.Commit {
 		return "", Source{}, invalid
 	}
-	entry, err := sourceGit(checkout, "ls-tree", src.Commit, "--", src.Path)
+	entry, err := sourceGit(checkout, "ls-tree", "-z", src.Commit, "--", src.Path)
 	if err != nil {
 		return "", Source{}, invalid
 	}
-	fields := strings.Fields(strings.SplitN(string(entry), "\t", 2)[0])
+	records := strings.Split(string(entry), "\x00")
+	if len(records) != 2 || records[1] != "" {
+		return "", Source{}, invalid
+	}
+	metadata, returnedPath, ok := strings.Cut(records[0], "\t")
+	if !ok || returnedPath != src.Path {
+		return "", Source{}, invalid
+	}
+	fields := strings.Fields(metadata)
 	if len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" {
 		return "", Source{}, invalid
 	}

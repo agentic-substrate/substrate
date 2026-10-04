@@ -215,7 +215,10 @@ the contributing session, not independently verified factual evidence.
 Skill and agent-definition contributions read exact bytes from a full Git commit in the
 session's registered checkout, retain commit/path/blob identity, and remain candidates with
 no effective head. A moving ref, an unsafe/non-UTF-8 path, a symlink blob, or invalid UTF-8
-source content is rejected. Source commands use an empty `GIT_ALLOW_PROTOCOL` allowlist,
+source content is rejected. Source paths identify one literal regular file, never a directory
+or `.`. Git tree reads require exactly one NUL-terminated entry whose raw path equals the
+requested path; literal wildcard characters, tabs, and trailing spaces remain supported.
+Source commands use an empty `GIT_ALLOW_PROTOCOL` allowlist,
 which overrides repository transport settings and blocks missing-object promisor fetch
 helpers and network access. Required objects must already be local. This mechanism is
 verified on Git 2.43.0, rather than relying on an unsupported no-lazy-fetch flag. See the

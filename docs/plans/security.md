@@ -142,6 +142,14 @@ loopback HTTP receiver records zero requests. Final check commands and the repai
 revision are recorded in PR #18. These controls do not claim arbitrary Git plugin isolation,
 device/power-failure recovery, backup completeness, or network synchronization readiness.
 
+A further source-provenance regression on 2026-10-04 demonstrated that `.` could capture
+the first regular file from a one-file or multi-file root tree while recording the false
+path `.`. The source reader now rejects `.` and requires exactly one NUL-terminated Git tree
+entry with a raw path equal to the requested literal filename. Tests preserve exact bytes,
+paths, and blob IDs for literal asterisk, tab, and trailing-space names and reject directories
+and unmatched glob-looking paths. The final commands and source revision are recorded in
+PR #18; these local checks do not extend the existing recovery or platform claims.
+
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget
 trigger. Require strong authentication for source/release authority, keep access least privileged

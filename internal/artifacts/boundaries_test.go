@@ -114,6 +114,72 @@ func TestGitSourceTextRequiresUTF8(t *testing.T) {
 	}
 }
 
+func TestGitSourceRejectsDotPath(t *testing.T) {
+	for _, count := range []int{1, 2} {
+		t.Run(fmt.Sprintf("%d-regular-files", count), func(t *testing.T) {
+			f := setup(t)
+			for i := range count {
+				if err := os.WriteFile(filepath.Join(f.checkout, fmt.Sprintf("source%d.md", i)), []byte("synthetic source\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git(t, f.checkout, "add", ".")
+			git(t, f.checkout, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "synthetic regular files")
+			commit := git(t, f.checkout, "rev-parse", "HEAD")
+			if r, err := f.session.Contribute(Contribution{OperationID: "dot-source", Kind: "skill", Source: &Source{Commit: commit, Path: "."}}); err == nil || r != (Receipt{}) {
+				t.Fatalf("dot path acknowledged with false source provenance: %+v %v", r, err)
+			}
+			pending, err := f.session.Pending()
+			if err != nil || len(pending) != 0 {
+				t.Fatalf("rejected dot path persisted pending work: %+v %v", pending, err)
+			}
+		})
+	}
+}
+
+func TestGitSourceRequiresOneExactLiteralFile(t *testing.T) {
+	f := setup(t)
+	files := map[string]string{
+		"one.md": "one source\n", "two.md": "two source\n",
+		"dir/item.md": "ordinary nested source\n", "dir/*.md": "literal wildcard source\n",
+		"tab\tname.md": "tab filename source\n", "trailing.md ": "trailing space filename source\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(f.checkout, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(f.checkout, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, f.checkout, "add", ".")
+	git(t, f.checkout, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "synthetic literal paths")
+	commit := git(t, f.checkout, "rev-parse", "HEAD")
+	for i, name := range []string{"dir", "*.md", "dir/i*.md"} {
+		t.Run(name, func(t *testing.T) {
+			r, err := f.session.Contribute(Contribution{OperationID: fmt.Sprintf("reject-%d", i), Kind: "skill", Source: &Source{Commit: commit, Path: name}})
+			if err == nil || r != (Receipt{}) {
+				t.Fatalf("non-file or expanding path acknowledged: %+v %v", r, err)
+			}
+		})
+	}
+	operation := 0
+	for name, content := range files {
+		operation++
+		t.Run("literal-"+name, func(t *testing.T) {
+			r := capture(t, f.session, Contribution{OperationID: fmt.Sprintf("literal-%d", operation), Kind: "skill", Source: &Source{Commit: commit, Path: name}})
+			a, err := f.session.Inspect(r.ArtifactID)
+			if err != nil || len(a.Revisions) != 1 || a.Revisions[0].Source == nil || a.Revisions[0].Source.Path != name || a.Revisions[0].Content != content {
+				t.Fatalf("literal path provenance changed: %+v %v", a, err)
+			}
+			blob, err := sourceGit(f.checkout, "rev-parse", commit+":"+name)
+			if err != nil || a.Revisions[0].Source.Blob != strings.TrimSpace(string(blob)) {
+				t.Fatalf("literal blob provenance changed: %+v %v", a, err)
+			}
+		})
+	}
+}
+
 func TestLiveJournalPrivateAndIndependentOpenWaits(t *testing.T) {
 	f := setup(t)
 	tx, err := f.store.db.BeginTx(context.Background(), nil)
