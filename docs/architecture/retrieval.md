@@ -176,7 +176,9 @@ positions, and a revision checkpoint. Version 5 adds durable installation pause 
 bulk/failure state while preserving content, approvals, bundles, publication records, retry
 receipts, and the pending operation ledger. Incremental work always loads the current committed
 head; stale/history-only jobs whose checkpoint matches consume their queue without rewriting
-postings. Explicit full rebuilds force regeneration of matching checkpoints.
+postings. Explicit full rebuilds force regeneration of matching checkpoints. History-only writes keep
+existing bulk intent, including artifacts that have not yet been indexed; callers record actual
+head changes before promoting queued bulk to incremental work.
 
 `Store.IndexNext` processes one artifact in a cancellable transaction. It atomically replaces
 postings, records the checkpoint, and consumes its own queue entry. Cancellation rolls back
@@ -203,7 +205,9 @@ can wake it; search, content reads, publication review, and status do not. It sl
 an idle polling ticker. All automatic and explicit indexing uses this worker, so concurrency
 is one artifact transaction. Installation pause is durable; startup preserves it unless an
 explicit boolean override is supplied. Pause acknowledgements wait for the worker's current
-artifact transaction. Explicit index/resume attempts at most 100 incremental jobs before
+artifact transaction, including during an explicit batch. Pause/status/rebuild/retry controls
+are serviced between artifacts; additional run/resume batches wait on a separate unbuffered
+channel and cannot recursively start indexing. Explicit index/resume attempts at most 100 incremental jobs before
 responding; background work can continue afterward. Failures count toward the attempt bound.
 
 Full rebuilds queue discretionary bulk work. Automatic processing never consumes bulk or failed

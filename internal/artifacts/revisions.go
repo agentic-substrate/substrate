@@ -127,7 +127,7 @@ func (s *Session) Contribute(c Contribution) (Receipt, error) {
 			return Receipt{}, ErrUnavailable
 		}
 	}
-	if err := record(tx, ctx, hash, r, "contribute"); err != nil {
+	if err := record(tx, ctx, hash, r, "contribute", state == "pending-local" && a.HeadRevision != r.RevisionID); err != nil {
 		return Receipt{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -155,8 +155,8 @@ func retry(tx *sql.Tx, ctx authority.Context, operation, hash string) (Receipt, 
 	return r, true, nil
 }
 
-func record(tx *sql.Tx, ctx authority.Context, hash string, r Receipt, action string) error {
-	if _, err := tx.Exec("INSERT INTO index_queue(artifact_id) VALUES(?) ON CONFLICT(artifact_id) DO UPDATE SET bulk=0", r.ArtifactID); err != nil {
+func record(tx *sql.Tx, ctx authority.Context, hash string, r Receipt, action string, changedHead bool) error {
+	if _, err := tx.Exec("INSERT INTO index_queue(artifact_id) VALUES(?) ON CONFLICT(artifact_id) DO UPDATE SET bulk=CASE WHEN ? THEN 0 ELSE index_queue.bulk END", r.ArtifactID, changedHead); err != nil {
 		return ErrUnavailable
 	}
 	encoded, _ := json.Marshal(r)
@@ -200,7 +200,7 @@ func (s *Session) Retire(id, expected, operation string) (Receipt, error) {
 		return Receipt{}, ErrUnavailable
 	}
 	r := Receipt{OperationID: operation, ArtifactID: id, RevisionID: a.HeadRevision, State: "retired"}
-	if err := record(tx, ctx, hash, r, "retire"); err != nil {
+	if err := record(tx, ctx, hash, r, "retire", false); err != nil {
 		return Receipt{}, err
 	}
 	if err := tx.Commit(); err != nil {

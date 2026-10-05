@@ -336,7 +336,9 @@ The foreground node runs one indexing worker. Successful artifact mutations and 
 incremental work after a short coalescing delay; searches, reads, review, and status requests
 never schedule indexing. Each artifact replaces postings and its revision checkpoint atomically,
 with at most 32,768 token positions. Repeated edits coalesce to the newest committed head, and
-history-only candidates with an unchanged checkpoint do not rewrite postings. Complete content
+history-only candidates with an unchanged checkpoint do not rewrite postings or discard a
+previously queued forced rebuild. Only a changed head promotes existing bulk work to
+incremental processing. Complete content
 and the separate pending operation ledger remain durable and readable while indexing is paused.
 
 Use the same `-state-dir` for the node and these trusted local owner commands:
@@ -354,7 +356,9 @@ Pause is installation-wide and durable across shutdown and restart. Omitted `nod
 -index-paused` preserves it; explicit `-index-paused=true` or `-index-paused=false` overrides
 it. `index` without a control and `index -pause=false` resume and synchronously attempt at most
 100 incremental artifacts before responding, including failed attempts in that bound.
-Background incremental work can continue afterward. `-status` reads without changing pause,
+Background incremental work can continue afterward. Pause and read-only status controls are
+serviced between artifacts even during an explicit batch; a later batch waits for the same
+worker instead of nesting indexing. `-status` reads without changing pause,
 clearing failures, or scheduling work. The pause, status, rebuild, run, and retry controls are
 mutually exclusive. `-rebuild` queues discretionary bulk work without running it; bulk work
 survives restart and only `-run` attempts up to 100 jobs, including bulk, while unpaused.

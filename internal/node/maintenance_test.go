@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ncruces/go-sqlite3/driver"
 	"net"
 	"os"
 	"os/exec"
@@ -218,6 +219,49 @@ func TestStatusPollingCannotDelayScheduledIncrementalWork(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("status polling postponed scheduled work: %+v", state)
+}
+
+func TestExplicitBatchServicesPauseBeforeNextArtifact(t *testing.T) {
+	auth, checkout, token := maintenanceNode(t)
+	n, err := Start(auth, new(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.Close()
+	session, err := n.store.Session(token, checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := session.Contribute(artifacts.Contribution{OperationID: fmt.Sprint("pause-boundary-", i), Kind: "memory", Content: "pause at artifact boundary", Provenance: "test"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := driver.Open("file:" + filepath.Join(auth.Dir, "artifacts.db") + "?_txlock=immediate&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	resume := maintenanceRequest{request: Request{Action: "index", Pause: new(false)}, reply: make(chan maintenanceResult, 1)}
+	n.batches <- resume
+	pause := maintenanceRequest{request: Request{Action: "index", Pause: new(true)}, reply: make(chan maintenanceResult, 1)}
+	started := make(chan struct{})
+	go func() { close(started); n.controls <- pause }()
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	paused := <-pause.reply
+	resumed := <-resume.reply
+	if paused.err != nil || resumed.err != nil || !paused.Paused || !resumed.Paused || resumed.Processed > 1 || paused.Queued < 19 {
+		t.Fatalf("pause drained entire explicit batch: pause%+v resume%+v", paused, resumed)
+	}
 }
 
 func TestConcurrentPauseCaptureIndexAndShutdownPreserveAcknowledgements(t *testing.T) {

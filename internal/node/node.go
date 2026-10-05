@@ -54,6 +54,7 @@ type Node struct {
 	cancel       context.CancelFunc
 	wake         chan struct{}
 	controls     chan maintenanceRequest
+	batches      chan maintenanceRequest
 	connections  map[net.Conn]struct{}
 	connectionMu sync.Mutex
 }
@@ -105,7 +106,7 @@ func Start(auth *authority.Store, paused *bool) (*Node, error) {
 		return fail(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	n := &Node{auth: auth, store: store, listener: listener, lock: lock, socket: socket, slots: make(chan struct{}, 32), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), controls: make(chan maintenanceRequest), connections: map[net.Conn]struct{}{}}
+	n := &Node{auth: auth, store: store, listener: listener, lock: lock, socket: socket, slots: make(chan struct{}, 32), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), controls: make(chan maintenanceRequest), batches: make(chan maintenanceRequest), connections: map[net.Conn]struct{}{}}
 	n.wg.Add(2)
 	go n.accept()
 	go n.maintain()

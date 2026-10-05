@@ -91,6 +91,56 @@ func TestRapidEditsCoalesceNewestHeadAndPreserveOperationLedger(t *testing.T) {
 	}
 }
 
+func TestHistoryOnlyContributionPreservesDiscretionaryRebuild(t *testing.T) {
+	for _, indexed := range []bool{false, true} {
+		t.Run(fmt.Sprint(indexed), func(t *testing.T) {
+			f := setup(t)
+			first := capture(t, f.session, memory("first", "superseded evidence"))
+			edit := memory("current", "repairneedle")
+			edit.ArtifactID, edit.ExpectedRevision = first.ArtifactID, first.RevisionID
+			current := capture(t, f.session, edit)
+			if indexed {
+				if _, err := f.store.IndexBatch(100); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.store.db.Exec("DELETE FROM tokens"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := f.store.RebuildIndex(); err != nil {
+				t.Fatal(err)
+			}
+			stale := memory("stale", "history only")
+			stale.ArtifactID, stale.ExpectedRevision = first.ArtifactID, first.RevisionID
+			capture(t, f.session, stale)
+			state, err := f.store.Maintenance()
+			if err != nil || state.Queued != 0 || state.Deferred != 1 {
+				t.Fatalf("history discarded bulk intent %+v %v", state, err)
+			}
+			if attempted, err := f.store.IndexNext(context.Background(), false); err != nil || attempted {
+				t.Fatalf("automatic consumed discretionary job %v %v", attempted, err)
+			}
+			if attempted, err := f.store.IndexNext(context.Background(), true); err != nil || !attempted {
+				t.Fatalf("explicit rebuild lost %v %v", attempted, err)
+			}
+			got, err := f.session.Search(SearchRequest{Query: "repairneedle"})
+			if err != nil || len(got.Results) != 1 || got.Results[0].RevisionID != current.RevisionID {
+				t.Fatalf("repair skipped current head %+v %v", got, err)
+			}
+			if err := f.store.RebuildIndex(); err != nil {
+				t.Fatal(err)
+			}
+			changed := memory("changed", "new current content")
+			changed.ArtifactID, changed.ExpectedRevision = current.ArtifactID, current.RevisionID
+			capture(t, f.session, changed)
+			state, err = f.store.Maintenance()
+			if err != nil || state.Queued != 1 || state.Deferred != 0 {
+				t.Fatalf("changed head remained discretionary %+v %v", state, err)
+			}
+		})
+	}
+}
+
 func TestBulkRebuildIsDeferredAndRegeneratesMatchingCheckpoint(t *testing.T) {
 	f := setup(t)
 	r := capture(t, f.session, memory("bulk", "rebuild otter"))

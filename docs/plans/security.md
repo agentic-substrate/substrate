@@ -299,7 +299,7 @@ change.
 
 On 2026-10-05, the issue #12 worktree passed `env PATH="/usr/local/go/bin:$PATH"
 GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux amd64 in WSL 2,
-with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. Seventeen new
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. Nineteen new
 Go regressions cover schema 4-to-5 migration, durable pause/startup override, coalescing to
 current heads, unchanged-posting preservation, explicit forced rebuild, deferred bulk restart,
 failed-job restart/edited-head persistence and healthy progress, a 100-failed-attempt bound,
@@ -307,7 +307,8 @@ pre-transaction and checkpoint cancellation, bounded incomplete-frame shutdown, 
 denial versus node unavailability, concurrent maintenance, and full scoped counts beyond the
 bounded browser list. A status-poll regression first left five queued jobs indefinitely pending;
 the corrected worker serves controls without resetting its active delay. Test-only SQL
-triggers inject failures/cancellation without production test hooks. Indexing preserves saved
+triggers inject failures/cancellation without production test hooks. Cooperative explicit-batch pause and retained forced-rebuild intent after indexed/unindexed
+history-only contributions also passed review regressions. Indexing preserves saved
 receipts and the independent pending operation ledger.
 
 All fifteen packaged browser flows passed, including six maintenance flows and a real

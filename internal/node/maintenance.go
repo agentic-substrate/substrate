@@ -42,8 +42,12 @@ func (n *Node) control(req Request) (maintenanceResult, error) {
 		return maintenanceResult{}, errors.New("unsupported index control")
 	}
 	command := maintenanceRequest{request: req, reply: make(chan maintenanceResult, 1)}
+	queue := n.controls
+	if req.Control == "run" || req.Control == "" && (req.Pause == nil || !*req.Pause) {
+		queue = n.batches
+	}
 	select {
-	case n.controls <- command:
+	case queue <- command:
 	case <-n.ctx.Done():
 		return maintenanceResult{}, artifacts.ErrUnavailable
 	}
@@ -72,8 +76,47 @@ func (n *Node) perform(command maintenanceRequest) {
 	if result.err == nil {
 		result.Maintenance, result.err = n.store.Maintenance()
 	}
+	command.reply <- result
+	if req.Control != "status" {
+		n.notify()
+	}
+}
+
+func (n *Node) batch(command maintenanceRequest) {
+	req := command.request
+	var result maintenanceResult
+	if req.Pause != nil {
+		result.err = n.store.SetIndexPaused(*req.Pause)
+	}
+	if result.err == nil {
+		result.Maintenance, result.err = n.store.Maintenance()
+	}
 	if result.err == nil && !result.Paused && (req.Control == "" || req.Control == "run") {
 		for range 100 {
+		fastControls:
+			for {
+				select {
+				case <-n.ctx.Done():
+					result.err = n.ctx.Err()
+					break fastControls
+				case fast := <-n.controls:
+					n.perform(fast)
+				default:
+					break fastControls
+				}
+			}
+			if result.err != nil {
+				break
+			}
+			paused, err := n.store.IndexPaused()
+			if n.ctx.Err() != nil {
+				result.err = n.ctx.Err()
+				break
+			}
+			if err != nil || paused {
+				result.err = err
+				break
+			}
 			attempted, err := n.store.IndexNext(n.ctx, req.Control == "run")
 			if err == nil && attempted {
 				result.Processed++
@@ -88,9 +131,7 @@ func (n *Node) perform(command maintenanceRequest) {
 		}
 	}
 	command.reply <- result
-	if req.Control != "status" {
-		n.notify()
-	}
+	n.notify()
 }
 
 func (n *Node) maintain() {
@@ -101,6 +142,8 @@ func (n *Node) maintain() {
 			return
 		case command := <-n.controls:
 			n.perform(command)
+		case command := <-n.batches:
+			n.batch(command)
 		case <-n.wake:
 			timer := time.NewTimer(25 * time.Millisecond)
 		debounce:
@@ -111,6 +154,8 @@ func (n *Node) maintain() {
 					return
 				case command := <-n.controls:
 					n.perform(command)
+				case command := <-n.batches:
+					n.batch(command)
 				case <-timer.C:
 					break debounce
 				}
@@ -121,6 +166,8 @@ func (n *Node) maintain() {
 					return
 				case command := <-n.controls:
 					n.perform(command)
+				case command := <-n.batches:
+					n.batch(command)
 				default:
 				}
 				paused, err := n.store.IndexPaused()

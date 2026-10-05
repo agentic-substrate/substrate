@@ -262,7 +262,9 @@ The single foreground worker coalesces incremental artifact jobs and commits one
 cancellable transaction. Maintenance tests cover durable pause, unchanged checkpoints, forced
 bulk rebuilds, deferred work across restart, SQL-injected rollback and generic failures,
 explicit retry after edits, hidden Work failures, scoped counts beyond the 100-record browser
-inventory, bounded failed attempts, and concurrent pause/capture/index/shutdown. A status-poll
+inventory, bounded failed attempts, and concurrent pause/capture/index/shutdown. Review
+regressions also verify pause between explicit-batch artifacts and preservation of forced
+rebuild intent through history-only contributions, including unindexed bulk work. A status-poll
 regression first left five healthy jobs pending after the synchronous 100-attempt barrier;
 serving controls without resetting the coalescing timer lets scheduled work finish. The CLI
 keeps installation queue counts separate from browser-scoped lexical coverage.
