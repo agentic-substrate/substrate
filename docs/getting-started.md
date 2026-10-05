@@ -75,11 +75,16 @@ or inaccessible placement cannot prove a safe destination and fails before setup
 Credential files and the authority directory also reject symlinks.
 
 On the packaged browser page, enter the credential’s contents in Session credential to inspect
-the current space and registered checkout. The page clears the credential after each request,
-keeps no persistent browser credential storage, and offers Clear context to clear the display. The inspected context is a snapshot, not an ongoing
-browser grant; further requests require the credential again.
+the current space and registered checkout. The page clears the input after inspection and
+holds the credential only in page memory for subsequent artifact requests, each of which
+rechecks current authority. Clear context removes the credential, displayed artifacts,
+proposals, and review state. No cookie, URL, or persistent browser storage holds credentials.
 Denial and unavailable-authority states disclose no restricted repository metadata. This
-read-only view does not activate artifacts or approve policy changes.
+inspection does not activate artifacts or approve policy changes. The artifact browser lists
+up to 100 current-scope artifact summaries and 100 source-scoped proposals; the scoped CLI
+can inspect additional known IDs. It displays candidate/history states, complete declared
+Git dependencies, and backend explanations of permitted actions. A displayed snapshot or
+historical receipt never grants a later action.
 
 ## Local artifact capture and inspection
 
@@ -148,8 +153,8 @@ characters, tabs, and trailing spaces are preserved. Reads use locally available
 a missing promisor object remains unavailable without remote-helper execution or network access,
 even when repository configuration allows a transport. Materialize required objects separately
 through your trusted Git workflow. Lexical recall and local stdio MCP use the foreground node.
-Cross-space publication and backup/restore remain unavailable.
-The browser remains a status and read-only context view, with no artifact editing endpoint.
+Local reviewed publication is described below. Whole-installation backup/restore remains
+unavailable; explicit single-artifact restoration does not recover an installation.
 
 ## Git candidates and approved content
 
@@ -217,7 +222,55 @@ Approved reads return stored main and dependency bytes with exact commit/path/bl
 even after the source branch advances or files disappear. Source or dependency changes create
 new unapproved candidates and cannot silently replace the approved snapshot. The response marks
 `native_activation` as `unsupported`; content read is not native installation, executable safety,
-activation, or tested harness compatibility. No cross-space publication is provided.
+activation, or tested harness compatibility. Export still needs its independent policy and
+exact derived-memory publication review.
+
+## Local publication review
+
+Publication preserves the restricted source and creates a separate unverified memory in a
+registered Personal repository. It never copies executable bundles, source IDs, paths, names,
+or private source provenance into the recipient record. Review the actual proposed text for
+restricted details; the application does not automatically detect secrets or undeclared sources.
+
+Register the Personal checkout once and use trusted `bindings` output to identify its space
+and repository IDs. Stop the node before owner policy commands. Both source export and
+destination publication-write default to denied:
+
+```sh
+./bin/substrate register -path "$HOME/repos/personal-project" -space Personal
+./bin/substrate publication-policy -path "$HOME/repos/project" -action export -decision allow
+./bin/substrate publication-policy -path "$HOME/repos/personal-project" -action publish -decision allow
+./bin/substrate bindings
+```
+
+An additional source restriction uses `publication-policy -path <Work checkout>` with
+`-artifact <source ID> -action export -decision deny`. Changing the artifact decision to allow cannot
+relax a denied space policy. These trusted commands manage only this one-owner local policy;
+they do not implement organization administration or authorize a network export.
+
+Restart the node and browser server. Bind the Work session, inspect a current artifact, enter
+the complete generalized lesson and requested Personal destination IDs, and save the proposal.
+The draft remains in its source scope, pending exact review. Stop the node and issue a new
+private credential for the displayed proposal ID/revision and registered destination:
+
+```sh
+./bin/substrate review-grant -path "$HOME/repos/project" -proposal PROPOSAL_ID -revision PROPOSAL_REVISION -destination-path "$HOME/repos/personal-project" -out "$HOME/.config/substrate/review-credential"
+```
+
+Restart the node, enter that file's contents in the separate Review credential field, inspect
+the exact text, destination, source/dependency inventory, audience, placement, and policy,
+then confirm and publish. The credential expires after fifteen minutes and approves only that
+snapshot. Scoped session credentials and approval arguments cannot satisfy review. Changed
+content, destination, effective source/override relationship, or policy invalidates stale review;
+mandatory denial cannot be approved away. A new proposal revision needs a new credential.
+`review-revoke -path <Work checkout> -review-credential <file>` revokes a grant while the node
+is stopped; remove the credential file separately.
+
+Exact retries return their original acknowledgement without new writes. Historical proposal
+or publication receipts do not establish current permission; expired/revoked review credentials
+cannot recover a receipt. Publication commit failure returns no success. Serialized review
+inventories exceeding seven MiB are rejected before credential issuance; reduce source inventory
+or content. Imported reference text is never followed or executed.
 
 ## HTTP contract
 
@@ -234,7 +287,17 @@ Client navigation without a file extension falls back to the embedded page. Unsu
 methods on the page routes return 405. The server applies a restrictive content policy and
 does not load external scripts or fonts.
 
-No artifact, MCP, pairing, or synchronization HTTP endpoint exists yet. Artifact CLI commands
+`GET /api/artifacts` lists the bounded scoped inventory; `GET /api/artifacts/{id}` inspects
+content/history/actions. Scoped `POST /api/publications` proposes a derived lesson and
+`GET /api/publications/{id}` inspects its current revision. Dedicated-grant
+`GET /api/publication-review` loads the exact review and `POST /api/publication-review`
+publishes its revision/snapshot with a stable operation ID. Protected routes forward to the
+running node and never open a browser database fallback. Browser writes require the exact
+Origin; all protected routes check Host/port, Fetch-Site, and one bearer credential, and
+return JSON error codes with 400 invalid, 403 denied, 409 conflict, or 503 unavailable.
+Mutation bodies allow one strict UTF-8 JSON object of at most two MiB with supported fields.
+Ordinary missing/inaccessible object IDs share a generic denial. No HTTP MCP, pairing, or
+synchronization endpoint exists. Artifact CLI commands
 use plaintext `artifacts.db` beside bounded plaintext JSON authority records in a 0700 directory,
 with 0600 database, state, and credential files. Keep this directory on the Linux/WSL local
 filesystem. SQLite uses rollback journaling with EXTRA synchronization and checks schema version

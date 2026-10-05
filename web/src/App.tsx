@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-
+import { ArtifactBrowser } from "./ArtifactBrowser";
+import { PublicationReview } from "./PublicationReview";
 import { SessionContext } from "./SessionContext";
 
 type Status = "loading" | "connected" | "error";
 
 export function App() {
   const [status, setStatus] = useState<Status>("loading");
+  const [credential, setCredential] = useState<string | null>(null);
+  const [contextVersion, setContextVersion] = useState(0);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setStatus("loading");
@@ -35,7 +38,6 @@ export function App() {
 
   return (
     <main>
-      <p className="eyebrow">Local application</p>
       <h1>Substrate</h1>
       <p className="intro">
         Project knowledge that carries between coding sessions.
@@ -59,7 +61,16 @@ export function App() {
           Refresh status
         </button>
       </section>
-      <SessionContext />
+      <SessionContext
+        onCredential={(token) => {
+          setCredential(token);
+          setContextVersion((version) => version + 1);
+        }}
+      />
+      {credential && (
+        <ArtifactBrowser key={contextVersion} credential={credential} />
+      )}
+      <PublicationReview key={`review-${contextVersion}`} />
       <section aria-labelledby="scope-heading">
         <h2 id="scope-heading">Available in this checkout</h2>
         <p>
@@ -69,8 +80,8 @@ export function App() {
           snapshots. Scoped MCP tools connect harnesses to the local node.
         </p>
         <p>
-          Browser artifact inspection, publication review, and synchronization
-          are planned work.
+          Inspect permitted artifact history and exact-content publication
+          review here. Native activation and synchronization remain unavailable.
         </p>
       </section>
     </main>

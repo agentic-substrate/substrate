@@ -17,6 +17,9 @@ func New(assets fs.FS, options ...Options) http.Handler {
 	mux := http.NewServeMux()
 	if config.Authority != nil {
 		mux.HandleFunc("GET /api/context", config.context)
+		for _, route := range []string{"GET /api/artifacts", "GET /api/artifacts/{id}", "POST /api/publications", "GET /api/publications/{id}", "GET /api/publication-review", "POST /api/publication-review"} {
+			mux.HandleFunc(route, config.browser)
+		}
 	}
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

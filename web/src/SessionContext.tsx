@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { useRequest } from "./api";
 
 type Context = { space_name: string; checkout: string };
 
-export function SessionContext() {
+export function SessionContext({
+  onCredential,
+}: {
+  onCredential: (credential: string | null) => void;
+}) {
   const [credential, setCredential] = useState("");
   const [context, setContext] = useState<Context | null>(null);
   const [message, setMessage] = useState(
@@ -11,20 +16,27 @@ export function SessionContext() {
   const [loading, setLoading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const clearButton = useRef<HTMLButtonElement>(null);
+  const { start, cancel, finish } = useRequest();
   useEffect(() => {
     if (context) clearButton.current?.focus();
   }, [context]);
 
   async function bind() {
-    if (loading) return;
+    const controller = start();
+    if (!controller) return;
+    const token = credential.trim();
+    onCredential(null);
     setLoading(true);
     setContext(null);
     setMessage("Checking session credential…");
     try {
       const response = await fetch("/api/context", {
-        headers: { Authorization: `Bearer ${credential.trim()}` },
+        headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
+        credentials: "omit",
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!response.ok) {
         setMessage(
           response.status === 503
@@ -34,6 +46,7 @@ export function SessionContext() {
         return;
       }
       const body: unknown = await response.json();
+      if (controller.signal.aborted) return;
       if (
         typeof body !== "object" ||
         body === null ||
@@ -44,14 +57,19 @@ export function SessionContext() {
       )
         throw new Error("Invalid context");
       setContext({ space_name: body.space_name, checkout: body.checkout });
+      onCredential(token);
       setMessage(`Verified ${body.space_name} session context.`);
     } catch {
-      setMessage(
-        "Unable to reach the local authority. Check that it is running, then retry.",
-      );
+      if (!controller.signal.aborted)
+        setMessage(
+          "Unable to reach the local authority. Check that it is running, then retry.",
+        );
     } finally {
-      setCredential("");
-      setLoading(false);
+      finish(controller);
+      if (!controller.signal.aborted) {
+        setCredential("");
+        setLoading(false);
+      }
     }
   }
 
@@ -64,8 +82,8 @@ export function SessionContext() {
       {context ? (
         <>
           <p>
-            This inspection is a snapshot. Future requests require the
-            credential again.
+            This binding is a snapshot. Artifact requests recheck the
+            credential, held only in page memory until you clear this context.
           </p>
           <p>
             Registered checkout: <span>{context.checkout}</span>
@@ -74,6 +92,10 @@ export function SessionContext() {
             type="button"
             ref={clearButton}
             onClick={() => {
+              cancel();
+              onCredential(null);
+              setCredential("");
+              setLoading(false);
               setContext(null);
               setMessage(
                 "No session bound. Use a credential issued through trusted local setup.",
@@ -97,7 +119,16 @@ export function SessionContext() {
             id="session-credential"
             type="password"
             value={credential}
-            onChange={(event) => setCredential(event.target.value)}
+            onChange={(event) => {
+              cancel();
+              onCredential(null);
+              setContext(null);
+              setLoading(false);
+              setCredential(event.target.value);
+              setMessage(
+                "No session bound. Inspect this credential to establish context.",
+              );
+            }}
             autoComplete="off"
             spellCheck={false}
             required
@@ -105,10 +136,27 @@ export function SessionContext() {
           />
           <p id="credential-help">
             Create a credential with the local session command. It stays in this
-            page’s memory and is cleared after each request.
+            page’s memory until context is cleared; each request checks current
+            authority.
           </p>
           <button type="submit" aria-disabled={loading}>
             Inspect context
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              cancel();
+              onCredential(null);
+              setContext(null);
+              setCredential("");
+              setLoading(false);
+              setMessage(
+                "No session bound. Use a credential issued through trusted local setup.",
+              );
+              input.current?.focus();
+            }}
+          >
+            Clear credential
           </button>
         </form>
       )}

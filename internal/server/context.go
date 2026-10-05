@@ -25,6 +25,9 @@ func (options Options) allowedRequest(r *http.Request) bool {
 	if len(origins) > 1 || (len(origins) == 1 && origins[0] != "http://"+options.Host) {
 		return false
 	}
+	if len(r.Header.Values("Sec-Fetch-Site")) > 1 {
+		return false
+	}
 	site := r.Header.Get("Sec-Fetch-Site")
 	return site == "" || site == "same-origin" || site == "none"
 }

@@ -34,6 +34,10 @@ func (s *Session) Inspect(id string) (Artifact, error) {
 		return Artifact{}, ErrUnavailable
 	}
 	defer tx.Rollback()
+	return inspect(tx, ctx, id)
+}
+
+func inspect(tx *sql.Tx, ctx authority.Context, id string) (Artifact, error) {
 	a, err := lookup(tx, ctx, id)
 	if err != nil {
 		return Artifact{}, err

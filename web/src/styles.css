@@ -26,10 +26,6 @@ h2 {
 p {
   overflow-wrap: anywhere;
 }
-.eyebrow {
-  font-weight: 600;
-  color: #31524b;
-}
 .intro {
   font-size: 1.2rem;
 }
@@ -55,7 +51,9 @@ button[aria-disabled="true"] {
   cursor: wait;
 }
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible,
+[tabindex="-1"]:focus-visible {
   outline: 3px solid #1767a6;
   outline-offset: 4px;
 }
@@ -72,7 +70,8 @@ label {
   display: block;
   font-weight: 600;
 }
-input {
+input,
+textarea {
   display: block;
   width: 100%;
   min-height: 44px;
@@ -82,4 +81,71 @@ input {
   color: #18252b;
   background: #fff;
   font: inherit;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  background: #f4f6f5;
+  border: 1px solid #b2c0bb;
+  font-size: 0.95rem;
+}
+dd,
+li {
+  overflow-wrap: anywhere;
+}
+dd {
+  margin: 0 0 0.5rem;
+}
+dt {
+  font-weight: 600;
+}
+.revision {
+  margin-block: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #b2c0bb;
+}
+.artifact-list {
+  padding: 0;
+  list-style: none;
+}
+.artifact-list li {
+  margin-block: 1rem;
+}
+button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+button:hover:not([aria-disabled="true"]) {
+  background: #315b50;
+}
+button:active:not([aria-disabled="true"]) {
+  background: #173a32;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+form > button {
+  margin-top: 0.75rem;
+}
+.confirmation {
+  display: flex;
+  align-items: start;
+  gap: 0.75rem;
+  margin-block: 1rem;
+  cursor: pointer;
+}
+.confirmation input {
+  flex: 0 0 24px;
+  width: 24px;
+  min-height: 24px;
+  margin: 0.3rem 0;
+  accent-color: #244b42;
+}
+::selection {
+  color: #fff;
+  background: #244b42;
 }

@@ -8,14 +8,15 @@ selected for the first usable release. The browser uses Vite + React, with its s
 embedded in the Go executable. The local stdio MCP/Unix node mechanism is selected below; background service installation,
 remote MCP, shared credentials, and concrete platform packaging remain open. The local owner/session credential
 and browser inspection mechanism is selected in [onboarding](onboarding.md); inspection
-displays an authenticated snapshot and does not persist browser authority. The bootstrap
+displays authenticated snapshots and retains credentials only in page memory until cleared. The bootstrap
 uses TypeScript and npm,
 with tool versions pinned in the repository. Linux
 and WSL 2 are selected for the initial release; macOS and native Windows follow later.
 These choices define the release direction. The executable provides trusted local setup, scoped artifact capture/inspection, owner-controlled
-Git registration/approval, and approved snapshot reads. The browser serves status and authenticated
-context inspection. Local CLI/MCP retrieval attaches to the foreground node; browser artifact
-APIs and native artifact adapters remain unavailable.
+Git registration/approval, and approved snapshot reads. The browser serves status, authenticated
+binding/artifact inspection, and exact local publication review. Its artifact routes forward
+to the foreground node instead of opening another database owner. Local CLI/MCP retrieval
+uses the same node; native artifact adapters remain unavailable.
 
 ## Interface recommendation
 
@@ -85,7 +86,10 @@ administration to local access; remote administration needs authenticated deploy
 
 CLI review must satisfy the same human/content/version/destination contract as browser review.
 Ordinary agent credentials may propose a publication, but cannot turn a tool argument into
-proof of human review. Exact human-session validation is still an implementation decision.
+proof of human review. Local review uses a separately issued exact-proposal credential under
+the [selected publication mechanism](sharing.md). Its fifteen-minute expiry and capability
+separation trust the owning OS account and locally delivered browser code; they do not prove
+human presence against same-account hostile processes or provide remote person authentication.
 
 ## Initial harness connection
 

@@ -87,7 +87,8 @@ operational evidence:
 | Local owner Git registration/approval, scoped qualified/alias delivery, immutable dependency bundles | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts` selection/bundle tests and separate owner/scoped CLI commands; dated commands and limits below. Re-run after source, selection, schema, or authority changes. |
 | Scoped local conflict resolution and trusted owner artifact restoration | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts/reconciliation.go`, explicit source conflict review, and CLI regressions enforce current expected heads, retained history, atomic receipts/work, and fresh source approval after restoration. This is distinct from application backup/restore and multi-node reconciliation. Re-run at the next lifecycle or authority change. |
 | Current scoped lexical retrieval, revision associations, private node IPC, and stdio MCP delivery | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, `internal/node`, `internal/mcpbridge`, and attached CLI tests; actual four-client calls and resource measurements are recorded below and in the development guide. Re-run after retrieval, transport, SDK, client-version, or authority changes. |
-| Broader artifact action policy, remote administration/MCP authorization, shared imports/publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local storage evidence does not verify these capabilities. |
+| Scoped browser inspection and exact local derived-memory publication | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts/publication*`, `internal/authority/review.go`, protected browser forwarding, owner CLI, and packaged browser regressions enforce independent export/write policy, exact short-lived review, immutable retry receipts, and atomic completion. Re-run after publication, browser, schema, or authority changes. |
+| Broader artifact action policy, remote administration/MCP authorization, shared imports/remote publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local inspection/publication evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
 
@@ -259,6 +260,41 @@ activation, hostile same-account isolation, other operating systems, or framewor
 conformance. Private fixtures used `/var/tmp` because this host's unrelated `/tmp/.git`
 marker makes `/tmp` invalid for authority placement; no control was exempted or removed.
 Project maintainers should repeat these checks at the next lifecycle or authority change.
+
+On 2026-10-04, the issue #9 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux amd64 under WSL 2
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. The owner
+policy/review commands and browser routes first failed as unsupported. Scoped credentials
+cannot load or approve human review; exact proposal/source/bundle/override/destination and
+policy epoch changes invalidate live review, with conjunctive source denial and no override
+by confirmation. Separate grants cannot publish one proposal twice. Regression evidence covers
+hidden Work/Personal and same-space repository sources, current source eligibility, expired
+or revoked grants, exact historical retries, strict bounded UTF-8/UTF-16 transport, and private
+recipient provenance. Deferred SQLite commit failure leaves no recipient, receipt, index work,
+grant consumption, or proposal completion; repair permits the same exact retry. Temporarily
+ignoring the commit error made that assertion fail. Moving the owner callback outside its
+authority lock also failed a native lock assertion; restored controls passed race/shuffle
+checks, and replacing a registered checkout with a same-path clone denied issued review.
+
+All nine packaged browser flows passed, including an actual offline owner grant followed by
+stale review denial and fresh exact approval into Personal. Axe scanned loading, empty, error,
+unavailable, pending, denied, conflict, and success states. Native keyboard focus/confirmation,
+late-response cancellation, exact retry identities, desktop/mobile screenshots, and 320-pixel
+and 320-by-256 reflow were checked. No actual screen-reader application or true browser/OS
+400% zoom was tested; equivalent viewport reflow and green axe scans do not prove conformance.
+The pinned `govulncheck` v1.8.0 reported no vulnerabilities. Both documentation checks passed;
+the issue #9 PR records the immutable revision and exact commands. Synthetic private fixtures
+used `/var/tmp` without exempting this host's unrelated `/tmp/.git` placement restriction.
+
+This verifies one trusted local OS owner and separate human review credentials, not remote
+human authentication, hostile same-account isolation, organization administration, automatic
+secret or undeclared-source detection, executable publication/native activation, network
+transfer, complete backup/restore, power-failure durability, or another platform. The browser
+lists at most 100 scoped artifacts/proposals, and serialized reviews over seven MiB cannot
+receive a grant. Whole-installation restore must invalidate sessions and all review grants;
+completed private proposal audits are distinct from credential authority. Project maintainers
+should repeat these checks at the next publication, browser, source, policy, schema, or authority
+change.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

@@ -154,7 +154,16 @@ owner/space/repository before reads, writes, receipts, and pending-work disclosu
 Trusted local owner commands register qualified Git source identities and approve exact snapshots
 in the registered scope. Scoped session commands can propose and read content but cannot invoke
 those approval operations. Same-account hostile processes remain outside this boundary; no
-remote human-review or publication authority is implied. Approved bundles preserve each declared
+remote human-review authority is implied. Local publication uses trusted offline policy and
+a distinct short-lived exact-proposal review grant under the [sharing contract](sharing.md).
+Scoped tokens cannot invoke review authority. Protected browser writes require
+exact Host/port and Origin, permitted Fetch-Site when present, one bearer credential,
+bounded UTF-8 JSON, and supported fields.
+Publication holds the authority lock through the SQLite commit, checks source export and
+Personal destination-write policy, and commits the derived artifact, receipt, grant consumption,
+and private review audit together. Recipient provenance contains no source IDs, names, paths,
+or bundle. Arbitrary proposed text still needs human review; there is no automatic secrecy or
+data-lineage detection. Approved bundles preserve each declared
 dependency's exact provenance and do not execute scripts or follow external references.
 Plaintext SQLite storage follows the private-placement boundary and preserves immutable candidates and
 retirement. Broader artifact/admin operations still need their complete object/action policy; network credential and encryption decisions remain open. Loopback alone is
