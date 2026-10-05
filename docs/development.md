@@ -302,8 +302,8 @@ On 2026-10-05, the command above passed on Linux amd64 in WSL 2 on host `Legion`
 CPUs. The toolchain was Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and Python 3.12.3.
 The freshly built packaged executable SHA256 was
 `9b6f37b052b48eebfbe39f921666edc567fa527ab87d8d49ee238aa24402e22e`.
-The issue #12 implementation commit identifies the runtime sources; the measurements used
-its pre-commit build. Other task agents held heavy work during this measurement window;
+Runtime sources match [36de0e4](https://github.com/agentic-substrate/substrate/tree/36de0e4c7f5b4d182152b6ef39989af85360cb86);
+the measurements used its pre-commit build. Other task agents held heavy work during this measurement window;
 background host activity was not controlled. Node CPU resolution was 0.01 seconds.
 
 | Observed stage | Result for this synthetic workload |
