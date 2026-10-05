@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { failure, requestJSON, useRequest } from "./api";
 import type { ArtifactDetail, Inventory, Proposal } from "./artifactTypes";
+import { MaintenanceStatus } from "./MaintenanceStatus";
 import { RevisionContent } from "./RevisionContent";
 
 export function ArtifactBrowser({ credential }: { credential: string }) {
@@ -178,6 +179,7 @@ export function ArtifactBrowser({ credential }: { credential: string }) {
             {inventory.context.space_id}. Repository:{" "}
             {inventory.context.repo_id}. Checkout: {inventory.context.checkout}.
           </p>
+          <MaintenanceStatus maintenance={inventory.maintenance} />
           <ul className="artifact-list">
             {inventory.artifacts.map((artifact) => (
               <li key={artifact.id}>

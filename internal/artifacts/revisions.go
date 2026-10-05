@@ -156,7 +156,7 @@ func retry(tx *sql.Tx, ctx authority.Context, operation, hash string) (Receipt, 
 }
 
 func record(tx *sql.Tx, ctx authority.Context, hash string, r Receipt, action string) error {
-	if _, err := tx.Exec("INSERT OR IGNORE INTO index_queue VALUES(?)", r.ArtifactID); err != nil {
+	if _, err := tx.Exec("INSERT INTO index_queue(artifact_id) VALUES(?) ON CONFLICT(artifact_id) DO UPDATE SET bulk=0", r.ArtifactID); err != nil {
 		return ErrUnavailable
 	}
 	encoded, _ := json.Marshal(r)

@@ -1,6 +1,6 @@
 # Security roadmap and evidence
 
-**Last reviewed:** 2026-10-04. Re-read at each release, trust-boundary change, enterprise
+**Last reviewed:** 2026-10-05. Re-read at each release, trust-boundary change, enterprise
 commitment, or material change to a referenced standard.
 
 **Status:** codified Substrate guidance from *Security frameworks and enterprise roadmap for
@@ -88,6 +88,7 @@ operational evidence:
 | Scoped local conflict resolution and trusted owner artifact restoration | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts/reconciliation.go`, explicit source conflict review, and CLI regressions enforce current expected heads, retained history, atomic receipts/work, and fresh source approval after restoration. This is distinct from application backup/restore and multi-node reconciliation. Re-run at the next lifecycle or authority change. |
 | Current scoped lexical retrieval, revision associations, private node IPC, and stdio MCP delivery | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, `internal/node`, `internal/mcpbridge`, and attached CLI tests; actual four-client calls and resource measurements are recorded below and in the development guide. Re-run after retrieval, transport, SDK, client-version, or authority changes. |
 | Scoped browser inspection and exact local derived-memory publication | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts/publication*`, `internal/authority/review.go`, protected browser forwarding, owner CLI, and packaged browser regressions enforce independent export/write policy, exact short-lived review, immutable retry receipts, and atomic completion. Re-run after publication, browser, schema, or authority changes. |
+| Durable foreground maintenance and scoped browser queue/coverage status | Verified with local WSL 2 evidence dated 2026-10-05; project maintainers own review | `internal/artifacts/maintenance.go`, `internal/node/maintenance.go`, scoped inventory and CLI/browser regressions; re-run after scheduling, schema, shutdown, or scope changes. |
 | Broader artifact action policy, remote administration/MCP authorization, shared imports/remote publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local inspection/publication evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
 | Release manifest, SBOM/provenance, consumer verification, restore/incident exercises | Planned | Verify delivered artifacts and actual restore results before making claims. |
@@ -295,6 +296,40 @@ receive a grant. Whole-installation restore must invalidate sessions and all rev
 completed private proposal audits are distinct from credential authority. Project maintainers
 should repeat these checks at the next publication, browser, source, policy, schema, or authority
 change.
+
+On 2026-10-05, the issue #12 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux amd64 in WSL 2,
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. Seventeen new
+Go regressions cover schema 4-to-5 migration, durable pause/startup override, coalescing to
+current heads, unchanged-posting preservation, explicit forced rebuild, deferred bulk restart,
+failed-job restart/edited-head persistence and healthy progress, a 100-failed-attempt bound,
+pre-transaction and checkpoint cancellation, bounded incomplete-frame shutdown, credential
+denial versus node unavailability, concurrent maintenance, and full scoped counts beyond the
+bounded browser list. A status-poll regression first left five queued jobs indefinitely pending;
+the corrected worker serves controls without resetting its active delay. Test-only SQL
+triggers inject failures/cancellation without production test hooks. Indexing preserves saved
+receipts and the independent pending operation ledger.
+
+All fifteen packaged browser flows passed, including six maintenance flows and a real
+owner-controlled paused capture, rebuild, restart, isolated Personal status, resume, and
+complete scoped lexical coverage. Missing/malformed status, inconsistent count relationships,
+failures, deferred work, empty/partial/limited coverage, revoked access, and canceled late Work
+responses remain distinct. Axe scanned relevant states, native keyboard controls and focus
+were checked, and desktop/320-pixel reflow screenshots were inspected. An actual screen-reader
+application and true OS/browser 400% zoom remain untested; equivalent viewport reflow does not
+prove conformance. No new HTTP route, browser maintenance control, automatic refresh, or
+external telemetry is introduced.
+
+The [foreground resource evidence](../development.md#foreground-maintenance-evidence)
+records a fresh packaged binary hash, synthetic workload, exact command, node CPU/RSS and
+latency, and a real zero-route offline namespace restart on WSL 2. Both SIGINT and SIGTERM
+preserve durable pause, receipt identity, current reads, pending work, and resumed retrieval;
+duplicate startup fails and normal shutdown removes only the owned socket. The implementation
+commit and PR identify the source revision and exact checks. This evidence does not establish
+power/device-failure durability, whole-installation restore, continuous WSL/distro survival,
+service packaging, native Windows/macOS, battery/host energy targets, or remote/shared
+security. Project maintainers should repeat it after schema, indexing, queue, shutdown,
+authority, or status-scope changes.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

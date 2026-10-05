@@ -1,6 +1,6 @@
 # Installation and node lifecycle
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each platform, install, or release decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each platform, install, or release decision
 
 **Status:** CLI, MCP, and a Vite + React admin UI embedded in Go are agreed for the first
 usable release. Initial platform coverage is Linux and WSL 2; macOS and native Windows follow
@@ -103,7 +103,8 @@ on `node.sock`, mode 0600 inside the validated owner-only directory. Scoped CLI 
 sessions attach to that node; they do not open their own database or start it implicitly.
 Duplicate startup fails without removing the live socket. After abrupt shutdown, the next
 exclusive lock holder may replace a private stale socket and let SQLite recover its journal.
-Normal shutdown stops accepting, drains bounded requests, closes SQLite, removes only its
+Normal shutdown stops accepting, cancels the indexing worker and accepted IPC connections,
+waits for bounded in-flight mutations, closes SQLite, removes only its
 own socket identity, and finally releases the installation lock. Closing a bridge leaves the
 node running. A shorter private directory is required when its Unix socket path exceeds
 100 bytes; unavailability returns an actionable bounded error without remote fallback.
@@ -116,7 +117,12 @@ Authority setup, scoped credential creation/revocation, and read-only browser co
 using the separate authority lock; they do not open SQLite. Installation locks and file modes
 protect against other OS users, not hostile processes using the owner's account or root.
 
-Foreground operation is implemented on the tested Linux environment. User-service installation,
+Foreground operation is implemented on the tested Linux/WSL environment. Durable indexing
+pause survives SIGINT/SIGTERM restart; explicit startup overrides retain the same identity
+and state directory. The [dated foreground evidence](../development.md#foreground-maintenance-evidence)
+includes a real WSL 2 network-namespace restart, duplicate-node rejection, exact receipt retry,
+current read, lexical retrieval, and node CPU/RSS measurements. It does not test distro shutdown
+or a host reboot. User-service installation,
 on-demand startup coordination, full migration backup/restore, native platform packaging,
 and continuous WSL availability remain unimplemented. The browser `serve` command retains
 its separate numeric-loopback listener and forwards credentialed artifact inspection and

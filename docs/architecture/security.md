@@ -1,6 +1,6 @@
 # Transfer, authority, and recovery
 
-**Last reviewed:** 2026-10-04. Re-read before changing identity, key custody, recovery,
+**Last reviewed:** 2026-10-05. Re-read before changing identity, key custody, recovery,
 network transfer, offline grants, or telemetry.
 
 **Status:** information relay first, future peer-to-peer and hub-and-spoke transfer of
@@ -181,6 +181,15 @@ operation. Owner registration/approval stay offline under that same lock, withou
 MCP route. Ranking uses only current permitted revisions and no hidden-corpus statistics.
 Search labels cannot approve or select a source alias; related endpoints and direct IDs repeat
 current scope/eligibility checks. Derived indexing cannot invalidate a committed save receipt.
+Maintenance status in the existing browser inventory authenticates before counting the full
+owner/space/repository queue and current eligible coverage. Hidden jobs and failures cannot
+change another scope's counts or readiness. Installation pause is deliberately visible and
+labeled independently; no global active job or progress is disclosed. Only trusted local
+owner IPC/CLI controls can change durable pause, retry failures, or run discretionary bulk
+work; no browser or MCP maintenance control endpoint is added. Worker cancellation leaves
+unfinished indexing queued without a failure, and shutdown cancels accepted incomplete IPC
+frames while preserving exact socket ownership checks. These local operational fields do not
+introduce external telemetry collection or a content/management grant.
 The [delivery contract](delivery.md#selected-local-mcp-transport) pins the SDK/transport;
 actual versioned client evidence remains distinct from protocol-level tests.
 

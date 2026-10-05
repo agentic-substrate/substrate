@@ -332,13 +332,54 @@ source aliases. Read result IDs with `read -id ARTIFACT_ID` or `read -revision R
 selector. Superseded, retired, candidate, inaccessible, and missing current revisions cannot
 be read through retrieval; authorized historical inspection uses `artifact` separately.
 
-The node processes up to 100 queued identities each second, with at most 32,768 indexed token
-positions per revision. Search's `index` object reports eligible/indexed/pending counts and
-limited lexical coverage for this session only. Complete content remains durable and readable.
-Start `node -index-paused` to pause indexing from startup. `index -pause=true` pauses without
-consuming work; `index -pause=false` processes one batch and resumes. Keep `-state-dir`
-consistent. Saved content and pending operation receipts survive pause/restart and index failure.
-This is bounded local indexing, not backup, synchronization, or a battery-aware scheduler.
+The foreground node runs one indexing worker. Successful artifact mutations and startup wake
+incremental work after a short coalescing delay; searches, reads, review, and status requests
+never schedule indexing. Each artifact replaces postings and its revision checkpoint atomically,
+with at most 32,768 token positions. Repeated edits coalesce to the newest committed head, and
+history-only candidates with an unchanged checkpoint do not rewrite postings. Complete content
+and the separate pending operation ledger remain durable and readable while indexing is paused.
+
+Use the same `-state-dir` for the node and these trusted local owner commands:
+
+```sh
+substrate index -state-dir PRIVATE_DIR -status
+substrate index -state-dir PRIVATE_DIR -pause=true
+substrate index -state-dir PRIVATE_DIR -pause=false
+substrate index -state-dir PRIVATE_DIR -rebuild
+substrate index -state-dir PRIVATE_DIR -run
+substrate index -state-dir PRIVATE_DIR -retry
+```
+
+Pause is installation-wide and durable across shutdown and restart. Omitted `node
+-index-paused` preserves it; explicit `-index-paused=true` or `-index-paused=false` overrides
+it. `index` without a control and `index -pause=false` resume and synchronously attempt at most
+100 incremental artifacts before responding, including failed attempts in that bound.
+Background incremental work can continue afterward. `-status` reads without changing pause,
+clearing failures, or scheduling work. The pause, status, rebuild, run, and retry controls are
+mutually exclusive. `-rebuild` queues discretionary bulk work without running it; bulk work
+survives restart and only `-run` attempts up to 100 jobs, including bulk, while unpaused.
+A full rebuild regenerates postings even when the revision checkpoint matches. Remaining bulk
+work requires another explicit run. A failed artifact remains failed through restart and later
+edits; `-retry` explicitly clears failures and wakes permitted incremental work. Operational
+failures return actionable unavailable errors; per-artifact failures use generic maintenance
+status without private database diagnostics. Cancellation preserves unfinished queued work.
+
+CLI maintenance counts cover the installation. The existing browser artifact inventory adds
+read-only maintenance and lexical coverage for the full authenticated owner, space, and
+repository, independently of its 100-record list limit. `queued` counts healthy incremental
+jobs even while paused; `deferred` counts healthy discretionary bulk jobs even while paused;
+`failed` counts failed jobs instead of including them in either other count. Coarse queue
+state prioritizes failed, then pending incremental, then deferred bulk, then ready. All three
+counts and the installation pause remain visible. A ready queue can have empty eligible
+content or limited lexical coverage and does not prove complete search recall. Search's
+`index` object and browser coverage count only current eligible scoped revisions, with
+`limited` reporting truncation. Browser inspection cannot resume indexing or clear failures.
+
+Supported foreground shutdown handles SIGINT and SIGTERM, cancels index transactions and
+incomplete accepted IPC frames, and releases only its own socket and installation lock.
+The [development evidence](development.md#foreground-maintenance-evidence) records the tested
+Linux/WSL environment, offline restart, and synthetic latency/resource limits. No service,
+continuous WSL availability, battery target, or platform beyond that evidence is advertised.
 
 ## Connect a local MCP client
 

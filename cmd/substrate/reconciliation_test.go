@@ -28,7 +28,7 @@ func TestReconciliationCLISelectsConflictAndRestoresFreshHead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runtime, err := node.Start(&authority.Store{Dir: state}, true)
+	runtime, err := node.Start(&authority.Store{Dir: state}, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestReconciliationCLISelectsConflictAndRestoresFreshHead(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &restored); err != nil || restored.RevisionID == resolved.RevisionID || restored.State != "pending-local" {
 		t.Fatalf("restoration reused retired head: %s %v", output.String(), err)
 	}
-	runtime, err = node.Start(&authority.Store{Dir: state}, true)
+	runtime, err = node.Start(&authority.Store{Dir: state}, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}

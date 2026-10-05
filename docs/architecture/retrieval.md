@@ -1,6 +1,6 @@
 # Context retrieval
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each retrieval or storage decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each retrieval or storage decision
 
 **Status:** the agreed initial retrieval direction combines ranked text, exact identifiers
 and scope, and explicit semantic associations without neural inference. Learned embeddings
@@ -172,26 +172,58 @@ external or transitive access. Search aliases are separate from registered sourc
 aliases: use search results' exact artifact/revision IDs for a subsequent current read.
 
 Schema version 3 adds revision associations, a coalesced per-artifact index queue, token
-positions, and a revision checkpoint. Migration preserves version 1/2 content, approvals,
-bundles, and retry receipts. Index batches atomically replace postings, record the current
-checkpoint, and consume their own queue. The existing pending operation ledger remains
-intact for later reconciliation. A failed batch leaves saved content, receipts, queue, and
-previous derived state intact. Current exact reads work while indexing is paused, and stale
-postings cannot deliver old or retired content. Exact ID/association lookup can find current
-unindexed content; ordinary lexical recall reports incomplete coverage until indexed.
+positions, and a revision checkpoint. Version 5 adds durable installation pause and per-job
+bulk/failure state while preserving content, approvals, bundles, publication records, retry
+receipts, and the pending operation ledger. Incremental work always loads the current committed
+head; stale/history-only jobs whose checkpoint matches consume their queue without rewriting
+postings. Explicit full rebuilds force regeneration of matching checkpoints.
 
-`Store.IndexBatch` processes at most 100 artifact identities per transaction. Each revision
-indexes at most 32,768 token positions across content and explicit associations/dependencies;
-`index.limited` reports permitted current revisions with truncated lexical coverage. Complete
-content remains saved and readable. `index.eligible`, `indexed`, and `pending` count only the
-current eligible session scope. Search returns at most 100 results and 400-rune excerpts.
-This bounds index work without promising recall for text beyond that cap. Unrecorded
-paraphrases, spelling errors, and inferred relationships are unsupported by this baseline.
-A paused capture remains pending-local/unverified evidence, not an indexed or verified fact.
+`Store.IndexNext` processes one artifact in a cancellable transaction. It atomically replaces
+postings, records the checkpoint, and consumes its own queue entry. Cancellation rolls back
+unfinished derived work without creating a failure. A real failure rolls back derived changes,
+then records only a generic failure on the durable job. Failed jobs remain queued but cannot
+block healthy incremental work, and stay failed through later edits and restart until explicit
+retry. Saved content, receipts, and previous derived state remain intact. Current exact reads
+work while paused, and stale postings cannot deliver old or retired content. Exact
+ID/association lookup can find current unindexed content; ordinary lexical recall reports
+incomplete coverage until indexed.
 
-The foreground node attempts one bounded index batch each second when unpaused. `index
---pause=true` processes no work; `index --pause=false` processes one batch and resumes that
-loop. The one-second control loop still wakes while paused; no battery or energy saving is
-claimed. Battery/charging detection, discretionary scheduling, enrichment, and model acquisition
-remain later maintenance work. Re-read this contract after changes to scoring, eligibility,
-queue semantics, coverage bounds, scheduling, or optional inference.
+`Store.IndexBatch` bounds attempts to 100 artifact identities, including failures, with one
+transaction per artifact. Each revision indexes at most 32,768 token positions across content
+and explicit associations/dependencies; `index.limited` reports permitted current revisions
+with truncated lexical coverage. Complete content remains saved and readable. `index.eligible`,
+`indexed`, and `pending` count only the current eligible session scope. Search returns at most
+100 results and 400-rune excerpts. This bounds index work without promising recall for text
+beyond that cap. Unrecorded paraphrases, spelling errors, and inferred relationships are
+unsupported. A paused capture remains pending-local/unverified evidence.
+
+The foreground node has one worker and one buffered wake signal with a 25-millisecond
+coalescing delay. Startup, successful artifact mutations, and explicit maintenance controls
+can wake it; search, content reads, publication review, and status do not. It sleeps without
+an idle polling ticker. All automatic and explicit indexing uses this worker, so concurrency
+is one artifact transaction. Installation pause is durable; startup preserves it unless an
+explicit boolean override is supplied. Pause acknowledgements wait for the worker's current
+artifact transaction. Explicit index/resume attempts at most 100 incremental jobs before
+responding; background work can continue afterward. Failures count toward the attempt bound.
+
+Full rebuilds queue discretionary bulk work. Automatic processing never consumes bulk or failed
+jobs. Explicit run attempts at most 100 incremental/bulk jobs while unpaused, and remaining
+bulk stays deferred across restart. Retry clears generic failures explicitly and wakes healthy
+incremental work. Publication drafts enqueue no artifact work; successful publication uses the
+same committed artifact queue as capture.
+
+The existing scoped browser inventory reports lexical mode, durable installation pause,
+disjoint queued/deferred/failed counts, and eligible/indexed/pending/limited coverage across
+the full owner/space/repository, independently of its bounded artifact list. Healthy incremental
+jobs remain queued while paused; healthy bulk remains deferred while paused. Failed jobs
+count only as failed. Coarse state prioritizes failed, queued, deferred, then ready, while every
+count remains visible. Queue readiness is separate from empty or truncated coverage. Hidden
+Work jobs, failures, identifiers, and activity never change Personal scoped counts or coverage;
+the deliberately exposed installation pause is labeled separately. No global active job,
+progress, or identifier appears. Trusted local CLI status covers installation queue counts and
+omits scoped coverage rather than representing unknown coverage as zero.
+
+[Measured foreground evidence](../development.md#foreground-maintenance-evidence) records
+resource and lifecycle observations, not a battery guarantee. Charging detection, optional
+inference, service installation, and host energy budgets remain unimplemented. Re-read this
+contract after scoring, eligibility, schema, queue, scheduling, coverage, or inference changes.

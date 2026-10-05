@@ -142,7 +142,15 @@ func migrate(db *sql.DB) error {
 		if _, err := tx.Exec(publicationSchema); err != nil {
 			return ErrUnavailable
 		}
-	} else if version != 4 {
+		version = 4
+	}
+	if version == 4 {
+		if _, err := tx.Exec(maintenanceSchema); err != nil {
+			return ErrUnavailable
+		}
+		version = 5
+	}
+	if version != 5 {
 		return ErrUnavailable
 	}
 	if err := tx.Commit(); err != nil {

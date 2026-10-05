@@ -178,6 +178,9 @@ func TestIndexFailurePreservesQueueReceiptAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.store.db.Exec("DROP TRIGGER fail_index")
+	if err := f.store.RetryIndex(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.store.IndexBatch(100); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +214,7 @@ func TestVersionTwoMigrationPreservesLegacyRetryFingerprints(t *testing.T) {
 	if _, err := f.store.db.Exec("UPDATE contributions SET fingerprint=? WHERE operation_id=?", fingerprint(old), c.OperationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.db.Exec("DROP TABLE review_grants; DROP TABLE publication_revisions; DROP TABLE publication_proposals; DROP TABLE publication_policy; DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; PRAGMA user_version=2"); err != nil {
+	if _, err := f.store.db.Exec("DROP TABLE maintenance; DROP TABLE review_grants; DROP TABLE publication_revisions; DROP TABLE publication_proposals; DROP TABLE publication_policy; DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; PRAGMA user_version=2"); err != nil {
 		t.Fatal(err)
 	}
 	f.store.Close()
@@ -271,6 +274,10 @@ func TestIndexCapsPostingsAndReportsLimitedCoverage(t *testing.T) {
 	got, err := f.session.Search(SearchRequest{Query: "bounded"})
 	if err != nil || len(got.Results) != 1 || got.Index.Limited != 1 {
 		t.Fatalf("bounded index %+v %v", got, err)
+	}
+	inventory, err := f.session.BrowserInventory()
+	if err != nil || inventory.Maintenance.State != "ready" || inventory.Maintenance.Coverage.Limited != 1 {
+		t.Fatalf("ready queue concealed limited coverage %+v %v", inventory.Maintenance, err)
 	}
 	var count int
 	f.store.db.QueryRow("SELECT count(*) FROM tokens").Scan(&count)

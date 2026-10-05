@@ -1,6 +1,6 @@
 # Artifact precedence, discovery, and policy
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each policy, search, or adapter decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each policy, search, or adapter decision
 
 **Status:** artifacts means memories, skills, and agent definitions. The decision order,
 type-specific precedence, search boundaries, segmentation, denied/approval/allowed distinction,
@@ -184,8 +184,10 @@ lexical indexing. The actual capability check reports
 SQLite 3.53.4. Compared with `modernc.org/sqlite` v1.60.1 it needs a smaller production dependency
 set; `mattn/go-sqlite3` v1.14.52 needs cgo and an FTS5 build tag.
 This choice does not establish performance or memory targets. The driver documents higher
-per-connection memory use from its Wasm sandbox; actual application resource measurements
-remain future evidence. See the [driver guidance](https://github.com/ncruces/go-sqlite3/tree/v0.35.6)
+per-connection memory use from its Wasm sandbox; representative foreground application
+resource measurements appear in the
+[development evidence](../development.md#foreground-maintenance-evidence), with workload and
+platform limits. See the [driver guidance](https://github.com/ncruces/go-sqlite3/tree/v0.35.6)
 and [SQLite synchronization settings](https://www.sqlite.org/pragma.html#pragma_synchronous).
 
 A storage session retains its credential privately and authenticates through current local
@@ -197,8 +199,8 @@ user; plaintext files and mode protection do not isolate that user or root.
 
 A successful contribution atomically commits artifact identity, immutable revision content,
 provenance, operation receipt, and pending incremental work. The original version 1 schema migrates
-transactionally through selection tables to version 3 revision associations and the derived lexical
-index; a newer unknown schema fails with an actionable unavailable error. A
+transactionally through selection tables, version 3 revision associations and the derived lexical
+index, version 4 publication records, and version 5 durable maintenance pause/queue/failure state. A newer unknown schema fails with an actionable unavailable error. A
 contribution operation ID is unique within owner/space/repository. An exact retry returns its
 original receipt; a changed payload under that ID is rejected. Text content and every
 contribution/lookup/lifecycle string must be valid UTF-8 before fingerprinting or persistence.

@@ -106,6 +106,21 @@ dt {
   padding-top: 1rem;
   border-top: 1px solid #b2c0bb;
 }
+.maintenance {
+  margin-block: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.maintenance-counts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 1rem;
+}
+.maintenance-counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
 .artifact-list {
   padding: 0;
   list-style: none;

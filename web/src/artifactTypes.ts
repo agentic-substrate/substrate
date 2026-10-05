@@ -57,8 +57,23 @@ export type Proposal = {
   sources: { artifact_id: string; revision_id: string }[];
   destination: Destination;
 };
+export type Maintenance = {
+  mode: "lexical";
+  paused: boolean;
+  state: "ready" | "pending" | "deferred" | "failed";
+  queued: number;
+  deferred: number;
+  failed: number;
+  coverage: {
+    eligible: number;
+    indexed: number;
+    pending: number;
+    limited: number;
+  };
+};
 export type Inventory = {
   context: Context;
+  maintenance?: Maintenance;
   artifacts: ArtifactSummary[];
   proposals: {
     id: string;

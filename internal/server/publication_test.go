@@ -49,7 +49,7 @@ func TestBrowserArtifactScopeOriginAndStrictPublicationBody(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runtime, err := node.Start(auth, true)
+	runtime, err := node.Start(auth, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}

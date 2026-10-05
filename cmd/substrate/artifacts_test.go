@@ -28,7 +28,7 @@ func TestCaptureCLIReportsCommittedReceiptAndScopedInspection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runtime, err := node.Start(&authority.Store{Dir: state}, false)
+	runtime, err := node.Start(&authority.Store{Dir: state}, new(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestSearchCLIForwardsQueryLimitAndRelatedOrigin(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runtime, err := node.Start(&authority.Store{Dir: state}, true)
+	runtime, err := node.Start(&authority.Store{Dir: state}, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}
