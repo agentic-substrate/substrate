@@ -201,15 +201,21 @@ transactionally through selection tables to version 3 revision associations and 
 index; a newer unknown schema fails with an actionable unavailable error. A
 contribution operation ID is unique within owner/space/repository. An exact retry returns its
 original receipt; a changed payload under that ID is rejected. Text content and every
-contribution/lookup/retirement string must be valid UTF-8 before fingerprinting or persistence.
+contribution/lookup/lifecycle string must be valid UTF-8 before fingerprinting or persistence.
 Invalid bytes are rejected instead of being normalized to U+FFFD; valid U+FFFD is preserved.
 No receipt is returned before commit. Storage failure remains unavailable; derived index failure cannot invalidate a saved receipt.
 
 Memory observations are unverified and pending-local. An edit against the current expected
 revision advances the local head; an outdated edit is preserved as a conflict candidate and
-cannot replace that head. Retirement checks the expected head and persists lifecycle state;
-later edits remain restricted candidates and cannot restore the artifact. Restoration,
-verification, publication, and shared acceptance are unavailable. Provenance is a claim from
+cannot replace that head. Explicit scoped memory resolution checks the current expected head,
+copies the selected revision's content, provenance, and associations into a fresh unverified
+revision, and retains competing history with resolved state. Keeping the current revision uses
+the same fresh-revision transition. Combining text is a separate contribution with its own
+expected head; no automatic text merge or inherited factual verification occurs.
+Retirement checks the expected head and persists lifecycle state; later edits remain restricted
+candidates and cannot restore the artifact. A separate trusted local owner operation restores
+memory into a fresh unverified head so pre-retirement edits stay stale. Verification,
+publication, and shared acceptance are unavailable. Provenance is a claim from
 the contributing session, not independently verified factual evidence.
 
 Skill and agent-definition contributions read exact bytes from a full Git commit in the
@@ -224,7 +230,7 @@ access. Required objects must already be local. This mechanism is verified on Gi
 rather than relying on an unsupported no-lazy-fetch flag. See the
 [versioned Git environment contract](https://github.com/git/git/blob/v2.43.0/Documentation/git.txt).
 Capturing does not approve or execute source. Trusted registration and explicit approved-version
-selection follow the contract below; neither source text nor scoped operation arguments can
+selection and restoration follow the contract below; neither source text nor scoped operation arguments can
 approve content.
 
 The local reopen and rollback checks prove the tested application's acknowledgment boundary.
@@ -256,6 +262,24 @@ bytes does not alter the stored approved snapshot. A new source or dependency ve
 another candidate and explicit approval. Schema version 2 transactionally adds registrations and
 approved override records to the version 1 store. Approval, receipt, selected head, and pending
 index work commit together; a failed commit returns no success receipt.
+
+The owner can explicitly review a competing candidate against the current expected head.
+Conflict approval copies that exact immutable bundle and its associations into a fresh revision,
+checks current registration and override rules, and commits its approval with the new head.
+Prior competing source candidates retain resolved history. Existing approval retries retain
+their original fingerprints when the conflict-review flag is absent. Combined source text or
+dependencies must first become a fresh Git candidate; approvals of the inputs do not approve
+the result. Scoped sessions cannot approve source or settle definition precedence.
+
+Restoration is a separate owner command with the expected retired head and a new operation
+identity. It invalidates prior source candidates, including edits captured while retired, as
+`retired-candidate`. A previously approved head becomes a fresh candidate with no effective
+head and no copied approval or override relationship. A source retired before any approval
+returns `restored-awaiting-candidate` with no revision and requires a fresh proposal. Only a
+fresh candidate and owner approval can make restored source effective. The owner must declare
+current override pins again; restoring content cannot restore stale precedence. Receipts,
+pending work, revision changes, lifecycle, and index invalidation commit atomically. Exact
+resolution and restoration retries return historical receipts without changing current state.
 
 An override must explicitly name an active, approved, same-kind default in the same authorized
 repository and space, pin its current revision, and target a default marked overridable at

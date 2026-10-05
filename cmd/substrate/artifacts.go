@@ -50,6 +50,11 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 		id = flags.String("id", "", "artifact to retire")
 		expected = flags.String("expected", "", "expected current revision")
 		operation = flags.String("operation", "", "stable retirement operation ID")
+	case "resolve-conflict":
+		id = flags.String("id", "", "memory artifact to resolve")
+		flags.StringVar(&revision, "revision", "", "exact existing revision to keep or choose")
+		expected = flags.String("expected", "", "expected current revision")
+		operation = flags.String("operation", "", "stable resolution operation ID")
 	case "pending":
 	case "search":
 		flags.StringVar(&relatedTo, "related-to", "", "one-hop related results from this current permitted artifact")
@@ -102,6 +107,8 @@ func runArtifact(args []string, in io.Reader, out io.Writer) error {
 		request.ID = *id
 	case "retire":
 		request.ID, request.Expected, request.Operation = *id, *expected, *operation
+	case "resolve-conflict":
+		request.Resolution = artifacts.Resolution{OperationID: *operation, ArtifactID: *id, RevisionID: revision, ExpectedRevision: *expected}
 	case "pending":
 	case "search":
 		request.Search = artifacts.SearchRequest{Query: query, Limit: limit, RelatedTo: relatedTo}

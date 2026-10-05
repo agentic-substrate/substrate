@@ -94,6 +94,24 @@ func TestSourceCLISeparatesProposalsFromOwnerApproval(t *testing.T) {
 		t.Fatalf("choices: %s %v", output.String(), err)
 	}
 	output.Reset()
+	stale := append(append([]string{"propose"}, common...), "-operation", "stale-proposal", "-artifact", r.ArtifactID, "-kind", "agent-definition", "-commit", cliGit("rev-parse", "HEAD"), "-file", "AGENT.md", "-dependency", "reference.md")
+	if err := runScoped(stale, strings.NewReader(""), &output); err != nil {
+		t.Fatal(err)
+	}
+	var candidate artifacts.Receipt
+	if err := json.Unmarshal(output.Bytes(), &candidate); err != nil || candidate.State != "conflict" {
+		t.Fatalf("stale source: %s %v", output.String(), err)
+	}
+	output.Reset()
+	resolution := append(append([]string{"approve"}, ownerFlags...), "-artifact", r.ArtifactID, "-revision", candidate.RevisionID, "-expected", r.RevisionID, "-operation", "resolve-source", "-resolve-conflict")
+	if err := runSource(resolution, &output); err != nil {
+		t.Fatalf("explicit owner source resolution: %v", err)
+	}
+	var resolved artifacts.Receipt
+	if err := json.Unmarshal(output.Bytes(), &resolved); err != nil || resolved.State != "approved" || resolved.RevisionID == candidate.RevisionID {
+		t.Fatalf("source resolution: %s %v", output.String(), err)
+	}
+	output.Reset()
 	if err := runAuthority([]string{"revoke", "-state-dir", state, "-credential", credential}, new(bytes.Buffer)); err != nil {
 		t.Fatal(err)
 	}
