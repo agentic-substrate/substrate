@@ -49,6 +49,12 @@ type Receipt struct {
 	RevisionID  string `json:"revision_id"`
 	State       string `json:"state"`
 }
+type Resolution struct {
+	OperationID      string `json:"operation_id"`
+	ArtifactID       string `json:"artifact_id"`
+	RevisionID       string `json:"revision_id"`
+	ExpectedRevision string `json:"expected_revision"`
+}
 type Revision struct {
 	Associations Associations `json:"associations"`
 	ID           string       `json:"id"`

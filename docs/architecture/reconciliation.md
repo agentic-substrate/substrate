@@ -98,5 +98,33 @@ The local store now preserves expected-base candidates, operation receipts, and 
 state under the [selected persistence contract](artifacts.md#selected-local-persistence-contract).
 This is not a synchronization engine or synchronization acceptance test.
 
+## Selected local resolution and restoration
+
+Scoped memory resolution chooses an exact authorized revision, including the accepted head
+for a keep action, against the current expected head. It creates a fresh unverified local
+revision with the chosen evidence and associations, and retains earlier competing candidates
+as resolved history. Combined memory text is a new expected-base contribution; there is no
+automatic merge. Independent observations remain separate artifact identities.
+
+Git source resolution remains a trusted local owner approval. The explicit conflict-review
+flag permits review of a current candidate or conflict whose original base is stale, but still
+checks the current expected effective head and applicable override/default pins. The reviewed
+exact bundle becomes a fresh approved revision; no textual merge or source-order preference
+selects it. Combined source requires a new Git snapshot and explicit approval.
+
+Only the trusted owner CLI restores retired artifacts. Memory receives a fresh unverified
+head so old edits cannot replace it. A restored approved Git snapshot becomes a fresh candidate
+without copied approval or override authority. Previous source candidates become
+`retired-candidate` and cannot activate through an old empty-head expectation. If no approved
+source head exists, restore changes lifecycle only and reports `restored-awaiting-candidate`;
+a fresh proposal and owner approval are required. These owner actions have no node, browser,
+or MCP endpoint and retain the trusted OS-account boundary.
+
+Each transition commits its receipt, revisions, lifecycle/head, pending work, and incremental
+index invalidation together. Changed arguments under an existing operation identity conflict;
+exact retries return the original receipt without undoing later retirement. Current authority
+checks still precede receipt disclosure. These local checks do not decide shared restoration,
+tombstones, compaction, cross-node identifiers, or synchronization authority.
+
 See [deployment](deployment.md), [offline grants](offline.md), [source ownership](repositories.md),
 and [sharing](sharing.md).

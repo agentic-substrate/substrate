@@ -53,7 +53,11 @@ func (o *Owner) Approve(a Approval) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	if r.Source == nil || r.Base != a.ExpectedRevision || r.State != "candidate" {
+	eligible := r.State == "candidate" && r.Base == a.ExpectedRevision
+	if a.ResolveConflict {
+		eligible = r.State == "candidate" || r.State == "conflict"
+	}
+	if r.Source == nil || !eligible {
 		return Receipt{}, ErrConflict
 	}
 	// One-level relationships keep cycles and implicit override chains unavailable.
@@ -71,19 +75,29 @@ func (o *Owner) Approve(a Approval) (Receipt, error) {
 			return Receipt{}, ErrConflict
 		}
 	}
-	if _, err := tx.Exec("INSERT INTO approvals VALUES(?,?,?)", a.RevisionID, a.Overrides, a.OverrideRevision); err != nil {
+	revision := a.RevisionID
+	if a.ResolveConflict {
+		revision, err = cloneRevision(tx, ctx, artifact, r, "candidate")
+		if err != nil {
+			return Receipt{}, err
+		}
+		if _, err := tx.Exec("UPDATE revisions SET state='resolved' WHERE artifact_id=? AND state IN ('candidate','conflict') AND id!=?", a.ArtifactID, revision); err != nil {
+			return Receipt{}, ErrUnavailable
+		}
+	}
+	if _, err := tx.Exec("INSERT INTO approvals VALUES(?,?,?)", revision, a.Overrides, a.OverrideRevision); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
-	if _, err := tx.Exec("UPDATE revisions SET state='approved' WHERE id=?", a.RevisionID); err != nil {
+	if _, err := tx.Exec("UPDATE revisions SET state='approved' WHERE id=?", revision); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
-	if _, err := tx.Exec("UPDATE artifacts SET head=? WHERE id=?", a.RevisionID, a.ArtifactID); err != nil {
+	if _, err := tx.Exec("UPDATE artifacts SET head=? WHERE id=?", revision, a.ArtifactID); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
-	if _, err := tx.Exec("UPDATE revisions SET state='conflict' WHERE artifact_id=? AND state='candidate' AND base!=?", a.ArtifactID, a.RevisionID); err != nil {
+	if _, err := tx.Exec("UPDATE revisions SET state='conflict' WHERE artifact_id=? AND state='candidate' AND base!=?", a.ArtifactID, revision); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
-	receipt := Receipt{OperationID: a.OperationID, ArtifactID: a.ArtifactID, RevisionID: a.RevisionID, State: "approved"}
+	receipt := Receipt{OperationID: a.OperationID, ArtifactID: a.ArtifactID, RevisionID: revision, State: "approved"}
 	if err := record(tx, ctx, hash, receipt, "approve"); err != nil {
 		return Receipt{}, err
 	}

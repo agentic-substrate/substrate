@@ -85,6 +85,7 @@ operational evidence:
 | Local owner, space/checkout/session binding, bearer context Origin/Host checks, private state persistence | Verified with local evidence dated 2026-10-04 | `internal/authority`, `internal/server/context.go`, CLI and packaged browser tests; plaintext owner-only state is selected, with no same-user/root protection. Re-run after authority/interface changes. |
 | Local repository-scoped artifact persistence, immutable Git candidates, current session checks | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, CLI tests and packaged command journey; permission filtering, retries, stale revisions, commit failure, and retirement verified below. Re-run after storage, source, or authority changes. |
 | Local owner Git registration/approval, scoped qualified/alias delivery, immutable dependency bundles | Verified with local evidence dated 2026-10-04; project maintainers own review | `internal/artifacts` selection/bundle tests and separate owner/scoped CLI commands; dated commands and limits below. Re-run after source, selection, schema, or authority changes. |
+| Scoped local conflict resolution and trusted owner artifact restoration | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts/reconciliation.go`, explicit source conflict review, and CLI regressions enforce current expected heads, retained history, atomic receipts/work, and fresh source approval after restoration. This is distinct from application backup/restore and multi-node reconciliation. Re-run at the next lifecycle or authority change. |
 | Current scoped lexical retrieval, revision associations, private node IPC, and stdio MCP delivery | Verified with local WSL 2 evidence dated 2026-10-04; project maintainers own review | `internal/artifacts`, `internal/node`, `internal/mcpbridge`, and attached CLI tests; actual four-client calls and resource measurements are recorded below and in the development guide. Re-run after retrieval, transport, SDK, client-version, or authority changes. |
 | Broader artifact action policy, remote administration/MCP authorization, shared imports/publication | Planned | Full first-release boundaries, actual caller attribution, and transport/client-specific checks; local storage evidence does not verify these capabilities. |
 | Scoped recovery, transfer crypto, stale-state handling, telemetry | Planned; decisions pending | D10–D16 and adversarial evidence from the architecture contract. |
@@ -234,6 +235,30 @@ actual screen-reader or 400% zoom behavior, or framework/audit conformance. The 
 change reused all three packaged browser flows, keyboard/focus, axe scans, and 320-pixel reflow.
 Project maintainers should repeat the scoped and actual-client checks at the next relevant
 boundary, SDK, client-version, or release change.
+
+On 2026-10-04, the issue #10 worktree passed `env PATH="/usr/local/go/bin:$PATH"
+GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check` on Linux amd64 under WSL 2
+with Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and SQLite 3.53.4. The new CLI
+journey first failed because conflict resolution was unavailable, then passed with explicit
+memory selection, retirement, owner restoration, and denial of a pre-retirement edit. Source
+conflict review initially failed because stale candidates could not be selected; owner approval
+now creates a fresh reviewed snapshot. Adversarial review identified old empty-head candidates
+after restoration; regressions verify they remain inspectable and cannot be approved, even
+through explicit conflict review. Restored source always needs a fresh candidate approval.
+Focused race/shuffle checks also passed for concurrent replacements and resolution versus
+retirement, independent observations and retries, stale resolution/restore denial, current
+repository filtering and revoked retries, legacy approval receipts, and whole-transaction
+rollback of history, pending work, and index invalidation. The issue #10 PR identifies the
+immutable revision and exact commands. All existing packaged browser, axe, keyboard, web,
+and built-document checks passed; no browser behavior or MCP mutation surface changed.
+
+This evidence covers local lifecycle transitions under the trusted owner boundary. It does
+not prove multi-node synchronization, coordinator authority, application backup/restore,
+device-failure durability, shared acceptance, factual verification, publication, native
+activation, hostile same-account isolation, other operating systems, or framework/audit
+conformance. Private fixtures used `/var/tmp` because this host's unrelated `/tmp/.git`
+marker makes `/tmp` invalid for authority placement; no control was exempted or removed.
+Project maintainers should repeat these checks at the next lifecycle or authority change.
 
 CodeQL remains disabled under the documented budget decision. This roadmap does not enable
 scanners or replace remaining checks. Revisit that decision under its existing release/budget

@@ -21,6 +21,7 @@ type Registration struct {
 	Overridable bool   `json:"overridable"`
 }
 type Approval struct {
+	ResolveConflict  bool   `json:"resolve_conflict,omitempty"`
 	OperationID      string `json:"operation_id"`
 	ArtifactID       string `json:"artifact_id"`
 	RevisionID       string `json:"revision_id"`

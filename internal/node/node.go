@@ -28,6 +28,7 @@ type Request struct {
 	Contribution artifacts.Contribution  `json:"contribution"`
 	Search       artifacts.SearchRequest `json:"search"`
 	Read         artifacts.ReadRequest   `json:"read"`
+	Resolution   artifacts.Resolution    `json:"resolution"`
 	ID           string                  `json:"id"`
 	Expected     string                  `json:"expected"`
 	Operation    string                  `json:"operation"`
@@ -188,6 +189,8 @@ func (n *Node) dispatch(req Request) Response {
 				result, err = session.Choices(req.Read.Selector)
 			case "retire":
 				result, err = session.Retire(req.ID, req.Expected, req.Operation)
+			case "resolve-conflict":
+				result, err = session.ResolveConflict(req.Resolution)
 			default:
 				err = errors.New("unsupported local operation")
 			}

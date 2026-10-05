@@ -19,9 +19,10 @@ func runSource(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	dir := flags.String("state-dir", defaultDir, "private owner state directory outside Git")
 	path := flags.String("path", ".", "explicitly registered checkout")
-	id := flags.String("artifact", "", "Git-backed artifact identity")
+	id := flags.String("artifact", "", "artifact identity within the registered owner context")
 	var registration artifacts.Registration
 	var approval artifacts.Approval
+	var expected, operation string
 	switch args[0] {
 	case "source-register":
 		flags.StringVar(&registration.Source, "source", "", "source namespace within this repository")
@@ -29,11 +30,15 @@ func runSource(args []string, out io.Writer) error {
 		flags.StringVar(&registration.Alias, "alias", "", "optional explicit delivery alias")
 		flags.BoolVar(&registration.Overridable, "overridable", false, "permit an explicitly approved specialization")
 	case "approve":
+		flags.BoolVar(&approval.ResolveConflict, "resolve-conflict", false, "explicitly review this candidate against the current head and approve a fresh resolution")
 		flags.StringVar(&approval.OperationID, "operation", "", "stable approval operation ID")
 		flags.StringVar(&approval.RevisionID, "revision", "", "exact candidate revision to approve")
 		flags.StringVar(&approval.ExpectedRevision, "expected", "", "expected selected head; empty for first approval")
 		flags.StringVar(&approval.Overrides, "overrides", "", "registered overridable default artifact")
 		flags.StringVar(&approval.OverrideRevision, "override-revision", "", "exact selected default revision")
+	case "restore-artifact":
+		flags.StringVar(&expected, "expected", "", "expected retired head revision")
+		flags.StringVar(&operation, "operation", "", "stable restoration operation ID")
 	default:
 		return errors.New("unsupported owner source command")
 	}
@@ -65,6 +70,8 @@ func runSource(args []string, out io.Writer) error {
 	if args[0] == "source-register" {
 		registration.ArtifactID = *id
 		result, err = owner.Register(registration)
+	} else if args[0] == "restore-artifact" {
+		result, err = owner.Restore(*id, expected, operation)
 	} else {
 		approval.ArtifactID = *id
 		result, err = owner.Approve(approval)

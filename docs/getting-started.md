@@ -115,12 +115,29 @@ successful commit, so retry with the original input and operation ID.
 To propose an edit, pass `capture -artifact <artifact-id> -expected <revision-id>` with a new
 operation ID and content. An edit against the current memory revision advances the local head.
 A stale edit returns `conflict`, preserves its candidate, and keeps the current head. Inspect
-all authorized revisions with `artifact`. Resolve by submitting new content against the current
-head; old candidates remain in history. This does not approve shared state or verify facts.
+all authorized revisions with `artifact`, including each candidate's base and the accepted head.
+Use `resolve-conflict -id <artifact-id> -revision <revision-id> -expected <current-head-id>
+-operation <operation-id>` to keep the accepted memory or choose an exact existing revision.
+Resolution creates a fresh unverified, pending-local revision and marks existing competing
+candidates resolved without deleting their history. An outdated expected head blocks resolution.
+To combine observations, submit the reviewed text through `capture` against the current head;
+Substrate never merges prose automatically. Neither action approves shared state or verifies facts.
 `retire -id <artifact-id> -expected <revision-id> -operation <operation-id>` marks an artifact
 retired. A stale expected revision blocks retirement. Later edits return `conflict-retired`
 and cannot restore it. The receipt records the original contribution outcome; it is not a
 current lifecycle or delivery grant. Re-inspect before using saved content.
+
+Stop the node and use the trusted owner command `restore-artifact -artifact <artifact-id>
+-expected <retired-head-id> -operation <operation-id>` to restore a retired artifact in its
+registered repository. It accepts no session credential and is unavailable through the node,
+browser, or MCP. Restoring memory creates a fresh unverified local head, so edits against the
+pre-retirement revision remain conflicts. Restoring an approved Git source creates a fresh
+candidate with no effective head; review and approve that exact revision again. All prior source
+candidates remain inspectable as `retired-candidate` and cannot be approved after restoration.
+If the source never had an approved head, restoration returns `restored-awaiting-candidate`
+with an empty revision ID; make a fresh proposal before approval. Restore and resolution retries
+return their original receipts without undoing later changes, and changed payloads require a new
+operation ID. Restart the node before scoped reads or contributions.
 
 Every operation rechecks the session credential and registered Git checkout. Missing and
 inaccessible object IDs share a generic denial, and failure returns no success JSON. Git-backed
@@ -167,7 +184,13 @@ a hostile process with that account's filesystem access can invoke the owner CLI
 A proposed source begins as a candidate. First approval expects an empty selected head; later
 approval requires `-expected <current-revision-id>` and a candidate captured against that same
 head using `propose -artifact <artifact-id> -expected <current-revision-id>`. Competing candidates
-remain conflicts. Resolve with a new proposal based on the current head and explicit approval.
+remain conflicts. Resolve with a new proposal based on the current head and explicit approval,
+or review an existing candidate and use `approve -resolve-conflict -artifact <artifact-id>
+-revision <candidate-id> -expected <current-head-id> -operation <operation-id>`. The latter
+approves a fresh exact snapshot against the current head; it rechecks any declared override
+and its current default revision. Scoped sessions cannot perform this owner review. Combined
+Git text or changed dependencies require a fresh proposal and approval; no input approval
+automatically covers the combined result.
 Retirement continues to block delivery and cannot be undone by approval of old candidates.
 `artifact` inspects authorized history and provenance; `choices` with no selector lists registered
 sources with candidate, effective, overridden, conflict, or retired state, the overridable-default
