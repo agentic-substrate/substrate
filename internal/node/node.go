@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/agentic-substrate/substrate/internal/artifacts"
@@ -32,6 +31,7 @@ type Request struct {
 	ID                  string                        `json:"id"`
 	Expected            string                        `json:"expected"`
 	Operation           string                        `json:"operation"`
+	Control             string                        `json:"control,omitempty"`
 	Pause               *bool                         `json:"pause,omitempty"`
 	Publication         artifacts.PublicationInput    `json:"publication"`
 	PublicationApproval artifacts.PublicationApproval `json:"publication_approval"`
@@ -42,19 +42,24 @@ type Response struct {
 	Code   string          `json:"code,omitempty"`
 }
 type Node struct {
-	auth     *authority.Store
-	store    *artifacts.Store
-	listener *net.UnixListener
-	lock     *os.File
-	socket   os.FileInfo
-	stop     chan struct{}
-	once     sync.Once
-	wg       sync.WaitGroup
-	slots    chan struct{}
-	paused   atomic.Bool
+	auth         *authority.Store
+	store        *artifacts.Store
+	listener     *net.UnixListener
+	lock         *os.File
+	socket       os.FileInfo
+	once         sync.Once
+	wg           sync.WaitGroup
+	slots        chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wake         chan struct{}
+	controls     chan maintenanceRequest
+	batches      chan maintenanceRequest
+	connections  map[net.Conn]struct{}
+	connectionMu sync.Mutex
 }
 
-func Start(auth *authority.Store, paused bool) (*Node, error) {
+func Start(auth *authority.Store, paused *bool) (*Node, error) {
 	lock, err := Lock(auth)
 	if err != nil {
 		return nil, err
@@ -75,6 +80,12 @@ func Start(auth *authority.Store, paused bool) (*Node, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if paused != nil {
+		if err := store.SetIndexPaused(*paused); err != nil {
+			store.Close()
+			return fail(err)
+		}
+	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		store.Close()
@@ -94,17 +105,23 @@ func Start(auth *authority.Store, paused bool) (*Node, error) {
 		store.Close()
 		return fail(err)
 	}
-	n := &Node{auth: auth, store: store, listener: listener, lock: lock, socket: socket, stop: make(chan struct{}), slots: make(chan struct{}, 32)}
-	n.paused.Store(paused)
+	ctx, cancel := context.WithCancel(context.Background())
+	n := &Node{auth: auth, store: store, listener: listener, lock: lock, socket: socket, slots: make(chan struct{}, 32), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), controls: make(chan maintenanceRequest), batches: make(chan maintenanceRequest), connections: map[net.Conn]struct{}{}}
 	n.wg.Add(2)
 	go n.accept()
 	go n.maintain()
+	n.notify()
 	return n, nil
 }
 func (n *Node) Close() error {
 	n.once.Do(func() {
-		close(n.stop)
+		n.cancel()
 		n.listener.Close()
+		n.connectionMu.Lock()
+		for conn := range n.connections {
+			conn.Close()
+		}
+		n.connectionMu.Unlock()
 		n.wg.Wait()
 		n.store.Close()
 		path := filepath.Join(n.auth.Dir, "node.sock")
@@ -115,21 +132,6 @@ func (n *Node) Close() error {
 	})
 	return nil
 }
-func (n *Node) maintain() {
-	defer n.wg.Done()
-	timer := time.NewTicker(time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-n.stop:
-			return
-		case <-timer.C:
-			if !n.paused.Load() {
-				n.store.IndexBatch(100)
-			}
-		}
-	}
-}
 func (n *Node) accept() {
 	defer n.wg.Done()
 	for {
@@ -137,13 +139,21 @@ func (n *Node) accept() {
 		if err != nil {
 			return
 		}
+		n.connectionMu.Lock()
+		if n.ctx.Err() != nil {
+			n.connectionMu.Unlock()
+			conn.Close()
+			return
+		}
+		n.connections[conn] = struct{}{}
+		n.connectionMu.Unlock()
 		select {
 		case n.slots <- struct{}{}:
 			n.wg.Add(1)
 			go func() {
 				defer n.wg.Done()
 				defer func() { <-n.slots }()
-				defer conn.Close()
+				defer n.release(conn)
 				conn.SetDeadline(time.Now().Add(30 * time.Second))
 				var req Request
 				if decodeFrame(conn, &req) != nil {
@@ -153,7 +163,7 @@ func (n *Node) accept() {
 				writeFrame(conn, n.dispatch(req))
 			}()
 		default:
-			conn.Close()
+			n.release(conn)
 		}
 	}
 }
@@ -165,17 +175,7 @@ func (n *Node) dispatch(req Request) Response {
 	} else if req.Action == "publication-publish" {
 		result, err = n.store.Publish(req.Token, req.PublicationApproval)
 	} else if req.Action == "index" {
-		if req.Pause != nil {
-			n.paused.Store(*req.Pause)
-		}
-		var count int
-		if !n.paused.Load() {
-			count, err = n.store.IndexBatch(100)
-		}
-		result = struct {
-			Indexed int  `json:"processed"`
-			Paused  bool `json:"paused"`
-		}{count, n.paused.Load()}
+		result, err = n.control(req)
 	} else {
 		var session *artifacts.Session
 		session, err = n.store.Session(req.Token, req.Checkout)
@@ -220,6 +220,10 @@ func (n *Node) dispatch(req Request) Response {
 			code = "conflict"
 		}
 		return Response{Error: err.Error(), Code: code}
+	}
+	switch req.Action {
+	case "capture", "retire", "resolve-conflict", "publication-publish":
+		n.notify()
 	}
 	data, err := json.Marshal(result)
 	if err != nil || len(data) > MaxFrame-1024 {

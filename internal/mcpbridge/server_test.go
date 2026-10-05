@@ -37,7 +37,7 @@ func TestMCPToolsSaveReadDenyAndLeaveNodeAlive(t *testing.T) {
 	if err := authority.WriteCredential(credential, token); err != nil {
 		t.Fatal(err)
 	}
-	n, err := node.Start(auth, false)
+	n, err := node.Start(auth, new(false))
 	if err != nil {
 		t.Fatal(err)
 	}

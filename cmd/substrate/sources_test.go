@@ -43,7 +43,7 @@ func TestSourceCLISeparatesProposalsFromOwnerApproval(t *testing.T) {
 	cliGit("add", ".")
 	cliGit("-c", "user.name=Owner", "-c", "user.email=owner@example.test", "commit", "-qm", "source")
 	runScoped := func(args []string, in io.Reader, out io.Writer) error {
-		runtime, err := node.Start(&authority.Store{Dir: state}, false)
+		runtime, err := node.Start(&authority.Store{Dir: state}, new(false))
 		if err != nil {
 			return err
 		}

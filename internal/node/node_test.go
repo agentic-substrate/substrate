@@ -33,12 +33,12 @@ func TestSingletonConcurrentSessionsAndUnavailableNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := Start(auth, false)
+	n, err := Start(auth, new(false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer n.Close()
-	if _, err := Start(auth, false); !errors.Is(err, ErrRunning) {
+	if _, err := Start(auth, new(false)); !errors.Is(err, ErrRunning) {
 		t.Fatalf("duplicate startup: %v", err)
 	}
 	req := Request{Action: "capture", Token: token, Checkout: checkout, Contribution: artifacts.Contribution{OperationID: "one", Kind: "memory", Content: "shared otter observation", Provenance: "test"}}
@@ -63,7 +63,7 @@ func TestSingletonConcurrentSessionsAndUnavailableNode(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(auth.Dir, "node.sock")); !os.IsNotExist(err) {
 		t.Fatal("socket remains")
 	}
-	n, err = Start(auth, true)
+	n, err = Start(auth, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +86,11 @@ func TestPrivateLockAndMalformedFramesFailClosed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(auth.Dir, "runtime.lock"), []byte{}, 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Start(auth, false); err == nil {
+	if _, err := Start(auth, new(false)); err == nil {
 		t.Fatal("unsafe lock accepted")
 	}
 	os.Chmod(filepath.Join(auth.Dir, "runtime.lock"), 0600)
-	n, err := Start(auth, true)
+	n, err := Start(auth, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}

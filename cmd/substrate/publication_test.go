@@ -55,7 +55,7 @@ func TestPublicationCLIOwnerReviewBoundary(t *testing.T) {
 			t.Fatalf("trusted policy command: %v", err)
 		}
 	}
-	runtime, err := node.Start(auth, true)
+	runtime, err := node.Start(auth, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestPublicationCLIOwnerReviewBoundary(t *testing.T) {
 	if err := runSource([]string{"review-revoke", "-state-dir", state, "-path", paths["Work"], "-review-credential", credential}, new(bytes.Buffer)); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err = node.Start(auth, true)
+	runtime, err = node.Start(auth, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}

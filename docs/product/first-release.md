@@ -1,10 +1,14 @@
 # First usable release
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** before filing or closing a foundational epic
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** before filing or closing a foundational epic
 
 **Status:** agreed release boundary. The architecture and
 artifact policies referenced below are agreed. Trusted local bindings, repository-scoped artifact
-persistence, explicit local Git registration/approval, and scoped snapshot reads are implemented. Scoped lexical retrieval, incremental indexing, and local stdio MCP are implemented.
+persistence, explicit local Git registration/approval, and scoped snapshot reads are implemented.
+Scoped lexical retrieval, durable bounded maintenance with scoped browser status, and local
+stdio MCP are implemented. Foreground Linux/WSL offline restart and synthetic resource evidence
+are recorded in the [development guide](../development.md#foreground-maintenance-evidence);
+services and continuous WSL availability remain unsupported.
 Client-specific evidence records actual tested versions. Local browser artifact inspection and
 exact human-reviewed publication of derived memories are implemented; native activation and
 whole-installation backup/restore remain unfinished. The browser is a local interface to the

@@ -351,7 +351,7 @@ func TestSameSpaceRepositoryAlternativesDoNotInfluenceAlias(t *testing.T) {
 func TestVersionOneStoreMigratesWithoutLosingCandidatesOrReceipts(t *testing.T) {
 	f := setup(t)
 	r := gitCandidate(t, f, "candidate", "", "", "survives migration")
-	if _, err := f.store.db.Exec("DROP TABLE review_grants; DROP TABLE publication_revisions; DROP TABLE publication_proposals; DROP TABLE publication_policy; DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; DROP TABLE approvals; DROP TABLE registrations; PRAGMA user_version=1"); err != nil {
+	if _, err := f.store.db.Exec("DROP TABLE maintenance; DROP TABLE review_grants; DROP TABLE publication_revisions; DROP TABLE publication_proposals; DROP TABLE publication_policy; DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; DROP TABLE approvals; DROP TABLE registrations; PRAGMA user_version=1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.Close(); err != nil {

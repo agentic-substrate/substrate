@@ -56,7 +56,7 @@ func (s *Session) ResolveConflict(a Resolution) (Receipt, error) {
 		return Receipt{}, ErrUnavailable
 	}
 	receipt := Receipt{OperationID: a.OperationID, ArtifactID: artifact.ID, RevisionID: id, State: "pending-local"}
-	if err := record(tx, ctx, hash, receipt, "resolve-conflict"); err != nil {
+	if err := record(tx, ctx, hash, receipt, "resolve-conflict", artifact.HeadRevision != id); err != nil {
 		return Receipt{}, err
 	}
 	if tx.Commit() != nil {
@@ -92,6 +92,7 @@ func (o *Owner) Restore(id, expected, operation string) (Receipt, error) {
 	if a.Lifecycle != "retired" || a.HeadRevision != expected {
 		return Receipt{}, ErrConflict
 	}
+	oldHead := a.HeadRevision
 	r := Receipt{OperationID: operation, ArtifactID: id, State: "candidate"}
 	head := ""
 	if a.Kind != "memory" {
@@ -122,7 +123,7 @@ func (o *Owner) Restore(id, expected, operation string) (Receipt, error) {
 	if _, err := tx.Exec("UPDATE artifacts SET lifecycle='active', head=? WHERE id=?", head, id); err != nil {
 		return Receipt{}, ErrUnavailable
 	}
-	if err := record(tx, ctx, hash, r, "restore"); err != nil {
+	if err := record(tx, ctx, hash, r, "restore", oldHead != head); err != nil {
 		return Receipt{}, err
 	}
 	if tx.Commit() != nil {

@@ -192,7 +192,7 @@ func (s *Store) Publish(token string, a PublicationApproval) (Receipt, error) {
 		if err := saveAssociations(tx, ctx, revision, Associations{}); err != nil {
 			return err
 		}
-		if err := record(tx, ctx, fingerprint(a), receipt, "publish"); err != nil {
+		if err := record(tx, ctx, fingerprint(a), receipt, "publish", true); err != nil {
 			return err
 		}
 		data, _ := json.Marshal(receipt)

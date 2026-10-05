@@ -20,9 +20,10 @@ type PublicationSummary struct {
 	Destination PublicationDestination `json:"destination"`
 }
 type BrowserInventory struct {
-	Context   authority.Context    `json:"context"`
-	Artifacts []ArtifactSummary    `json:"artifacts"`
-	Proposals []PublicationSummary `json:"proposals"`
+	Context     authority.Context    `json:"context"`
+	Artifacts   []ArtifactSummary    `json:"artifacts"`
+	Proposals   []PublicationSummary `json:"proposals"`
+	Maintenance Maintenance          `json:"maintenance"`
 }
 type PermittedAction struct {
 	Action string `json:"action"`
@@ -46,6 +47,10 @@ func (s *Session) BrowserInventory() (BrowserInventory, error) {
 	}
 	defer tx.Rollback()
 	result := BrowserInventory{Context: ctx, Artifacts: []ArtifactSummary{}, Proposals: []PublicationSummary{}}
+	result.Maintenance, err = maintenance(tx, &ctx)
+	if err != nil {
+		return BrowserInventory{}, err
+	}
 	rows, err := tx.Query("SELECT id,kind,lifecycle,head FROM artifacts WHERE owner_id=? AND space_id=? AND repo_id=? ORDER BY id LIMIT 100", ctx.OwnerID, ctx.SpaceID, ctx.RepositoryID)
 	if err != nil {
 		return BrowserInventory{}, ErrUnavailable

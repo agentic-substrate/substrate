@@ -98,7 +98,7 @@ func (o *Owner) Approve(a Approval) (Receipt, error) {
 		return Receipt{}, ErrUnavailable
 	}
 	receipt := Receipt{OperationID: a.OperationID, ArtifactID: a.ArtifactID, RevisionID: revision, State: "approved"}
-	if err := record(tx, ctx, hash, receipt, "approve"); err != nil {
+	if err := record(tx, ctx, hash, receipt, "approve", artifact.HeadRevision != revision); err != nil {
 		return Receipt{}, err
 	}
 	if err := tx.Commit(); err != nil {

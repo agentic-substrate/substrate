@@ -1,6 +1,6 @@
 # Development
 
-**Last reviewed:** 2026-10-04. Re-read whenever a command, tool version, or CI contract changes.
+**Last reviewed:** 2026-10-05. Re-read whenever a command, tool version, or CI contract changes.
 
 ## Setup and verification
 
@@ -254,3 +254,79 @@ Re-run this matrix after SDK, transport, authority, node, or advertised client-v
 The observations establish basic local stdio behavior for these executable versions and this
 synthetic workload. They do not establish native installation/execution, remote MCP, other
 platforms, a latency guarantee, complete recovery, or complete accessibility conformance.
+
+
+## Foreground maintenance evidence
+
+The single foreground worker coalesces incremental artifact jobs and commits one artifact per
+cancellable transaction. Maintenance tests cover durable pause, unchanged checkpoints, forced
+bulk rebuilds, deferred work across restart, SQL-injected rollback and generic failures,
+explicit retry after edits, hidden Work failures, scoped counts beyond the 100-record browser
+inventory, bounded failed attempts, and concurrent pause/capture/index/shutdown. Review
+regressions also verify pause between explicit-batch artifacts and preservation of forced
+rebuild intent through history-only contributions, including unindexed bulk work. A status-poll
+regression first left five healthy jobs pending after the synchronous 100-attempt barrier;
+serving controls without resetting the coalescing timer lets scheduled work finish. The CLI
+keeps installation queue counts separate from browser-scoped lexical coverage.
+
+Run the reproducible packaged synthetic workload after `make build`:
+
+```sh
+python3 scripts/measure-maintenance.py --binary bin/substrate --memories 256 --idle-seconds 2
+```
+
+It requires Python 3, Git, Linux `/proc`, and permission for `unshare --user
+--map-root-user --net`. Missing prerequisites or failed assertions stop with errors; an
+unavailable namespace is not skipped. The harness creates only synthetic private fixtures in
+`/var/tmp`, starts its own foreground nodes, and removes its own fixture after stopping them.
+It captures 256 memories of 126 words and imports one approved Git skill with a main document
+and two explicit dependency files, each containing 512 words. It pauses capture, checks duplicate
+startup, uses both SIGINT and SIGTERM shutdown, verifies socket cleanup, restarts the same state
+in a namespace with zero network routes, and preserves exact receipts and the pending ledger
+through resume and lexical retrieval. Source registration and approval run offline under the
+same installation lock. The namespace blocks networking; it does not stop or reboot WSL.
+
+Latency samples use Python's monotonic performance clock around actual Unix IPC calls;
+they exclude command-process startup. Incremental wall time includes the synchronous first
+100 attempts and automatic completion observed through status reads. Bulk time includes
+explicit bounded run commands. Node CPU uses `/proc/PID/stat` user plus system ticks, excluding
+Git subprocesses, CLI/harness CPU, and host energy. RSS is sampled every ten milliseconds and
+reports the maximum observed node resident set rather than an absolute peak. Idle samples
+measure finite intervals at the kernel clock resolution; observed zero ticks cannot prove no
+work or a battery benefit. Database sizes are local main-file sizes after committed stages,
+not complete installation or backup size. Repeat with representative permitted data before
+claiming performance targets, large-corpus behavior, concurrent-load latency, other hardware,
+services, WSL distro survival, native Windows/macOS, or battery use.
+
+
+On 2026-10-05, the command above passed on Linux amd64 in WSL 2 on host `Legion`, kernel
+`6.6.114.1-microsoft-standard-WSL2`, with a reported Intel Core i9-13980HX and 16 logical
+CPUs. The toolchain was Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and Python 3.12.3.
+The freshly built packaged executable SHA256 was
+`6624118bb4f140306b3b6a8675c1f613cc3cc123f5ba776288cc23dd00401ecb`.
+Runtime sources match [5208836](https://github.com/agentic-substrate/substrate/tree/520883659552bc8506f34051952a75bf095c75b8);
+the measurements used a clean build of that revision. Concurrent development workloads were
+paused during this measurement window; background host activity was not controlled. Node CPU resolution was 0.01 seconds.
+
+| Observed stage | Result for this synthetic workload |
+|---|---|
+| Capture Unix IPC, 256 samples | p50 10.062 ms; p95 13.247 ms |
+| Search Unix IPC, 40 samples | p50 7.403 ms; p95 9.030 ms |
+| Incremental completion, 257 artifacts | 1,845.400 ms elapsed; 0.99 seconds node CPU |
+| Explicit bulk rebuild, 257 artifacts | 2,297.314 ms elapsed; 1.57 seconds node CPU |
+| Sampled maximum node RSS | 26,008 KiB |
+| Paused idle and ready idle, two seconds each | Paused 0.00 seconds; ready 0.01 seconds of observed node CPU |
+| Main database after paused memory capture | 1,163,264 bytes |
+| Main database after approved source and indexing | 11,931,648 bytes |
+| Main database after full rebuild | 12,066,816 bytes |
+| Offline namespace | `/proc/PID/net/route` was empty; zero routes |
+
+Both supported signals stopped the node successfully and removed its socket. Duplicate startup
+failed while preserving the live node. Restart omitted the pause override and retained pause;
+exact capture retry returned its original artifact/revision receipt, and current reads worked
+before indexing resumed. After resume and explicit bounded rebuild, all 257 eligible revisions
+were indexed, with zero queued/deferred/failed/limited records. The complete pending operation
+ledger was unchanged by indexing. These observations establish foreground process behavior
+for this tested WSL distribution, without claiming systemd support, host reboot or distro
+shutdown survival, device/power-failure durability, whole-installation recovery, another OS,
+absolute RSS peaks, charging policy, or energy/battery savings.
