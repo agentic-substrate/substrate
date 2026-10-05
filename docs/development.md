@@ -303,22 +303,22 @@ On 2026-10-05, the command above passed on Linux amd64 in WSL 2 on host `Legion`
 `6.6.114.1-microsoft-standard-WSL2`, with a reported Intel Core i9-13980HX and 16 logical
 CPUs. The toolchain was Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, and Python 3.12.3.
 The freshly built packaged executable SHA256 was
-`9b6f37b052b48eebfbe39f921666edc567fa527ab87d8d49ee238aa24402e22e`.
-Runtime sources match [36de0e4](https://github.com/agentic-substrate/substrate/tree/36de0e4c7f5b4d182152b6ef39989af85360cb86);
-the measurements used its pre-commit build. Other task agents held heavy work during this measurement window;
-background host activity was not controlled. Node CPU resolution was 0.01 seconds.
+`6624118bb4f140306b3b6a8675c1f613cc3cc123f5ba776288cc23dd00401ecb`.
+Runtime sources match [5208836](https://github.com/agentic-substrate/substrate/tree/520883659552bc8506f34051952a75bf095c75b8);
+the measurements used a clean build of that revision. Concurrent development workloads were
+paused during this measurement window; background host activity was not controlled. Node CPU resolution was 0.01 seconds.
 
 | Observed stage | Result for this synthetic workload |
 |---|---|
-| Capture Unix IPC, 256 samples | p50 15.619 ms; p95 23.465 ms |
-| Search Unix IPC, 40 samples | p50 10.184 ms; p95 11.179 ms |
-| Incremental completion, 257 artifacts | 2,658.360 ms elapsed; 1.36 seconds node CPU |
-| Explicit bulk rebuild, 257 artifacts | 3,407.937 ms elapsed; 2.24 seconds node CPU |
-| Sampled maximum node RSS | 26,260 KiB |
-| Paused idle and ready idle, two seconds each | 0.00 observed node CPU seconds in each interval |
-| Main database after paused memory capture | 1,150,976 bytes |
-| Main database after approved source and indexing | 11,915,264 bytes |
-| Main database after full rebuild | 12,025,856 bytes |
+| Capture Unix IPC, 256 samples | p50 10.062 ms; p95 13.247 ms |
+| Search Unix IPC, 40 samples | p50 7.403 ms; p95 9.030 ms |
+| Incremental completion, 257 artifacts | 1,845.400 ms elapsed; 0.99 seconds node CPU |
+| Explicit bulk rebuild, 257 artifacts | 2,297.314 ms elapsed; 1.57 seconds node CPU |
+| Sampled maximum node RSS | 26,008 KiB |
+| Paused idle and ready idle, two seconds each | Paused 0.00 seconds; ready 0.01 seconds of observed node CPU |
+| Main database after paused memory capture | 1,163,264 bytes |
+| Main database after approved source and indexing | 11,931,648 bytes |
+| Main database after full rebuild | 12,066,816 bytes |
 | Offline namespace | `/proc/PID/net/route` was empty; zero routes |
 
 Both supported signals stopped the node successfully and removed its socket. Duplicate startup
