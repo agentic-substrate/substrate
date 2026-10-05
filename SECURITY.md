@@ -12,12 +12,17 @@ Use synthetic data where possible. Maintainers will investigate and coordinate d
 there is no guaranteed response deadline at this stage.
 
 The current server is intended for a trusted Linux or WSL user and accepts loopback listeners.
-It serves an anonymous status page and a credentialed read-only session context endpoint.
+It serves an anonymous status page, scoped context/artifact inspection, and exact local publication review.
 Trusted local CLI setup provides owner, space, checkout, and scoped session records. Local
 artifact capture/inspection/retirement authenticate each operation and filter owner, space,
 and repository before disclosure. A foreground node serves bounded owner-only Unix IPC; scoped stdio MCP bridges use the same
 current checks and cannot approve source or widen their fixed session. Network enrollment,
-pairing, publication, and remote MCP remain unavailable. SQLite commits revisions, retry receipts, and pending work atomically; failed
+pairing and remote MCP remain unavailable. Trusted offline owner policy controls local source
+export and destination publication-write. A separate fifteen-minute review credential covers
+one exact proposal, current source snapshots, destination, and policy epochs; scoped sessions
+cannot issue or satisfy it. Mandatory denial still wins. Reviewed publication creates only a
+separate unverified memory with generic provenance, keeping private source lineage restricted.
+SQLite commits revisions, retry receipts, and pending work atomically; failed
 commits return no success receipt, and stale edits cannot undo retirement. Git imports begin as immutable candidates; only trusted local owner commands register source
 identities and approve exact revision/dependency snapshots. Aliases and overrides resolve only
 within current authorized scope; ambiguity blocks delivery. Content reads never execute source. Plaintext owner-only

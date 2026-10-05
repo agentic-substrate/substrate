@@ -22,17 +22,19 @@ import (
 const MaxFrame = 8 * 1024 * 1024
 
 type Request struct {
-	Action       string                  `json:"action"`
-	Token        string                  `json:"token"`
-	Checkout     string                  `json:"checkout"`
-	Contribution artifacts.Contribution  `json:"contribution"`
-	Search       artifacts.SearchRequest `json:"search"`
-	Read         artifacts.ReadRequest   `json:"read"`
-	Resolution   artifacts.Resolution    `json:"resolution"`
-	ID           string                  `json:"id"`
-	Expected     string                  `json:"expected"`
-	Operation    string                  `json:"operation"`
-	Pause        *bool                   `json:"pause,omitempty"`
+	Action              string                        `json:"action"`
+	Token               string                        `json:"token"`
+	Checkout            string                        `json:"checkout"`
+	Contribution        artifacts.Contribution        `json:"contribution"`
+	Search              artifacts.SearchRequest       `json:"search"`
+	Read                artifacts.ReadRequest         `json:"read"`
+	Resolution          artifacts.Resolution          `json:"resolution"`
+	ID                  string                        `json:"id"`
+	Expected            string                        `json:"expected"`
+	Operation           string                        `json:"operation"`
+	Pause               *bool                         `json:"pause,omitempty"`
+	Publication         artifacts.PublicationInput    `json:"publication"`
+	PublicationApproval artifacts.PublicationApproval `json:"publication_approval"`
 }
 type Response struct {
 	Result json.RawMessage `json:"result,omitempty"`
@@ -158,7 +160,11 @@ func (n *Node) accept() {
 func (n *Node) dispatch(req Request) Response {
 	var result any
 	var err error
-	if req.Action == "index" {
+	if req.Action == "publication-review" {
+		result, err = n.store.ReviewPublication(req.Token)
+	} else if req.Action == "publication-publish" {
+		result, err = n.store.Publish(req.Token, req.PublicationApproval)
+	} else if req.Action == "index" {
 		if req.Pause != nil {
 			n.paused.Store(*req.Pause)
 		}
@@ -175,6 +181,14 @@ func (n *Node) dispatch(req Request) Response {
 		session, err = n.store.Session(req.Token, req.Checkout)
 		if err == nil {
 			switch req.Action {
+			case "browser-inventory":
+				result, err = session.BrowserInventory()
+			case "browser-inspect":
+				result, err = session.InspectBrowser(req.ID)
+			case "publication-propose":
+				result, err = session.ProposePublication(req.Publication)
+			case "publication-get":
+				result, err = session.Publication(req.ID)
 			case "capture":
 				result, err = session.Contribute(req.Contribution)
 			case "search", "discovery":
@@ -200,7 +214,7 @@ func (n *Node) dispatch(req Request) Response {
 		code := "invalid"
 		if errors.Is(err, authority.ErrDenied) {
 			code = "denied"
-		} else if errors.Is(err, artifacts.ErrUnavailable) {
+		} else if errors.Is(err, artifacts.ErrUnavailable) || errors.Is(err, authority.ErrUnavailable) {
 			code = "unavailable"
 		} else if errors.Is(err, artifacts.ErrConflict) || errors.Is(err, artifacts.ErrOperation) {
 			code = "conflict"

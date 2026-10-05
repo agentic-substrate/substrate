@@ -4,8 +4,8 @@
 
 **Status:** CLI, MCP, and a Vite + React admin UI embedded in Go are agreed for the first
 usable release. Initial platform coverage is Linux and WSL 2; macOS and native Windows follow
-later. Concrete lifecycle, service, and release integrations remain open. No installation,
-service integration, or release validation is implemented yet.
+later. Foreground node operation is implemented. Service installation, native packaging,
+release validation, and whole-installation recovery remain open.
 
 ## Agreed platform scope and packaging direction
 
@@ -108,8 +108,9 @@ own socket identity, and finally releases the installation lock. Closing a bridg
 node running. A shorter private directory is required when its Unix socket path exceeds
 100 bytes; unavailability returns an actionable bounded error without remote fallback.
 
-This replaces the initial direct scoped CLI persistence path. Trusted owner `source-register`
-and `approve` remain offline commands: stop the node, perform the review command under the
+This replaces the initial direct scoped CLI persistence path. Trusted owner `source-register`,
+`approve`, `restore-artifact`, `publication-policy`, `review-grant`, and `review-revoke`
+remain offline commands: stop the node, perform the command under the
 same exclusive installation lock, and restart. They fail while a node owns the directory.
 Authority setup, scoped credential creation/revocation, and read-only browser context keep
 using the separate authority lock; they do not open SQLite. Installation locks and file modes
@@ -118,4 +119,5 @@ protect against other OS users, not hostile processes using the owner's account 
 Foreground operation is implemented on the tested Linux environment. User-service installation,
 on-demand startup coordination, full migration backup/restore, native platform packaging,
 and continuous WSL availability remain unimplemented. The browser `serve` command retains
-its separate numeric-loopback status/context interface and no artifact or HTTP MCP API.
+its separate numeric-loopback listener and forwards credentialed artifact inspection and
+publication review to the running node. It does not own SQLite or expose an HTTP MCP API.

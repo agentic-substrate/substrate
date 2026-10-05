@@ -211,7 +211,7 @@ func TestVersionTwoMigrationPreservesLegacyRetryFingerprints(t *testing.T) {
 	if _, err := f.store.db.Exec("UPDATE contributions SET fingerprint=? WHERE operation_id=?", fingerprint(old), c.OperationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.db.Exec("DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; PRAGMA user_version=2"); err != nil {
+	if _, err := f.store.db.Exec("DROP TABLE review_grants; DROP TABLE publication_revisions; DROP TABLE publication_proposals; DROP TABLE publication_policy; DROP TABLE tokens; DROP TABLE indexed; DROP TABLE index_queue; DROP TABLE revision_associations; PRAGMA user_version=2"); err != nil {
 		t.Fatal(err)
 	}
 	f.store.Close()

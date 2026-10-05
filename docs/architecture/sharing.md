@@ -4,7 +4,26 @@
 
 **Status:** work/personal separation, group restrictions, explicit placement, repository-level
 artifacts, organization-only restrictions, and per-item cross-space publication review are confirmed.
-The artifact decision contract is agreed. Exact policy and publication mechanisms remain open.
+The artifact decision contract is agreed. The one-owner local publication mechanism is selected
+below; broader shared policy and publication mechanisms remain open.
+
+The selected one-owner local publication mechanism uses trusted offline owner commands to
+configure export and destination publication-write policy. Source-space export defaults to
+denied; per-artifact restrictions can add denial but cannot relax the space policy. Every
+policy update advances its epoch. Scoped sessions may create restricted derived proposals
+from current permitted memories or approved Git snapshots, with their complete declared
+dependency inventories. Bundled files inherit their source artifact and space policy; the
+implementation does not follow external references or discover independent dependency policy.
+
+A separate 256-bit review credential expires after fifteen minutes and covers one exact
+proposal revision, effective source snapshots and override relationships, destination binding,
+policy epochs, audience, placement, and recipient-visible provenance. Its trusted offline
+issuance permits a browser review; it is distinct from a scoped session credential. The human
+reviews the complete proposed text and Personal destination before publication. Publication
+rechecks these conditions and atomically consumes the grant while creating a separate
+unverified memory. It copies no executable bundle or private source lineage into Personal.
+This trusts the local OS owner and browser delivery, not hostile same-account processes.
+Whole-installation restore must discard review grants and scoped sessions before promotion.
 
 Artifacts means memories, skills, and agent definitions. The agreed
 [artifact decision contract](artifacts.md) maps precedence, search, segmentation, actions,
@@ -87,7 +106,7 @@ filesystem boundaries. A local-only persistence rule does not itself prohibit de
 content to a harness that uses a remote model; processing and harness egress require their
 own deployment controls. Revocation cannot instantly erase an unreachable recipient's copies.
 
-## Cross-space publication: review agreed, mechanism proposed
+## Cross-space publication
 
 Keep the original work artifact restricted. Create a separate, generalized version for a
 destination such as reusable practice or Personal. Publication requires source export

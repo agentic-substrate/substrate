@@ -5,9 +5,10 @@
 **Status:** agreed release boundary. The architecture and
 artifact policies referenced below are agreed. Trusted local bindings, repository-scoped artifact
 persistence, explicit local Git registration/approval, and scoped snapshot reads are implemented. Scoped lexical retrieval, incremental indexing, and local stdio MCP are implemented.
-Client-specific evidence records actual tested versions; native activation, publication, and
-backup/restore remain unfinished.
-The bootstrap browser establishes status and context inspection, not the complete release.
+Client-specific evidence records actual tested versions. Local browser artifact inspection and
+exact human-reviewed publication of derived memories are implemented; native activation and
+whole-installation backup/restore remain unfinished. The browser is a local interface to the
+foreground node, not evidence of complete release or remote deployment readiness.
 
 ## Job and scope
 

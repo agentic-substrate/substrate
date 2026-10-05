@@ -6,7 +6,7 @@
 type-specific precedence, search boundaries, segmentation, denied/approval/allowed distinction,
 and mandatory organization restrictions are agreed. Per-item cross-space publication review
 is also agreed. Local repository-scoped persistence is selected below. Broader policy
-evaluation, publication, isolation mechanisms, and offline grant durations and enforcement remain open.
+evaluation, remote publication, isolation mechanisms, and offline grant durations and enforcement remain open.
 The [offline model](offline.md) uses finite administrator-controlled shared grants with
 online-only sensitive exceptions and independent wholly owned Personal operation.
 
@@ -214,8 +214,8 @@ the same fresh-revision transition. Combining text is a separate contribution wi
 expected head; no automatic text merge or inherited factual verification occurs.
 Retirement checks the expected head and persists lifecycle state; later edits remain restricted
 candidates and cannot restore the artifact. A separate trusted local owner operation restores
-memory into a fresh unverified head so pre-retirement edits stay stale. Verification,
-publication, and shared acceptance are unavailable. Provenance is a claim from
+memory into a fresh unverified head so pre-retirement edits stay stale. Shared acceptance and
+factual verification remain separate from local publication. Provenance is a claim from
 the contributing session, not independently verified factual evidence.
 
 Skill and agent-definition contributions read exact bytes from a full Git commit in the
@@ -245,7 +245,8 @@ approval CLI commands. These commands accept no session credential and have no b
 endpoint. Scoped sessions can propose candidates, inspect their permitted metadata, and read
 approved snapshots; they cannot register identities or approve content. This separates interface
 capabilities within the trusted OS-account boundary, not hostile processes running as that account.
-Remote human review and cross-space publication remain unavailable.
+Remote human review remains unavailable. Local derived-memory publication uses the separate
+exact-proposal credential and policy checks described below; source approval grants no export right.
 
 Registration binds one Git-backed artifact to a stable qualified identity consisting of its
 space, repository, kind, source namespace, and name. Namespaces and aliases are labels, not
@@ -298,3 +299,30 @@ references in source text nor loads external files or executes scripts. Content 
 the stored bundle and do not establish native installation, activation, executable safety,
 harness compatibility, broader source access, or transfer authorization. Future adapters must
 reject any dependency or destination they cannot preserve under the governing boundary.
+
+## Selected local publication contract
+
+Schema version 4 adds source-scoped immutable proposal revisions, versioned local export/write
+policy, hashed review grants, and private completion audits. A source-space export grant is
+required; additional per-artifact denial and destination publication-write policy apply
+independently. Every policy command advances its epoch. Each explicit source must be current
+and eligible, with approved Git bundles and override relationships pinned as complete snapshots.
+Candidate, retired, stale, or unresolved sources cannot satisfy review. Declared bundle files
+inherit the local source policy; references are not followed and independent dependency policy
+discovery is not implemented.
+
+Publication creates a separate unverified Personal memory with empty associations, no Git
+source/dependencies, and fixed generic provenance. The source-side audit retains exact content,
+source inventory, destination bindings, and policy epochs privately. Policy, source, proposal,
+or destination changes invalidate unconsumed review. Two grants for one proposal cannot create
+two publications. All publication writes, receipt/index work, audit, and grant consumption are
+atomic; failed commit returns no receipt. A review snapshot exceeding seven MiB of encoded
+JSON is rejected before issuing a credential, preserving the bounded local transport.
+
+Exact acknowledged proposal retries recover their original immutable payload after source or
+policy changes if their current session still authenticates. An exact consumed publication
+retry can recover its historical receipt while its grant remains unexpired, unrevoked, and
+bound to the current checkouts. Neither historical acknowledgement establishes current export
+or read permission. Live review and any new publication recheck current eligibility and policy.
+Whole-installation restore must clear review grants and scoped authority sessions before
+promotion; source-private completed audits remain in the proposal records.

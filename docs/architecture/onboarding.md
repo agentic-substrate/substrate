@@ -27,7 +27,12 @@ state, changed Git identity, and ambiguous context fail closed. Private-placemen
 walk canonical directory ancestors and reject any `.git` marker without trusting successful
 Git parsing; missing Git or inaccessible ancestors fail before creating private files. Starting the anonymous
 bootstrap page does not silently enroll an owner. Pairing, automated moves, token refresh,
-and remote/local-browser administration are future work.
+and general browser administration are future work. The browser now retains a scoped
+credential only in page memory until Clear context; each artifact request authenticates
+current authority. A separate short-lived exact-proposal review credential permits local
+publication review under the [sharing contract](sharing.md). Neither credential grants
+policy management or general owner authority, and none is stored in cookies, URLs, or browser
+persistent storage.
 
 ## Required product outcomes
 
@@ -125,9 +130,9 @@ credential conventions, but application permission checks apply to both. See [MC
 
 Unattended workers need owned service principals and scoped credentials rather than copied
 human enrollment secrets. Their transport and lifecycle are separate implementation decisions.
-The one-node owner/session credential storage and read-only browser inspection are selected
-above. MCP connection, remote administration, shared credentials, and recovery procedures
-still require contracts before implementation.
+The one-node owner/session credential storage and local browser inspection/review are selected
+above. Local stdio MCP uses the [delivery contract](delivery.md); remote administration,
+shared credentials, and whole-installation recovery remain separate work.
 The [delivery research](delivery.md) records agreed CLI/MCP access and a small Vite + React
 browser administration interface embedded in Go for the first usable release. Exact screens,
 node lifecycle, and concrete platform packaging remain pending. Initial platforms are Linux
