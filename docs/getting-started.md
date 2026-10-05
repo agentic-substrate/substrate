@@ -1,6 +1,6 @@
 # Getting started
 
-**Last reviewed:** 2026-10-04. Re-read whenever the CLI, HTTP contract, or visible UI changes.
+**Last reviewed:** 2026-10-05. Re-read whenever the CLI, HTTP contract, or visible UI changes.
 
 ## Prerequisites and build
 
@@ -153,8 +153,60 @@ characters, tabs, and trailing spaces are preserved. Reads use locally available
 a missing promisor object remains unavailable without remote-helper execution or network access,
 even when repository configuration allows a transport. Materialize required objects separately
 through your trusted Git workflow. Lexical recall and local stdio MCP use the foreground node.
-Local reviewed publication is described below. Whole-installation backup/restore remains
-unavailable; explicit single-artifact restoration does not recover an installation.
+Local reviewed publication is described below. The owner backup and restore commands recover
+whole-installation state; `restore-artifact` only changes one artifact's lifecycle.
+
+## Local installation backup and restore
+
+The trusted owner CLI supports offline plaintext backup and fresh restore of one local
+installation. Stop the foreground node before taking a backup. Recovery has no HTTP, browser,
+or MCP endpoint and accepts no session credential.
+
+```sh
+./bin/substrate backup -state-dir PRIVATE -out UNUSED_BACKUP_DIR
+./bin/substrate restore -backup BACKUP_DIR -state-dir UNUSED_PRIVATE_STATE
+```
+
+Replace these placeholders with paths outside Git. Both output directories must be unused;
+neither command overwrites an existing destination. The backup and restored directories are
+owned by the current OS user with mode `0700`, and their regular files use mode `0600`.
+Symlinks, special files, and Git placement are rejected. Keep the backup private.
+
+Backup holds the installation runtime lock, then the authority lock, to capture coherent
+authority and a SQLite Backup API snapshot. It preserves the original known source schema
+version, from 1 through 5, without migrating the source database. The snapshot includes all
+bindings, artifacts and revisions, approved dependency bundles, conflicts, retirement state,
+pending work, maintenance settings and lexical indexes, publication policies and proposals,
+and completed private audits and retry receipts.
+
+A backup contains exactly `manifest.json`, `authority.json`, and `artifacts.db`. Format 1
+accepts authority version 1 and artifact schemas 1 through 5, with limits of 16 KiB for the
+manifest, 1 MiB for authority JSON, and 1 GiB for the database. Restore checks the inventory,
+sizes, SHA-256 hashes, schema, application scopes, and lexical postings before migrating only
+the private staged copy to current schema 5. It clears every scoped session and every review
+grant, including consumed grants, while preserving completed private audits and receipts.
+Issue fresh scoped credentials through trusted setup before using the restored installation.
+
+External Git repositories are excluded and need separate backups. Restore preserves their
+registered checkout paths and absolute Git common-directory paths, including device and inode
+identity. Fresh credentials can use a surviving registered checkout; a missing, moved, or
+replaced checkout is denied, with no automatic path remapping. Snapshot policies and known
+retirements remain effective, but changes or denials made after the snapshot cannot be
+recovered from it.
+
+Normal failures before publication remove the private staging directory and leave existing
+state and the backup unchanged. Abrupt process death can leave an unpublished sibling named
+`.substrate-recovery-*`; remove it only after confirming no process is using it. Successful
+publication atomically installs the staged directory without replacing a destination. If
+syncing the parent directory fails after publication, the error explicitly says the destination
+was published. Inspect that destination before retrying; the command does not remove it.
+
+SHA-256 detects corruption; it provides neither authenticity nor encryption. This workflow
+trusts the OS owner and root and does not protect plaintext from either. The
+[local recovery evidence](development.md#local-recovery-evidence) records the tested environment
+and limits. Shared or enterprise recovery, native packaging and services, network recovery,
+and host, power, or device failure recovery remain unverified. This local workflow does not
+settle the future shared-authority recovery decisions.
 
 ## Git candidates and approved content
 

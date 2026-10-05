@@ -1,6 +1,6 @@
 # Offline changes and conflict resolution
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each synchronization or artifact-lifecycle decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each synchronization or artifact-lifecycle decision
 
 **Status:** local durability, explicit shared authority, current permission checks on reconnect,
 Git source ownership, and reviewed cross-space publication are agreed. The type-aware
@@ -97,6 +97,13 @@ revoked submissions, and permission-safe review before declaring synchronization
 The local store now preserves expected-base candidates, operation receipts, and retirement
 state under the [selected persistence contract](artifacts.md#selected-local-persistence-contract).
 This is not a synchronization engine or synchronization acceptance test.
+
+Selected [local whole-installation recovery](security.md#selected-local-recovery) preserves
+captured conflict candidates, immutable history, retirement, retry receipts, pending operations,
+and durable maintenance state in a fresh installation. It clears session/review credentials
+and rechecks surviving checkout identity when issuing new sessions. Snapshot retirement does
+not establish knowledge of later retirement or revocation; shared current-authority
+revalidation and stale-peer reconciliation remain separate unimplemented work.
 
 ## Selected local resolution and restoration
 

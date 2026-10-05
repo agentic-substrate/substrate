@@ -1,12 +1,12 @@
 # Joining and administration
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each identity, enrollment, or delivery decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each identity, enrollment, or delivery decision
 
 **Status:** easy user joins and administration are major product goals. Repository discovery
 manifests and reusable approved bindings are agreed. Local owner setup and device pairing
 come first, administrator-verified invitations serve early teams, and optional organization
 OIDC follows with organization features. Local owner and scoped session setup are implemented through the trusted CLI. Device pairing,
-invitations, organization authentication, recovery mechanisms, and shared offline grant
+invitations, organization authentication, shared recovery mechanisms, and shared offline grant
 durations remain unimplemented and their concrete credentials remain open.
 
 ## Selected local owner and session mechanism
@@ -132,7 +132,11 @@ Unattended workers need owned service principals and scoped credentials rather t
 human enrollment secrets. Their transport and lifecycle are separate implementation decisions.
 The one-node owner/session credential storage and local browser inspection/review are selected
 above. Local stdio MCP uses the [delivery contract](delivery.md); remote administration,
-shared credentials, and whole-installation recovery remain separate work.
+shared credentials, and shared recovery remain separate work. Trusted owner
+[local whole-installation recovery](security.md#selected-local-recovery) preserves owner and
+binding records while clearing all sessions/review grants. Issue fresh scoped credentials only
+after the surviving checkout's common-directory/device/inode identity is rechecked. Missing,
+moved, or replaced checkouts remain denied; there is no automatic recovery remap.
 The [delivery research](delivery.md) records agreed CLI/MCP access and a small Vite + React
 browser administration interface embedded in Go for the first usable release. Exact screens,
 node lifecycle, and concrete platform packaging remain pending. Initial platforms are Linux

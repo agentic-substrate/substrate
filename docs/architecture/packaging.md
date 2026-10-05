@@ -4,8 +4,8 @@
 
 **Status:** CLI, MCP, and a Vite + React admin UI embedded in Go are agreed for the first
 usable release. Initial platform coverage is Linux and WSL 2; macOS and native Windows follow
-later. Foreground node operation is implemented. Service installation, native packaging,
-release validation, and whole-installation recovery remain open.
+later. Foreground node operation and owner offline whole-installation recovery are implemented.
+Service installation, native packaging, and release validation remain open.
 
 ## Agreed platform scope and packaging direction
 
@@ -81,9 +81,10 @@ explicit data deletion is a separate operation. Host-level removal of a WSL dist
 remove its files. Backup and recovery procedures must account for that boundary.
 
 Recommend explicit versioned updates initially. Publish checksums and define release-origin
-verification. Before schema migration, take a coherent application backup, stop gracefully,
+verification. Before schema migration, stop gracefully, take a coherent application backup,
 migrate once, and report the result. An old executable does not automatically reverse a
-schema migration. Restore revalidates shared authority and revoked grants as already agreed.
+schema migration. The selected local restore discards credentials; future shared restore
+still requires current authority and revoked-grant revalidation.
 The [SQLite backup API](https://sqlite.org/backup.html) supports consistent database snapshots;
 the full backup contract also includes related files and identity.
 
@@ -110,7 +111,8 @@ node running. A shorter private directory is required when its Unix socket path 
 100 bytes; unavailability returns an actionable bounded error without remote fallback.
 
 This replaces the initial direct scoped CLI persistence path. Trusted owner `source-register`,
-`approve`, `restore-artifact`, `publication-policy`, `review-grant`, and `review-revoke`
+`approve`, `restore-artifact`, `publication-policy`, `review-grant`, `review-revoke`,
+and `backup`
 remain offline commands: stop the node, perform the command under the
 same exclusive installation lock, and restart. They fail while a node owns the directory.
 Authority setup, scoped credential creation/revocation, and read-only browser context keep
@@ -123,7 +125,31 @@ and state directory. The [dated foreground evidence](../development.md#foregroun
 includes a real WSL 2 network-namespace restart, duplicate-node rejection, exact receipt retry,
 current read, lexical retrieval, and node CPU/RSS measurements. It does not test distro shutdown
 or a host reboot. User-service installation,
-on-demand startup coordination, full migration backup/restore, native platform packaging,
+on-demand startup coordination, native platform packaging,
 and continuous WSL availability remain unimplemented. The browser `serve` command retains
 its separate numeric-loopback listener and forwards credentialed artifact inspection and
 publication review to the running node. It does not own SQLite or expose an HTTP MCP API.
+
+## Selected local backup and restore
+
+`backup -state-dir PRIVATE_DIR -out UNUSED_BACKUP_DIR` holds the exclusive installation
+lock, then the authority transaction lock through authority serialization and SQLite's
+incremental backup API. The separate authority lock matters because setup/session commands
+can run while the node is stopped. The source is opened read-only without migration or empty
+database creation; original schemas 1–5 remain unchanged in the snapshot. Missing, hot-journal,
+oversized, incompatible, or corrupt state fails with an actionable error. Recover a journal
+with a compatible node and stop it before retrying backup.
+
+`restore -backup PRIVATE_BACKUP_DIR -state-dir UNUSED_DESTINATION` validates and copies
+the same opened bytes into a private sibling stage. Supported migration runs only there,
+then credentials are cleared and state is validated/synchronized before Linux no-replace
+rename publishes the unused destination. A failed no-replace syscall has no unsafe rename
+fallback. Existing installations are never restored in place. Runtime locks, authority locks,
+sockets, external credential files, journals, and external Git are not backup payload.
+
+The [security contract](security.md#selected-local-recovery) defines exact inventory/limits,
+credential reset, stale checkout denial, stage cleanup, and the post-publication directory-sync
+limit. [Local recovery evidence](../development.md#local-recovery-evidence) exercises the
+packaged executable and restored/new captures across restart in a zero-route namespace.
+It does not establish native platform packaging, service installation, host-reboot survival,
+power-loss guarantees, encrypted custody, or shared restore authority.

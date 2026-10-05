@@ -1,6 +1,6 @@
 # Context boundaries and selective sharing
 
-**Last reviewed:** 2026-10-03 · **Re-read cadence:** at each access, replication, or delivery decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each access, replication, or delivery decision
 
 **Status:** work/personal separation, group restrictions, explicit placement, repository-level
 artifacts, organization-only restrictions, and per-item cross-space publication review are confirmed.
@@ -23,7 +23,11 @@ reviews the complete proposed text and Personal destination before publication. 
 rechecks these conditions and atomically consumes the grant while creating a separate
 unverified memory. It copies no executable bundle or private source lineage into Personal.
 This trusts the local OS owner and browser delivery, not hostile same-account processes.
-Whole-installation restore must discard review grants and scoped sessions before promotion.
+Selected [local whole-installation restore](security.md#selected-local-recovery) discards
+all review grants and scoped sessions before promotion, including consumed retry grants.
+It retains completed private proposal audits and recipient receipts, captured policies, and
+snapshot retirement. It cannot discover later denials or changes; shared authority
+revalidation remains required before future network replay or delivery.
 
 Artifacts means memories, skills, and agent definitions. The agreed
 [artifact decision contract](artifacts.md) maps precedence, search, segmentation, actions,

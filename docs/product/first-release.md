@@ -10,8 +10,8 @@ stdio MCP are implemented. Foreground Linux/WSL offline restart and synthetic re
 are recorded in the [development guide](../development.md#foreground-maintenance-evidence);
 services and continuous WSL availability remain unsupported.
 Client-specific evidence records actual tested versions. Local browser artifact inspection and
-exact human-reviewed publication of derived memories are implemented; native activation and
-whole-installation backup/restore remain unfinished. The browser is a local interface to the
+exact human-reviewed publication of derived memories and owner offline plaintext
+whole-installation backup/restore are implemented. Native activation remains unfinished. The browser is a local interface to the
 foreground node, not evidence of complete release or remote deployment readiness.
 
 ## Job and scope
@@ -55,7 +55,8 @@ they are not prerequisites for this release.
    data directory, identity, access checks, and resource policy.
 
 The browser initially shows spaces/repository bindings, artifact inspection and review, and
-node/retrieval/backup status. Pairing, team administration, and remote coordinator controls
+node/retrieval status. Local backup and fresh restore are trusted offline owner CLI commands.
+Pairing, team administration, and remote coordinator controls
 appear with those implemented capabilities. Empty, pending, blocked, and error states must
 remain distinguishable from successful completion.
 
@@ -80,7 +81,11 @@ remain distinguishable from successful completion.
   resume indexing, and retrieve it. Evaluate representative queries, relevance, latency, and
   resource use; no performance or battery target is claimed before measurement.
 - Back up and restore artifacts, bindings, revisions, pending work, and known retirement state;
-  identify external Git sources needing their own backup. A snapshot cannot recover changes made
+  include all three kinds, declared bundles, selection/aliases, conflict history, publication
+  policy/proposals/private completed audits, retry receipts, and durable pause/bulk/failure
+  state with validated postings/checkpoints. Clear all scoped sessions and active/consumed
+  review grants before fresh-destination promotion. Identify external Git sources needing their
+  own backup and deny changed checkout identities. A snapshot cannot recover changes made
   after it. Later shared restores revalidate current authority before replay or delivery.
 
 [SQLite backup](https://www.sqlite.org/backup.html) provides a snapshot mechanism; complete

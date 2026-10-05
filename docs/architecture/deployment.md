@@ -1,6 +1,6 @@
 # Deployment and disconnected operation
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each architecture decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each architecture decision
 
 Go is selected for the backend, CLI, and MCP. Vite + React is selected for the browser,
 with its static build embedded in Go for the first usable release. See the
@@ -176,6 +176,13 @@ contract must define when local writes and coordinator acceptance are acknowledg
 WAL synchronization settings affect survival of power/system failure. See the
 [backup API](https://www.sqlite.org/backup.html) and
 [synchronization settings](https://www.sqlite.org/pragma.html#pragma_synchronous).
+
+The initial single-owner node now selects an offline private plaintext
+[whole-installation snapshot](security.md#selected-local-recovery), with fresh-destination
+staging and credential reset. External Git requires a separate backup, and restored bindings
+still require the same surviving checkout identity. Changes after the snapshot are absent.
+This local mechanism does not select enterprise custody, multi-node restore, or power-failure
+guarantees.
 
 Storage selection alone does not establish Work/Personal isolation or encryption. Every
 representation, provider call, and backup needs the accepted artifact boundaries; physical
