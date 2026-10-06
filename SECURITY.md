@@ -1,6 +1,6 @@
 # Security policy
 
-**Last reviewed:** 2026-10-04. Re-read before each release or trust-boundary change.
+**Last reviewed:** 2026-10-05. Re-read before each release or trust-boundary change.
 
 The project is in bootstrap development and has no supported production release. Report
 suspected vulnerabilities privately through the repository's GitHub security reporting page
@@ -27,6 +27,13 @@ commits return no success receipt, and stale edits cannot undo retirement. Git i
 identities and approve exact revision/dependency snapshots. Aliases and overrides resolve only
 within current authorized scope; ambiguity blocks delivery. Content reads never execute source. Plaintext owner-only
 state files do not protect against the owner’s OS account, root, or endpoint compromise.
+Trusted offline owner commands now back up and restore the complete local installation into
+an unused directory. The fixed private plaintext format uses size limits, SHA-256 corruption
+checks, strict schema/application validation, and staged no-replace promotion. Hashes do not
+authenticate a backup against its owner. Restore clears all session and review credentials,
+preserves captured policy/retirement and completed private audits, and requires fresh credentials
+against surviving checkout identities. External Git and changes after the snapshot need separate
+recovery. See [local recovery](docs/architecture/security.md#selected-local-recovery).
 Future artifact authorization must apply to every read, search, list, mutation, delivery, and
 publication surface. Repository contents and model-supplied arguments cannot grant authority.
 

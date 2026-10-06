@@ -326,5 +326,11 @@ policy changes if their current session still authenticates. An exact consumed p
 retry can recover its historical receipt while its grant remains unexpired, unrevoked, and
 bound to the current checkouts. Neither historical acknowledgement establishes current export
 or read permission. Live review and any new publication recheck current eligibility and policy.
-Whole-installation restore must clear review grants and scoped authority sessions before
-promotion; source-private completed audits remain in the proposal records.
+Selected [local whole-installation restore](security.md#selected-local-recovery) clears all
+review grants and scoped authority sessions before promotion, including consumed retry grants;
+source-private completed audits remain in the proposal records. It preserves all three artifact
+kinds, immutable declared bundles, registrations/aliases, approvals, associations, conflict and
+retirement history, publication revisions/policy, receipts, pending operations, and durable
+pause/bulk/failure jobs with validated postings/checkpoints. Supported migration affects only
+the restore stage; the snapshot keeps its original supported schema. External Git and
+post-snapshot changes require separate recovery.

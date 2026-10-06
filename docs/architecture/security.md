@@ -168,11 +168,57 @@ dependency's exact provenance and do not execute scripts or follow external refe
 Plaintext SQLite storage follows the private-placement boundary and preserves immutable candidates and
 retirement. Broader artifact/admin operations still need their complete object/action policy; network credential and encryption decisions remain open. Loopback alone is
 insufficient protection from hostile websites or processes running with the same privileges.
-Restrict filesystem, SQLite, and backup access; record the local encryption/key-storage
-decision and the boundary for other users/processes. Attribute privileged and MCP operations
+Restrict filesystem, SQLite, and backup access; local recovery retains the selected private
+plaintext boundary described below. Attribute privileged and MCP operations
 to their actual caller without logging content or secrets.
 CLI import/export needs safe destination handling, bounded parsing, and interrupted-write
 behavior; local encryption does not defend against an already compromised endpoint.
+
+## Selected local recovery
+
+One trusted OS owner can take an offline whole-installation backup and restore it into an
+unused private directory. This selects local plaintext recovery only; enterprise assigned-scope
+custody, recovery granularity, and offline enforcement remain open under D10–D12. Recovery
+has no scoped-session, browser, MCP, remote, or administrator-service route.
+
+Format version 1 contains exactly `manifest.json`, `authority.json`, and `artifacts.db`,
+with owned directories mode 0700 and regular files mode 0600 outside Git. Symlinks and special
+files are rejected. The manifest is limited to 16 KiB, authority to 1 MiB, and the database to
+1 GiB; oversized inputs fail rather than omit state. Fixed names, exact sizes, SHA-256,
+bounded strict JSON, supported authority/schema versions, SQLite integrity/foreign keys,
+known executable-free schema, and durable application relationships are checked. Preserved
+postings must match their captured revision checkpoint, including legitimate historical
+checkpoints while a newer head remains queued. SHA-256 detects corruption, not authenticity;
+the format cannot defend against the owner, root, or endpoint compromise.
+
+Restore preserves the captured owner, spaces, absolute checkout/common-directory paths,
+device/inode bindings, artifacts, history, approvals, retirement, policies, proposals,
+completed source-private review audits, receipts, pending operations, and durable indexing
+pause/bulk/failure state. It clears every scoped authority session and every review grant,
+including consumed grants that could otherwise retry a historical publication. Completed
+private audits and receipts remain separate from those discarded credentials. Fresh session
+issuance rechecks the surviving Git common-directory identity. Missing, moved, or replaced
+checkouts remain denied; restore does not remap paths or treat a same-path clone as the
+previous repository.
+
+Validation and supported migrations run in a private sibling stage. Atomic no-replace
+promotion cannot overwrite an existing installation. Pre-promotion failure leaves the
+destination absent and removes its failed stage, while preserving the backup and current
+installation. If parent-directory synchronization fails after promotion, the command reports
+that the destination was published and keeps that complete destination. Abrupt process death
+can leave a private unpublished `.substrate-recovery-*` sibling; the owner may remove it
+after confirming no recovery process is running. These checks establish process-level behavior,
+not power-failure survival or an encrypted recovery envelope.
+
+External Git checkouts, credential files, locks, sockets, and journals are excluded. Back up
+external authored repositories separately. A snapshot preserves only its captured retirement
+and policy state; it cannot recover later writes, revocations, or retirement. Future shared
+restores must still revalidate current authority before replay or delivery. The
+[packaging contract](packaging.md#selected-local-backup-and-restore) describes locking and
+migration, and [dated evidence](../development.md#local-recovery-evidence) records the tested
+foreground Linux/WSL environment and limits.
+
+## Selected local runtime
 
 The selected local runtime holds an installation lock through SQLite migration and shutdown.
 Scoped CLI and stdio MCP bridges use owner-only Unix IPC with bounded frames, connections,

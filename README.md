@@ -34,7 +34,10 @@ The owner can register Git-backed skills and agent definitions, approve exact im
 revision/dependency bundles, and inspect qualified choices or alias conflicts. Scoped sessions
 read approved snapshots and current observations in their registered scope through lexical
 search, explicit associations, and CLI or stdio MCP tools attached to one foreground node.
-Native activation, publication, synchronization, and complete recovery remain roadmap work.
+Browser inspection and reviewed local publication use that same node. The trusted owner CLI
+can make an offline plaintext whole-installation backup and restore it to a fresh private state
+directory; see the [local recovery workflow](docs/getting-started.md#local-installation-backup-and-restore).
+Native activation, synchronization, and shared or enterprise recovery remain roadmap work.
 
 ## Try the foundation
 

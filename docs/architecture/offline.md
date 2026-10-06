@@ -1,6 +1,6 @@
 # Offline artifact access and revocation
 
-**Last reviewed:** 2026-10-04 · **Re-read cadence:** at each grant, recovery, or deployment decision
+**Last reviewed:** 2026-10-05 · **Re-read cadence:** at each grant, recovery, or deployment decision
 
 **Status:** bounded administrator-controlled grants for ordinary shared offline access,
 sensitive online-only exceptions, and independent wholly owned Personal operation are agreed.
@@ -132,6 +132,14 @@ and restored credentials need explicit revalidation behavior. Go monotonic readi
 process-local, are not serialized, and may pause during sleep on some systems; persisting
 `time.Time` does not solve expiry across reboot. See [Go time](https://pkg.go.dev/time#hdr-Monotonic_Clocks).
 Stronger guarantees against a hostile machine owner require the deployment's broader boundary.
+
+The selected [one-owner local restore](security.md#selected-local-recovery) clears all
+session/review credentials and preserves captured pending work, pause, bulk jobs, failures,
+retirement, and policy. Fresh credentials must pass current surviving-checkout identity checks.
+Restored and newly captured authorized work can resume without routes; the
+[packaged evidence](../development.md#local-recovery-evidence) includes a new paused offline
+capture and another restart. A snapshot contains no later revocation or policy changes.
+Shared grant renewal/revalidation remains a future authority protocol.
 
 An extracted content key or copied plaintext cannot be recalled by a software lease. Key
 rotation must account for retained old keys and wrappers; rewrapping alone cannot revoke

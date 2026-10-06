@@ -21,8 +21,9 @@ dependency is missing. No test opt-out or coverage threshold is configured.
 Use tests where they protect behavior that can fail. The routing suite checks the boundary
 between client navigation and API errors. The browser flow checks connection failure,
 keyboard retry with retained focus, error-state accessibility, and narrow-screen reflow. The docs guard suite
-checks enforcement and its written-reason escape hatch. The artifact tests cover local capture/inspection and revision persistence; they do not
-establish cross-harness compatibility, device-failure durability, or complete recovery.
+checks enforcement and its written-reason escape hatch. The artifact tests cover local capture/inspection
+and revision persistence; the recovery suite covers complete local snapshot restoration.
+These tests do not establish device-failure durability or shared recovery.
 
 ## Local development and previews
 
@@ -116,8 +117,9 @@ This process-interruption check does not establish device-failure or complete re
 Pending operation receipts are committed with content and retained. A separate coalesced index
 queue supports bounded atomic batches and explicit pause/resume.
 Existing receipts survive retries, while retirement remains authoritative for later reads.
-Schema versions 1 and 2 migrate transactionally to version 3, preserving source selection and
-retry receipts while adding revision associations and rebuildable token postings. Unknown versions fail before contribution.
+Schema versions 1–4 migrate transactionally to version 5, preserving source selection,
+revision associations, token postings, publication history and retry receipts while adding
+durable maintenance pause/bulk/failure state. Unknown versions fail before contribution.
 Do not edit the database directly or treat copying a live file as an application backup.
 
 After `make build`, run `go test ./internal/artifacts ./cmd/substrate` for reopen, concurrency,
@@ -330,3 +332,65 @@ ledger was unchanged by indexing. These observations establish foreground proces
 for this tested WSL distribution, without claiming systemd support, host reboot or distro
 shutdown survival, device/power-failure durability, whole-installation recovery, another OS,
 absolute RSS peaks, charging policy, or energy/battery savings.
+
+## Local recovery evidence
+
+On 2026-10-05, the issue #11 worktree passed the following focused recovery checks on Linux
+amd64 in WSL 2 on host `Legion`, kernel `6.6.114.1-microsoft-standard-WSL2`, with
+Go 1.27.1, Node.js 24.15.0, npm 11.12.1, Git 2.43.0, Python 3.12.3, and SQLite 3.53.4:
+
+```sh
+env PATH="/usr/local/go/bin:$PATH" GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make build
+env PATH="/usr/local/go/bin:$PATH" GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp go test -race -shuffle=on ./internal/recovery ./internal/artifacts ./internal/authority ./internal/strictjson ./cmd/substrate -run 'TestBackup|TestSnapshot|TestRecovery|TestRestore|TestRestored|TestPromotion|TestDecode|TestCompleteRecoveryRoundTrip' -count=1
+env PATH="/usr/local/go/bin:$PATH" GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp python3 scripts/verify-recovery.py --binary bin/substrate
+env PATH="/usr/local/go/bin:$PATH" GOCACHE=/tmp/substrate-go-cache TMPDIR=/var/tmp make check
+npm run check:docs-required -- --base origin/main
+```
+
+All five focused Go packages passed. The full `make check` exited successfully, including
+the repository Go race/shuffle suite, packaged smoke, fifteen browser flows, vet, formatting,
+TypeScript/Biome, and local links across twenty-four built documentation pages. The paired
+documentation check also passed. These checks do not establish screen-reader behavior or
+untested platform compatibility. Meaningful failing-before/passing-after regressions cover
+nonmigrating old-schema snapshots, schema 5 maintenance preservation, corruption/application
+scope validation, strict bounded JSON, and credential invalidation. The complete roundtrip
+compares exact rows and rowids in all fourteen persistent noncredential tables: all three
+artifact kinds, declared Git bundles, registered aliases and approvals, conflicts/retirement,
+associations, policies/proposal history/private completed audits, receipts/pending operations,
+pause/incremental/bulk/failure jobs, and historical/current postings/checkpoints.
+Active and consumed review grants and all authority sessions are discarded. Fresh credentials
+read surviving same-checkout sources; missing and same-path replacement checkouts remain denied.
+
+Filesystem/SQL fixtures verify missing/hot/oversized databases, unsupported/executable schemas,
+corrupt/rehashed state, private modes, symlinks/FIFOs, destination races, exact opened-byte copy,
+staged migration rollback, and ordinary write-failure cleanup. A child-only 4 KiB
+`RLIMIT_FSIZE` causes deterministic staged-copy failure; current state and backup stay
+byte-identical. A real child restore interrupted during a bounded 64 MiB copy leaves only
+private unpublished sibling staging, without an advertised destination. Write/execute-only
+parent permissions allow promotion but deny parent fsync; the error explicitly reports the
+published destination and the complete destination survives.
+
+The packaged script uses private synthetic fixtures in `/var/tmp` and requires Git plus
+`unshare --user --map-root-user --net`; it fails when those prerequisites are unavailable.
+Its controller and node processes share one zero-route namespace. After owner backup and
+fresh restore, omitted-pause startup retains pause, old sessions and active/consumed review
+tokens are denied, and a newly issued same-checkout credential reads the restored capture.
+A new authorized paused offline capture survives another SIGTERM restart in the same
+namespace: exact retry returns its original receipt and current read/pending work survive.
+Resume processes both incremental captures and explicit run finishes three deferred jobs.
+Personal lexical coverage is four eligible/four indexed/zero pending, with the complete pending
+ledger retained, private completed publication audit preserved, hidden Work source absent,
+and post-snapshot content absent.
+
+The independent review repeated the packaged script on a clean checkout of runtime
+[32f6ae2](https://github.com/agentic-substrate/substrate/tree/32f6ae2b2da44015c5aaf814968da7d65bdd6088).
+That executable SHA256 was
+`36d4ea3b036af4838d268c38115aea70bc9988854aafe7a013851e189bd6f587`,
+with `vcs.modified=false`. The working issue #11 build had the same runtime sources with
+pending documentation changes; its separate SHA256 was
+`65a20f7d197ad7b17f86982273e9fb6ea70f2eea0651a10bbd7a934590eedc23`.
+Format limits are 16 KiB manifest, 1 MiB
+authority, and 1 GiB database, without silently omitting state. SHA-256 checks corruption
+rather than authenticity. These results cover local plaintext foreground process recovery,
+not power loss, host reboot/distro removal, services, other platforms, external Git recovery,
+post-snapshot changes, multi-node recovery, encryption, or enterprise custody.
