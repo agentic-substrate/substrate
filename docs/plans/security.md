@@ -50,7 +50,7 @@ Roadmap D identifiers preserve traceability to the supplied document.
 | D7 | Confirmed direction; limits open | Optional authoritative hub management and metrics; decide authority over enrollment, policy, and decryption recipients. |
 | D8 | Confirmed requirement; mechanism open | Enterprise recovery only within assigned scope; independently test authorization and custody. |
 | D9 | Proposed architecture | Separate relay/control/recovery/audit; review common host, IAM, deployment, and browser-code authority. |
-| D10 | Open; decide first | Choose key custody, effective decryptors, key-release authority, rotation, loss, and emergency recovery. Customer-controlled custody is a candidate. |
+| D10 | Open; proposal recorded | Choose key custody, effective decryptors, key-release authority, rotation, loss, and emergency recovery. The [D10 proposal](../architecture/security.md#d10-proposal) recommends customer-controlled scope keys and awaits a decision in issue #26. |
 | D11 | Open; decide first | Select recoverable tenant/project/collection granularity and Personal versus enterprise ownership. Existing artifact scopes do not select cryptographic recovery scope. |
 | D12 | Partly agreed; enforcement open | Finite shared offline grants and online-only sensitive exceptions are selected; choose duration, clock trust, caching, and runtime enforcement. No compromised-device erasure promise. |
 | D13 | Open mechanism | Identity-bound device enrollment/removal/re-enrollment; existing local pairing/invitation/OIDC sequence remains selected. |
