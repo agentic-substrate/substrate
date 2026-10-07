@@ -1,6 +1,6 @@
 # Transfer, authority, and recovery
 
-**Last reviewed:** 2026-10-07. Re-read before changing identity, key custody, recovery,
+**Last reviewed:** 2026-10-05. Re-read before changing identity, key custody, recovery,
 network transfer, offline grants, or telemetry.
 
 **Status:** information relay first, future peer-to-peer and hub-and-spoke transfer of
@@ -88,72 +88,6 @@ Avoid globally exportable recovery material. One master key able to unwrap all s
 enforce assigned-scope recovery against its holder through a UI filter. Use
 [NIST SP 800-57 Part 1 Rev. 5](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final) for lifecycle
 planning and obtain cryptographic design review before transfer ships.
-
-### D10 proposal
-
-**Status:** Proposed for maintainer decision in
-[issue #26](https://github.com/agentic-substrate/substrate/issues/26). Nothing below is
-selected or implemented. The proposal assumes that D11 defines a "recovery scope" and does not
-choose its granularity; each recovery scope below has its own keys.
-
-Recommendation: use customer-controlled scope keys for enterprise spaces and device-held keys
-with an owner-held recovery secret for Personal spaces. Reject provider-operated custody for
-the first transfer release, because it makes the provider decryption-capable and changes the
-contractual and incident boundary. Keep independent quorum recovery as an optional later
-policy rather than the default, because it adds enrollment and availability work before any
-buyer has asked for it.
-
-Proposed key hierarchy, built only from reviewed primitives (an AEAD cipher and an
-RFC 9180 HPKE implementation) and subject to cryptographic design review:
-
-| Key | Purpose | Held by |
-|---|---|---|
-| Revision data key | Encrypts one artifact revision; its AEAD context binds tenant, scope, object, revision, and key epoch. | Never stored unwrapped. |
-| Scope key, one per epoch | Wraps the revision data keys of one recovery scope. | Wrapped to each currently enrolled device in the scope and to that scope's recovery key. |
-| Device encryption key | Unwraps the scope keys delivered to that device. | The enrolled device only. |
-| Device signing key | Signs contributions and enrollment requests; never used for encryption. | The enrolled device only. |
-| Scope recovery key | Unwraps the scope keys for recovery. | The customer's recovery authority (enterprise), or derived from the owner's recovery secret (Personal). |
-
-Effective decryptors for an enterprise scope would be the devices currently enrolled in that
-scope, the customer's recovery authority for that scope only, and anyone with root, KMS, or
-build authority over either. The relay and the control plane would hold only wrapped keys.
-A compromised control plane that can add an enrolled device remains a decryptor in practice,
-which is why D13 must keep enrollment approval separate from management authority.
-
-Key release: the customer recovery authority releases a scope key only for an approved
-recovery operation, as described below. It rewraps the scope key to an approved device or
-recovery destination instead of exporting it. No key unwraps more than one recovery scope.
-
-Rotation: start a new scope-key epoch when a member or device is removed, after suspected
-compromise, and on a customer-chosen schedule. New revisions use the newest epoch. Old
-revisions keep their earlier epoch unless the customer requests rewrapping; as stated under
-Transfer and stale state, rotation does not remove access an attacker already retained.
-
-Loss: a lost device is revoked and its scope keys rotated; a replacement device receives
-wrapped keys from another enrolled device or the recovery authority after re-enrollment. A
-Personal owner who loses every device and the recovery secret loses that content; Substrate
-would state this before setup rather than keep a provider copy.
-
-Emergency recovery: the customer declares a break-glass path that requires two approvers who
-are not the requester, records the operation in protected audit, and notifies the customer
-security owner. Its scope remains limited to assigned recovery scopes.
-
-Abuse cases the selected design must defeat, with tests before Gate D:
-
-| Abuse case | Required outcome |
-|---|---|
-| A compromised relay or hub attempts to read content. | It holds only wrapped keys and ciphertext and cannot decrypt. |
-| A compromised hub enrolls an attacker's device. | Enrollment requires approval outside management authority, and the attempt is audited. |
-| A recovery administrator requests a scope outside their assignment. | The recovery authority denies release, and the denial is audited. |
-| A requester approves their own recovery. | The approval policy rejects it. |
-| A removed device keeps its old keys. | It cannot read revisions written after the next epoch; earlier exposure is documented. |
-| Ciphertext is moved to another scope or revision. | AEAD context verification fails. |
-| The recovery authority is unavailable. | Normal device access continues; recovery waits and fails safely. |
-
-Questions the maintainer must answer before selection: whether customer KMS integration is
-required for the first transfer release or a software recovery key is acceptable; whether
-Personal spaces may opt out of the recovery secret; and who performs the cryptographic
-design review.
 
 A proposed recovery operation identifies the exact scope, purpose, destination, and expected
 content. Independently check current identity, recovery assignment, and device trust with
