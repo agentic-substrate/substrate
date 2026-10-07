@@ -1,14 +1,19 @@
 # Roadmap
 
-**Last reviewed:** 2026-10-04. Re-read before accepting a foundational epic or changing a horizon.
+**Last reviewed:** 2026-10-07. Re-read before accepting a foundational epic or changing a horizon.
 
 The [vision](docs/product/vision.md) is durable context that compounds across sessions:
 permitted knowledge and reviewed practice follow the work, with understandable boundaries
 and eventual task continuity. Horizons express confidence in the outcome, not delivery dates.
 Execution state belongs in the [GitHub Project](https://github.com/orgs/agentic-substrate/projects/2).
-The [first release contract](docs/product/first-release.md) defines evidence for the three Now outcomes.
+The [first release contract](docs/product/first-release.md) defines evidence for the three first-release outcomes.
 
-## Now
+## Done
+
+The three first-release outcomes are implemented and verified on one Linux or WSL 2 node.
+The [development guide](docs/development.md#actual-client-verification) records the tested
+client versions and the synthetic workload; native activation, remote MCP, other platforms,
+and real-data retrieval measurements remain outside that evidence.
 
 - [Feature #2](https://github.com/agentic-substrate/substrate/issues/2): Reuse permitted memories, skills, and agent definitions across multiple harness sessions on
   one Linux or WSL node through a CLI and MCP, with explicit repository bindings and versions.
@@ -17,9 +22,17 @@ The [first release contract](docs/product/first-release.md) defines evidence for
 - [Feature #4](https://github.com/agentic-substrate/substrate/issues/4): Trust acknowledged saves, restart, backup, and restore, while observing and controlling
   incremental indexing and bounded background work.
 
+## Now
+
+- [Feature #25](https://github.com/agentic-substrate/substrate/issues/25): Decide the transfer gate (security plan Gate C): key custody, recovery scope, offline
+  enforcement, enrollment, deletion, and telemetry. Synchronization implementation waits on it.
+- [Task #33](https://github.com/agentic-substrate/substrate/issues/33): Measure lexical retrieval and node energy use on representative real
+  permitted data.
+- [Task #34](https://github.com/agentic-substrate/substrate/issues/34): Manually verify screen-reader and 400% zoom behavior for the browser page.
+
 ## Next
 
-- Keep independently usable nodes in multiple WSL instances selectively synchronized while
+- [Feature #32](https://github.com/agentic-substrate/substrate/issues/32): Keep independently usable nodes in multiple WSL instances selectively synchronized while
   they join, disconnect, and reconcile preserved revisions under a single coordinator.
 - Extend the same contracts to multiple laptops and servers with secure enrollment, finite
   offline grants, and explicit lifecycle and recovery evidence.
