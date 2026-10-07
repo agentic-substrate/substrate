@@ -24,14 +24,15 @@ and real-data retrieval measurements remain outside that evidence.
 
 ## Now
 
-- Decide the transfer gate (security plan Gate C): key custody, recovery scope, offline
+- [Feature #25](https://github.com/agentic-substrate/substrate/issues/25): Decide the transfer gate (security plan Gate C): key custody, recovery scope, offline
   enforcement, enrollment, deletion, and telemetry. Synchronization implementation waits on it.
-- Measure lexical retrieval and node energy use on representative real permitted data, and
-  manually verify screen-reader and 400% zoom behavior for the browser page.
+- [Task #33](https://github.com/agentic-substrate/substrate/issues/33): Measure lexical retrieval and node energy use on representative real
+  permitted data.
+- [Task #34](https://github.com/agentic-substrate/substrate/issues/34): Manually verify screen-reader and 400% zoom behavior for the browser page.
 
 ## Next
 
-- Keep independently usable nodes in multiple WSL instances selectively synchronized while
+- [Feature #32](https://github.com/agentic-substrate/substrate/issues/32): Keep independently usable nodes in multiple WSL instances selectively synchronized while
   they join, disconnect, and reconcile preserved revisions under a single coordinator.
 - Extend the same contracts to multiple laptops and servers with secure enrollment, finite
   offline grants, and explicit lifecycle and recovery evidence.
