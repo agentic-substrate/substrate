@@ -1,6 +1,10 @@
 # Bootstrap implementation plan
 
-**Last reviewed:** 2026-10-03. Re-read this plan before changing the bootstrap checks.
+**Last reviewed:** 2026-10-07. Re-read this plan before changing the bootstrap checks.
+
+**Status:** Complete. This plan is retained as history. Artifact storage, retrieval, and local
+stdio MCP have since been implemented; the [getting started guide](../getting-started.md)
+describes current behavior.
 
 The goal is a small, runnable foundation for the agreed local-first product. The executable
 will serve a React status page and a narrow status API. Artifact storage, MCP tools, and
